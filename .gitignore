@@ -1,0 +1,25 @@
+# Build output
+/forgebot
+/forgebot.exe
+/dist/
+/bin/
+
+# Runtime data
+/data/
+/logs/
+*.log
+
+# Local configuration
+/configs/*.local.json
+.env
+.env.*
+
+# Go
+/coverage.out
+/coverage.html
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
