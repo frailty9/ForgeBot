@@ -5,24 +5,37 @@ ForgeBot is built around explicit boundaries:
 ```text
 external platform
   -> platform adapter
+  -> connector binding (external target -> logical group)
   -> messaging.InboundMessage
   -> bot.Engine
   -> gate.Pool
   -> search / tools / llm
   -> messaging.OutboundMessage
-  -> platform sender
+  -> group registry (logical group -> connector target)
+  -> connector sender
 ```
+
+Runtime configuration flows through `settings.Store -> runtime.Manager`. A
+candidate Engine and LLM client are built before persistence; only a successful
+configuration commit is atomically published. Existing requests finish on the
+previous generation while new requests use the replacement.
 
 ## Packages
 
 - `cmd/forgebot`: process entrypoint.
 - `internal/app`: composition root and lifecycle.
 - `internal/config`: typed configuration loading and validation.
+- `internal/secret`: encrypted, write-only-managed secrets with staged activation.
+- `internal/settings`: versioned runtime configuration, history, and rollback.
+- `internal/runtime`: atomic runtime generations and component lifecycle.
+- `internal/admin`: management operations without direct storage access.
 - `internal/logging`: slog setup.
 - `internal/server`: HTTP health, runtime, and test ingress.
 - `internal/messaging`: platform-neutral message contracts.
 - `internal/platform`: adapter and sender interfaces.
 - `internal/platform/memory`: in-memory/logging sender for local development.
+- `internal/platform/onebot`: OneBot 11 HTTP webhook adapter and `send_msg`
+  sender, independently constructed behind the platform interfaces.
 - `internal/bot`: orchestration layer.
 - `internal/gate`: group message buffering and deduplication.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for
@@ -42,7 +55,8 @@ external platform
 
 ## LLM Client Contract
 
-`llm.NewClient` selects a protocol client from `config.LLMConfig.ClientConfig`.
+`llm.NewClient` selects a protocol client from an explicitly assembled
+`llm.ClientConfig`; API key resolution remains in the runtime composition layer.
 All three clients expose the same two operations:
 
 - `Complete`: JSON request/response with normalized text, finish reason, usage,
@@ -63,3 +77,17 @@ ForgeBot protocol surface.
 3. Structured search: migrate MuseBot `structuredsearch` as `internal/search`.
 4. LLM protocol clients: implemented behind `internal/llm.Client`; retry
    policy and richer tool-call streaming are follow-up work.
+
+Platform lifecycle contract:
+
+- Adapter.Start owns a blocking listener and returns when its listener stops.
+- Adapter.Stop is context-bounded and idempotent when the adapter is not running.
+- Adapters translate external events into messaging.InboundMessage and do not call the Bot Engine or read configuration files directly.
+
+The Bot core identifies chats only by logical `ConversationID`. The current
+configuration exposes group bindings exclusively, so every active conversation
+is currently a group. Protocol names, social accounts, connector IDs, and
+external chat IDs remain in the platform layer. A connector can bind multiple
+external groups, and multiple connectors of the same protocol can run
+simultaneously. Each logical conversation has one outbound binding; changing
+its account or protocol does not change the core identity.

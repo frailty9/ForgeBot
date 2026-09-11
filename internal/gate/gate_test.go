@@ -83,11 +83,11 @@ func TestTranscriptAndTrigger(t *testing.T) {
 func TestRequireMentionPolicy(t *testing.T) {
 	clock := newFakeClock()
 	p := New(context.Background(), func(string) Policy { return Policy{RequireMention: true} }, nil, Options{clock: clock})
-	if got := p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictIgnored {
+	if got := p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictIgnored {
 		t.Fatalf("got %v, want ignored", got)
 	}
 	p = New(context.Background(), func(string) Policy { return Policy{RequireMention: false, Silence: time.Hour} }, nil, Options{clock: clock})
-	if got := p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictAbsorbed {
+	if got := p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictAbsorbed {
 		t.Fatalf("got %v, want absorbed", got)
 	}
 	p.Close(time.Second)
@@ -95,7 +95,7 @@ func TestRequireMentionPolicy(t *testing.T) {
 
 func TestDedupFastLane(t *testing.T) {
 	p := New(context.Background(), func(string) Policy { return Policy{RequireMention: true} }, nil, Options{})
-	in := Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "1", Text: "/help", Addressed: true}
+	in := Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "/help", Addressed: true}
 	if got := p.Absorb(in); got != VerdictPass {
 		t.Fatalf("first addressed message got %v", got)
 	}
@@ -111,9 +111,9 @@ func TestSilenceFlushesBatch(t *testing.T) {
 	p := New(context.Background(), func(string) Policy {
 		return Policy{Silence: 4 * time.Second, MaxWindow: 30 * time.Second}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
-	p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "1", Text: "one"})
+	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "one"})
 	clock.Advance(3 * time.Second)
-	p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "2", Text: "two"})
+	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "2", Text: "two"})
 	clock.Advance(4 * time.Second)
 	select {
 	case batch := <-flushed:
@@ -132,8 +132,8 @@ func TestCountFlushesBatch(t *testing.T) {
 	p := New(context.Background(), func(string) Policy {
 		return Policy{Silence: time.Hour, MaxCount: 2}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
-	p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "1", Text: "one"})
-	p.Absorb(Input{Platform: "telegram", ChatID: "1", UserID: "u", MsgID: "2", Text: "two"})
+	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "one"})
+	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "2", Text: "two"})
 	select {
 	case batch := <-flushed:
 		if len(batch.Msgs) != 2 || batch.Reason != ReasonCount {

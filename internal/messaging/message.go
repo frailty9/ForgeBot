@@ -20,25 +20,23 @@ type Media struct {
 }
 
 type InboundMessage struct {
-	Platform  string    `json:"platform"`
-	ChatID    string    `json:"chat_id"`
-	UserID    string    `json:"user_id"`
-	UserName  string    `json:"user_name,omitempty"`
-	MessageID string    `json:"message_id"`
-	Text      string    `json:"text,omitempty"`
-	Media     []Media   `json:"media,omitempty"`
-	Mentioned bool      `json:"mentioned,omitempty"`
-	Command   bool      `json:"command,omitempty"`
-	Group     bool      `json:"group,omitempty"`
-	At        time.Time `json:"at,omitempty"`
+	ConversationID string    `json:"conversation_id"`
+	UserID         string    `json:"user_id"`
+	UserName       string    `json:"user_name,omitempty"`
+	MessageID      string    `json:"message_id"`
+	Text           string    `json:"text,omitempty"`
+	Media          []Media   `json:"media,omitempty"`
+	Mentioned      bool      `json:"mentioned,omitempty"`
+	Command        bool      `json:"command,omitempty"`
+	At             time.Time `json:"at,omitempty"`
 }
 
 func (m InboundMessage) SessionKey() string {
-	return m.Platform + ":" + m.ChatID
+	return m.ConversationID
 }
 
 func (m InboundMessage) Addressed() bool {
-	return m.Mentioned || m.Command || !m.Group
+	return m.Mentioned || m.Command
 }
 
 func (m InboundMessage) HasMedia() bool {
@@ -46,9 +44,7 @@ func (m InboundMessage) HasMedia() bool {
 }
 
 type OutboundMessage struct {
-	Platform         string  `json:"platform"`
-	ChatID           string  `json:"chat_id"`
-	UserID           string  `json:"user_id,omitempty"`
+	ConversationID   string  `json:"conversation_id"`
 	ReplyToMessageID string  `json:"reply_to_message_id,omitempty"`
 	Text             string  `json:"text,omitempty"`
 	Media            []Media `json:"media,omitempty"`

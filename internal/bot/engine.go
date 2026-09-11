@@ -7,31 +7,59 @@ import (
 	"strings"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/gate"
+	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
 )
 
-type Engine struct {
-	cfg      config.Config
-	logger   *slog.Logger
-	registry *platform.Registry
-	gate     *gate.Pool
+type Policy struct {
+	Name         string
+	SystemPrompt string
+	Model        string
+	Gate         GatePolicy
 }
 
-func NewEngine(ctx context.Context, cfg config.Config, logger *slog.Logger, registry *platform.Registry) *Engine {
+type GatePolicy struct {
+	Enabled        bool
+	RequireMention bool
+	Silence        time.Duration
+	MaxCount       int
+	MaxWindow      time.Duration
+	DedupTTL       time.Duration
+	DedupMax       int
+	MaxBuffered    int
+	MaxTextLen     int
+	MaxConcurrent  int
+}
+
+type Dependencies struct {
+	Sender platform.Sender
+	LLM    llm.Client
+	Policy Policy
+}
+
+type Engine struct {
+	deps   Dependencies
+	logger *slog.Logger
+	gate   *gate.Pool
+}
+
+func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	engine := &Engine{cfg: cfg, logger: logger, registry: registry}
+	if deps.Sender == nil {
+		return nil, fmt.Errorf("bot sender is required")
+	}
+	engine := &Engine{deps: deps, logger: logger}
 	engine.gate = gate.New(ctx, engine.gatePolicy, engine.onGateFlush, gate.Options{
-		DedupTTL:      cfg.Gate.DedupTTL,
-		DedupMax:      cfg.Gate.DedupMax,
-		MaxConcurrent: cfg.Gate.MaxConcurrent,
+		DedupTTL:      deps.Policy.Gate.DedupTTL,
+		DedupMax:      deps.Policy.Gate.DedupMax,
+		MaxConcurrent: deps.Policy.Gate.MaxConcurrent,
 		IdleBucketTTL: time.Minute,
 	})
-	return engine
+	return engine, nil
 }
 
 func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
@@ -39,23 +67,26 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
 	}
 	verdict := VerdictPass
-	if e.cfg.Gate.Enabled && msg.Group {
+	if e.deps.Policy.Gate.Enabled {
 		verdict = Verdict(e.gate.Absorb(gate.Input{
-			Platform:  msg.Platform,
-			ChatID:    msg.ChatID,
-			MsgID:     msg.MessageID,
-			UserID:    msg.UserID,
-			UserName:  msg.UserName,
-			Text:      msg.Text,
-			Addressed: msg.Addressed(),
-			HasMedia:  msg.HasMedia(),
-			At:        msg.At,
+			ConversationID: msg.ConversationID,
+			MsgID:          msg.MessageID,
+			UserID:         msg.UserID,
+			UserName:       msg.UserName,
+			Text:           msg.Text,
+			Addressed:      msg.Addressed(),
+			HasMedia:       msg.HasMedia(),
+			At:             msg.At,
 		}))
 		if verdict != VerdictPass {
 			return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
 		}
 	}
-	if err := e.reply(ctx, msg, "ForgeBot received: "+strings.TrimSpace(msg.Text)); err != nil {
+	reply, err := e.replyText(ctx, msg.Text)
+	if err != nil {
+		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, err
+	}
+	if err := e.reply(ctx, msg, reply); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
 	return platform.HandleResult{Accepted: true, Verdict: verdict.String()}, nil
@@ -71,49 +102,63 @@ func (e *Engine) GateStats() gate.Stats {
 
 func (e *Engine) gatePolicy(platform string) gate.Policy {
 	return gate.Policy{
-		Silence:        e.cfg.Gate.Silence,
-		MaxCount:       e.cfg.Gate.MaxCount,
-		MaxWindow:      e.cfg.Gate.MaxWindow,
-		MaxBuffered:    e.cfg.Gate.MaxBuffered,
-		MaxTextLen:     e.cfg.Gate.MaxTextLen,
-		RequireMention: e.cfg.Gate.RequireMention,
+		Silence:        e.deps.Policy.Gate.Silence,
+		MaxCount:       e.deps.Policy.Gate.MaxCount,
+		MaxWindow:      e.deps.Policy.Gate.MaxWindow,
+		MaxBuffered:    e.deps.Policy.Gate.MaxBuffered,
+		MaxTextLen:     e.deps.Policy.Gate.MaxTextLen,
+		RequireMention: e.deps.Policy.Gate.RequireMention,
 	}
 }
 
 func (e *Engine) onGateFlush(ctx context.Context, batch gate.Batch) {
-	transcript := batch.Transcript(e.cfg.Gate.MaxTextLen)
+	transcript := batch.Transcript(e.deps.Policy.Gate.MaxTextLen)
 	trigger := batch.Trigger("")
 	if trigger.MsgID == "" && len(batch.Msgs) > 0 {
 		trigger = batch.Msgs[len(batch.Msgs)-1]
 	}
 	text := "ForgeBot grouped message batch:\n" + transcript
 	msg := messaging.OutboundMessage{
-		Platform:         batch.Platform,
-		ChatID:           batch.ChatID,
+		ConversationID:   batch.ConversationID,
 		ReplyToMessageID: trigger.MsgID,
 		Text:             text,
 	}
-	if err := e.registry.Send(ctx, msg); err != nil {
-		e.logger.ErrorContext(ctx, "send gate batch reply", "err", err, "platform", batch.Platform, "chat_id", batch.ChatID)
+	if err := e.deps.Sender.Send(ctx, msg); err != nil {
+		e.logger.ErrorContext(ctx, "send gate batch reply", "err", err, "conversation_id", batch.ConversationID)
 	}
 }
 
 func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text string) error {
-	return e.registry.Send(ctx, messaging.OutboundMessage{
-		Platform:         in.Platform,
-		ChatID:           in.ChatID,
-		UserID:           in.UserID,
+	message := messaging.OutboundMessage{
+		ConversationID:   in.ConversationID,
 		ReplyToMessageID: in.MessageID,
 		Text:             text,
+	}
+	return e.deps.Sender.Send(ctx, message)
+}
+
+func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
+	if e.deps.LLM == nil {
+		name := strings.TrimSpace(e.deps.Policy.Name)
+		if name == "" {
+			name = "ForgeBot"
+		}
+		return name + " received: " + strings.TrimSpace(text), nil
+	}
+	response, err := e.deps.LLM.Complete(ctx, llm.Request{
+		Model:        e.deps.Policy.Model,
+		Instructions: e.deps.Policy.SystemPrompt,
+		Messages:     []llm.Message{llm.TextMessage(llm.RoleUser, strings.TrimSpace(text))},
 	})
+	if err != nil {
+		return "", err
+	}
+	return response.Text, nil
 }
 
 func validateInbound(msg messaging.InboundMessage) error {
-	if strings.TrimSpace(msg.Platform) == "" {
-		return fmt.Errorf("platform is required")
-	}
-	if strings.TrimSpace(msg.ChatID) == "" {
-		return fmt.Errorf("chat_id is required")
+	if strings.TrimSpace(msg.ConversationID) == "" {
+		return fmt.Errorf("conversation_id is required")
 	}
 	if strings.TrimSpace(msg.UserID) == "" {
 		return fmt.Errorf("user_id is required")

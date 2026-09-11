@@ -21,11 +21,11 @@ func NewSender(logger *slog.Logger) *Sender {
 	return &Sender{logger: logger}
 }
 
-func (s *Sender) Send(ctx context.Context, msg messaging.OutboundMessage) error {
+func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.OutboundMessage) error {
 	s.mu.Lock()
 	s.sent = append(s.sent, msg)
 	s.mu.Unlock()
-	s.logger.InfoContext(ctx, "outbound message", "platform", msg.Platform, "chat_id", msg.ChatID, "reply_to", msg.ReplyToMessageID, "text", msg.Text)
+	s.logger.InfoContext(ctx, "outbound message", "conversation_id", msg.ConversationID, "target", target, "reply_to", msg.ReplyToMessageID, "text", msg.Text)
 	return nil
 }
 

@@ -15,27 +15,34 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "", "path to ForgeBot JSON configuration file")
+	configPath := flag.String("config", "", "path to ForgeBot YAML startup configuration file")
+	runtimeConfigPath := flag.String("runtime-config", "", "path to ForgeBot JSON runtime configuration file")
 	flag.Parse()
 
 	cfg, report, err := config.Load(config.LoadOptions{
-		Path:      *configPath,
-		LookupEnv: os.Getenv,
+		Path:        *configPath,
+		RuntimePath: *runtimeConfigPath,
+		LookupEnv:   os.Getenv,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	logger, err := logging.New(cfg.Log)
+	logger, logController, err := logging.New(cfg.Runtime.Log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
 		os.Exit(1)
 	}
 	slog.SetDefault(logger)
-	logger.Info("configuration loaded", "source", report.Source, "path", report.Path)
+	logger.Info("configuration loaded",
+		"static_source", report.StaticSource,
+		"static_path", report.StaticPath,
+		"runtime_source", report.RuntimeSource,
+		"runtime_path", report.RuntimePath,
+	)
 
-	root, err := app.New(cfg, logger)
+	root, err := app.New(cfg, logger, logController)
 	if err != nil {
 		logger.Error("initialize app", "err", err)
 		os.Exit(1)

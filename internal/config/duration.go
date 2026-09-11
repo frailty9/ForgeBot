@@ -1,12 +1,50 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/llm"
 )
+
+func (g GateConfig) MarshalJSON() ([]byte, error) {
+	type encodedGateConfig struct {
+		Enabled        bool   `json:"enabled"`
+		RequireMention bool   `json:"require_mention"`
+		Silence        string `json:"silence"`
+		MaxCount       int    `json:"max_count"`
+		MaxWindow      string `json:"max_window"`
+		DedupTTL       string `json:"dedup_ttl"`
+		DedupMax       int    `json:"dedup_max"`
+		MaxBuffered    int    `json:"max_buffered"`
+		MaxTextLen     int    `json:"max_text_len"`
+		MaxConcurrent  int    `json:"max_concurrent"`
+	}
+	return json.Marshal(encodedGateConfig{
+		Enabled: g.Enabled, RequireMention: g.RequireMention, Silence: g.Silence.String(),
+		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow.String(), DedupTTL: g.DedupTTL.String(),
+		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,
+		MaxConcurrent: g.MaxConcurrent,
+	})
+}
+
+func (l LLMConfig) MarshalJSON() ([]byte, error) {
+	type encodedLLMConfig struct {
+		Protocol         llm.Protocol `json:"protocol"`
+		BaseURL          string       `json:"base_url"`
+		APIKeyRef        string       `json:"api_key_ref"`
+		Model            string       `json:"model"`
+		AnthropicVersion string       `json:"anthropic_version,omitempty"`
+		Timeout          string       `json:"timeout"`
+	}
+	return json.Marshal(encodedLLMConfig{
+		Protocol: l.Protocol, BaseURL: l.BaseURL, APIKeyRef: l.APIKeyRef, Model: l.Model,
+		AnthropicVersion: l.AnthropicVersion, Timeout: l.Timeout.String(),
+	})
+}
 
 func (d *ServerConfig) UnmarshalJSON(data []byte) error {
 	type rawServerConfig struct {
@@ -15,11 +53,11 @@ func (d *ServerConfig) UnmarshalJSON(data []byte) error {
 		WriteTimeout    json.RawMessage `json:"write_timeout"`
 		ShutdownTimeout json.RawMessage `json:"shutdown_timeout"`
 	}
-	defaults := Default().Server
+	defaults := DefaultStatic().Server
 	out := rawServerConfig{
 		Addr: defaults.Addr,
 	}
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := decodeStrictJSON(data, &out); err != nil {
 		return err
 	}
 	d.Addr = out.Addr
@@ -49,9 +87,9 @@ func (g *GateConfig) UnmarshalJSON(data []byte) error {
 		MaxTextLen     *int            `json:"max_text_len"`
 		MaxConcurrent  *int            `json:"max_concurrent"`
 	}
-	defaults := Default().Gate
+	defaults := DefaultRuntime().Gate
 	var raw rawGateConfig
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := decodeStrictJSON(data, &raw); err != nil {
 		return err
 	}
 	*g = defaults
@@ -93,14 +131,14 @@ func (l *LLMConfig) UnmarshalJSON(data []byte) error {
 	type rawLLMConfig struct {
 		Protocol         string          `json:"protocol"`
 		BaseURL          string          `json:"base_url"`
-		APIKey           string          `json:"api_key"`
+		APIKeyRef        string          `json:"api_key_ref"`
 		Model            string          `json:"model"`
 		AnthropicVersion string          `json:"anthropic_version"`
 		Timeout          json.RawMessage `json:"timeout"`
 	}
-	defaults := Default().LLM
+	defaults := DefaultRuntime().LLM
 	var raw rawLLMConfig
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := decodeStrictJSON(data, &raw); err != nil {
 		return err
 	}
 	protocol := defaults.Protocol
@@ -115,13 +153,33 @@ func (l *LLMConfig) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("timeout: %w", err)
 	}
+	apiKeyRef := raw.APIKeyRef
+	if apiKeyRef == "" {
+		apiKeyRef = defaults.APIKeyRef
+	}
 	*l = LLMConfig{
 		Protocol:         protocol,
 		BaseURL:          raw.BaseURL,
-		APIKey:           raw.APIKey,
+		APIKeyRef:        apiKeyRef,
 		Model:            raw.Model,
 		AnthropicVersion: raw.AnthropicVersion,
 		Timeout:          timeout,
+	}
+	return nil
+}
+
+func decodeStrictJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values are not allowed")
+		}
+		return err
 	}
 	return nil
 }

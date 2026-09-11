@@ -11,6 +11,7 @@
 
 # Local configuration
 /configs/*.local.json
+/configs/secrets.json
 .env
 .env.*
 
@@ -22,4 +23,3 @@
 .idea/
 .vscode/
 *.swp
-

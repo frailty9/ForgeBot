@@ -10,18 +10,17 @@ import (
 )
 
 type Input struct {
-	Platform  string
-	ChatID    string
-	MsgID     string
-	UserID    string
-	UserName  string
-	Text      string
-	Addressed bool
-	HasMedia  bool
-	At        time.Time
+	ConversationID string
+	MsgID          string
+	UserID         string
+	UserName       string
+	Text           string
+	Addressed      bool
+	HasMedia       bool
+	At             time.Time
 }
 
-func (i Input) SessionKey() string { return i.Platform + ":" + i.ChatID }
+func (i Input) SessionKey() string { return i.ConversationID }
 
 type Message struct {
 	MsgID    string
@@ -40,12 +39,11 @@ const (
 )
 
 type Batch struct {
-	SessionKey string
-	Platform   string
-	ChatID     string
-	Msgs       []Message
-	Reason     FlushReason
-	OpenedAt   time.Time
+	SessionKey     string
+	ConversationID string
+	Msgs           []Message
+	Reason         FlushReason
+	OpenedAt       time.Time
 }
 
 func (b Batch) Transcript(maxTextLen int) string {
@@ -113,17 +111,16 @@ func (v Verdict) String() string {
 }
 
 type bucket struct {
-	mu         sync.Mutex
-	key        string
-	platform   string
-	chatID     string
-	msgs       []Message
-	openedAt   time.Time
-	lastAt     time.Time
-	lastTouch  time.Time
-	timer      timer
-	generation uint64
-	flushing   bool
+	mu             sync.Mutex
+	key            string
+	conversationID string
+	msgs           []Message
+	openedAt       time.Time
+	lastAt         time.Time
+	lastTouch      time.Time
+	timer          timer
+	generation     uint64
+	flushing       bool
 }
 
 type Pool struct {
@@ -204,7 +201,7 @@ func (p *Pool) Absorb(in Input) Verdict {
 		p.deduped.Add(1)
 		return VerdictDuplicate
 	}
-	pol := p.policy(in.Platform)
+	pol := p.policy(in.ConversationID)
 	if in.Addressed {
 		return VerdictPass
 	}
@@ -244,7 +241,7 @@ func (p *Pool) getOrCreate(in Input) *bucket {
 	p.mu.Lock()
 	b := p.buckets[key]
 	if b == nil {
-		b = &bucket{key: key, platform: in.Platform, chatID: in.ChatID}
+		b = &bucket{key: key, conversationID: in.ConversationID}
 		p.buckets[key] = b
 	}
 	p.mu.Unlock()
@@ -276,7 +273,7 @@ func (p *Pool) armLocked(b *bucket, pol Policy, now time.Time) {
 }
 
 func (p *Pool) onTimer(b *bucket, generation uint64) {
-	pol := p.policy(b.platform)
+	pol := p.policy(b.conversationID)
 	now := p.clock.Now()
 
 	b.mu.Lock()
@@ -310,7 +307,7 @@ func (b *bucket) detachLocked(reason FlushReason) *Batch {
 	b.msgs = nil
 	b.generation++
 	b.flushing = true
-	return &Batch{SessionKey: b.key, Platform: b.platform, ChatID: b.chatID, Msgs: msgs, Reason: reason, OpenedAt: b.openedAt}
+	return &Batch{SessionKey: b.key, ConversationID: b.conversationID, Msgs: msgs, Reason: reason, OpenedAt: b.openedAt}
 }
 
 func (p *Pool) dispatch(b *bucket, batch Batch) {
@@ -326,7 +323,7 @@ func (p *Pool) dispatch(b *bucket, batch Batch) {
 			b.mu.Lock()
 			b.flushing = false
 			if len(b.msgs) > 0 && !p.closed.Load() {
-				p.armLocked(b, p.policy(b.platform), p.clock.Now())
+				p.armLocked(b, p.policy(b.conversationID), p.clock.Now())
 			}
 			b.mu.Unlock()
 		}()
@@ -351,7 +348,7 @@ func (p *Pool) Refresh() {
 	for _, b := range buckets {
 		b.mu.Lock()
 		if len(b.msgs) > 0 && !b.flushing {
-			p.armLocked(b, p.policy(b.platform), now)
+			p.armLocked(b, p.policy(b.conversationID), now)
 		}
 		b.mu.Unlock()
 	}

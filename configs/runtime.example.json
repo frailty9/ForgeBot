@@ -1,0 +1,56 @@
+{
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+  "bot": {
+	"name": "ForgeBot",
+	"system_prompt": ""
+  },
+  "llm": {
+    "protocol": "openai_responses",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_ref": "llm/default",
+    "model": "gpt-5",
+    "anthropic_version": "2023-06-01",
+    "timeout": "60s"
+  },
+  "gate": {
+    "enabled": true,
+    "require_mention": true,
+    "silence": "4s",
+    "max_count": 8,
+    "max_window": "25s",
+    "dedup_ttl": "60s",
+    "dedup_max": 10000,
+    "max_buffered": 50,
+    "max_text_len": 500,
+    "max_concurrent": 4
+  },
+  "platforms": {
+    "connectors": [
+      {
+        "id": "echo-local",
+        "type": "echo",
+        "enabled": true
+      },
+      {
+        "id": "qq-main",
+        "type": "onebot",
+        "enabled": false,
+        "onebot": {
+          "api_url": "http://127.0.0.1:5700",
+          "send_token": "",
+          "receive_secret": "",
+          "webhook_addr": "127.0.0.1:8090",
+          "webhook_path": "/onebot/qq-main",
+          "request_limit": 1048576,
+          "timeout": "15s"
+        }
+      }
+    ],
+    "groups": [
+      {"id": "local", "connector_id": "echo-local", "target": "local"}
+    ]
+  }
+}
