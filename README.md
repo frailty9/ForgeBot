@@ -1,220 +1,181 @@
 # ForgeBot
 
-ForgeBot is a clean-room multi-platform bot foundation for ForgeBot.
+ForgeBot is an open-source, multi-platform bot runtime for building practical
+LLM-powered assistants in group conversations.
 
-The project starts from a small, testable core instead of inheriting the
-historical MuseBot runtime. Platform adapters convert external events into a
-single message model; the bot engine applies admission control, routing,
-retrieval, tools, and LLM providers through explicit interfaces.
+It provides a protocol-neutral bot core, replaceable platform adapters, three
+mainstream LLM wire protocols, on-demand local document search, controlled
+operator actions, and runtime configuration that can be updated without
+restarting the process.
 
-## Current Scope
+ForgeBot is designed to run as a standalone service and does not require any
+other product.
 
-- YAML startup configuration plus writable JSON runtime configuration.
-- Structured runtime lifecycle with graceful shutdown.
-- HTTP management and test ingress.
-- Unified inbound/outbound message contracts.
-- Platform sender registry.
-- OneBot 11 HTTP webhook adapter with outbound `send_msg` support.
-- Reusable group message gate with buffering, deduplication, and stats.
-- On-demand local MD/MDX structured search with atomic hot reload.
-- A restricted, allow-listed tool executor; ordinary messages do not search
-  unless the model requests `search_docs`.
-- A deliberately small LLM boundary supporting Anthropic Messages, OpenAI
-  Responses, and OpenAI Chat Completions, including normalized JSON and SSE
-  clients.
+## What It Includes
 
-The OneBot adapter is wired for startup when enabled in runtime JSON. It
-remains replaceable behind `platform.Adapter` and `platform.Sender`.
+- Explicit interfaces between the bot core, platform connectors, LLM clients,
+  retrieval, tools, and runtime management.
+- Multiple connectors and group bindings active at the same time.
+- OneBot 11 HTTP webhook support with outbound `send_msg`, HMAC-SHA1 request
+  verification, replay protection, and bounded request handling.
+- A single logical conversation identity for the bot core, independent of the
+  protocol, account, or external group ID.
+- Group message gating with mention requirements, buffering, deduplication, and
+  concurrency limits.
+- LLM clients for exactly three protocols:
+  - Anthropic Messages
+  - OpenAI Responses
+  - OpenAI Chat Completions
+- On-demand structured search over local Markdown, MDX, and plain-text files
+  using an in-memory BM25F index.
+- An allow-listed `search_docs` tool. Ordinary messages do not trigger a
+  document search unless the user explicitly uses `/search` or the model asks
+  for the tool.
+- Stateless knowledge reflection that can turn approved administrator answers
+  into managed Markdown under the document root's `extra/` directory.
+- Versioned JSON runtime configuration, optimistic concurrency control, atomic
+  persistence, history, rollback, and component-level hot replacement.
+- A write-only LLM API key management flow backed by an AES-256-GCM encrypted
+  file store.
 
-Example OneBot runtime settings:
+## Architecture
 
-```json
-{
-  "platforms": {
-    "connectors": [{
-      "id": "qq-main",
-      "type": "onebot",
-      "enabled": true,
-      "onebot": {
-        "api_url": "http://127.0.0.1:5700",
-        "send_token": "",
-        "receive_secret": "",
-        "webhook_addr": "127.0.0.1:8090",
-        "webhook_path": "/onebot/qq-main",
-        "request_limit": 1048576,
-        "timeout": "15s",
-        "replay_ttl": "5m",
-        "replay_max": 10000
-      }
-    }],
-    "groups": [
-      {"id": "support", "connector_id": "qq-main", "target": "10001"},
-      {"id": "engineering", "connector_id": "qq-main", "target": "10002"}
-    ]
-  }
-}
+```text
+platform adapter
+    -> normalized inbound message
+    -> logical group binding
+    -> bot engine
+    -> gate / tools / search / LLM
+    -> normalized outbound message
+    -> platform sender
 ```
 
-OneBot sends POST callbacks to the configured webhook path. `receive_secret`
-validates its `X-Signature` using HMAC-SHA1, while `send_token` is sent as a
-Bearer token on outbound API calls. Platform setting changes rebuild and
-replace the Connector generation through `runtime.Manager`; failed startup or
-persistence restores the previous active connectors.
+The core only sees a logical `conversation_id`. Platform-specific details stay
+in connectors and bindings, so adding another protocol does not require changes
+to the bot engine.
 
-Accepted OneBot message events are deduplicated by connector/account/group/user/message
-identity. `replay_ttl` controls the replay window and `replay_max` bounds memory
-usage. Array message segments are preferred for clean text extraction; CQ codes
-are removed when only `raw_message` is available.
+See [docs/architecture.md](docs/architecture.md) for package boundaries and
+lifecycle contracts.
 
-Operator groups are an allow-listed, protocol-neutral operations boundary.
-They reference an existing logical conversation and never inherit the full Web
-administration API. In an operator group, slash commands are intercepted before
-ordinary Bot handling; non-command messages continue through the normal Bot
-pipeline.
+## Current Status
 
-Individual administrators are configured separately and scoped by logical
-conversation plus platform user ID. Runtime identity resolution marks trusted
-senders before messages reach application handlers; adapters and HTTP callers
-cannot assert this flag themselves. This identity is reserved for narrowly
-scoped communication-side capabilities such as future knowledge promotion and
-does not grant the full Web administration API.
+The current release is a focused runtime foundation rather than a complete
+hosted product. OneBot 11 and an in-memory echo connector are available today;
+additional platform adapters can implement the same interfaces. The structured
+retriever currently supports local `.md`, `.mdx`, and `.txt` files only. Vector
+and hybrid retrieval are intentionally not included yet.
 
-```json
-{
-  "administration": {
-    "administrators": [
-      {"conversation_id": "support", "user_id": "12345678"}
-    ]
-  }
-}
-```
-
-Available operator-group commands are `/status`, `/restart`, `/pause`,
-`/resume`, `/gate on|off`, and `/reload-docs`. Restart, Gate, and document
-reload operations acknowledge first, then report completion after the runtime
-operation finishes.
-Runtime, Connector, and LLM failures are dispatched asynchronously to operator
-groups with `notifications: true`; delivery failure is logged and never blocks
-the component that emitted the event.
-
-## Local Document Search
-
-Search is disabled by default. Enable it in runtime JSON and set an absolute
-local document root:
-
-```json
-{
-  "search": {
-    "enabled": true,
-    "policy": "on_demand",
-    "backend": "structured",
-    "document_root": "D:/forgebot-docs",
-    "extensions": [".md", ".mdx", ".txt"],
-    "default_results": 5,
-    "max_results": 8,
-    "min_match_ratio": 0.35,
-    "query_timeout": "750ms",
-    "build_timeout": "20s",
-    "max_queries_per_turn": 1,
-    "max_context_chars": 12000,
-    "max_section_chars": 8000,
-    "max_file_bytes": 4194304,
-    "max_total_bytes": 268435456,
-    "max_files": 10000
-  }
-}
-```
-
-Ordinary questions go to the LLM without a preliminary index query. The LLM
-may request the read-only `search_docs` tool when project facts are needed;
-the default budget permits one search and at most two LLM requests per turn.
-Use `/search <query>` to skip that decision and search immediately. Search
-results enter the prompt as bounded, untrusted reference data with source
-paths. Vector and hybrid backends are intentionally unavailable at this stage.
-
-Changing Search configuration builds a complete candidate index before the
-new runtime JSON is persisted. A failed build leaves the old configuration and
-index active. `/reload-docs` and the admin reload endpoint rebuild the current
-index atomically without changing the configuration version or restarting
-platform connectors.
-
-The planned knowledge-reflection workflow remains stateless across process
-restarts: ForgeBot will retain a bounded, expiring in-memory message window and
-periodically scan it for explicit administrator replies to member questions.
-Accepted entries will be written as managed Markdown under `extra/`, followed
-by one atomic index reload per scan batch. The draft under
-`specs/knowledge-reflection` must be confirmed before implementation.
+The public HTTP surface includes health checks, test message ingress, and a
+Bearer-protected management API. A web administration frontend is not bundled
+in this repository.
 
 ## Quick Start
 
+Requirements:
+
+- Go 1.25 or newer
+- A JSON runtime configuration file
+- An LLM endpoint and API key for actual model responses
+
+Run the test suite:
+
 ```powershell
 go test ./...
+```
+
+Start the local example:
+
+```powershell
 go run ./cmd/forgebot -config configs/forgebot.example.yaml
 ```
 
-Health check:
+The example starts the local echo connector and listens on `127.0.0.1:8080`.
+Check the process without an LLM key:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/healthz
 ```
 
-### LLM protocol selection
+To exercise a complete LLM turn, copy the example runtime configuration,
+configure the provider, create a SecretStore, and write the key through the
+management API. The complete procedure and every field are documented in
+[docs/configuration.md](docs/configuration.md).
 
-The `llm.protocol` field accepts exactly:
-
-- `anthropic_messages` (`POST /v1/messages`)
-- `openai_responses` (`POST /responses`)
-- `openai_completions` (`POST /chat/completions`)
-
-Use `llm.base_url` for a compatible gateway or vendor endpoint. The provider
-name is not encoded into the core API; a vendor is selected by choosing the
-protocol it implements.
-
-The LLM API key is intentionally absent from both example files. It will be
-managed through a dedicated write-only secret API and `SecretStore`; ordinary
-configuration reads and history never expose it. ForgeBot does not load a
-`.env` file. Deployment environments may use variables only for documented
-startup overrides such as `FORGEBOT_HTTP_ADDR`.
-
-The management API requires a Bearer token. Set `FORGEBOT_ADMIN_TOKEN` in the
-deployment environment; it overrides `admin_token` in the startup YAML. The
-token is never included in configuration responses.
-
-The file-backed `SecretStore` encrypts values with AES-256-GCM. Its encryption
-key is supplied as a Base64-encoded 32-byte value in `FORGEBOT_SECRET_KEY`; the
-key itself must remain in the deployment environment and must not be written to
-either configuration file.
-
-To enable API key management, set `secret_store_path: secrets.json` in the
-startup YAML and inject a generated master key before starting ForgeBot:
+Send a test message after an LLM key is configured:
 
 ```powershell
-$bytes = New-Object byte[] 32
-[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$env:FORGEBOT_SECRET_KEY = [Convert]::ToBase64String($bytes)
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8080/v1/messages `
+  -ContentType application/json `
+  -Body '{"conversation_id":"local","user_id":"u1","message_id":"m1","text":"hello ForgeBot","mentioned":true}'
 ```
 
-Configuration precedence and ownership are fixed:
+## Minimal Runtime Configuration
 
-```text
-documented environment override > startup YAML > code default
-runtime JSON is independent and is never overridden by environment variables
+Runtime settings live in writable JSON. The example below selects the OpenAI
+Responses protocol; switch `protocol` to `openai_completions` or
+`anthropic_messages` when using a compatible endpoint.
+
+```json
+{
+  "bot": {"name": "ForgeBot"},
+  "llm": {
+    "protocol": "openai_responses",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_ref": "llm/default",
+    "model": "gpt-5",
+    "timeout": "60s"
+  },
+  "platforms": {
+    "connectors": [
+      {"id": "echo-local", "type": "echo", "enabled": true}
+    ],
+    "groups": [
+      {"id": "local", "connector_id": "echo-local", "target": "local"}
+    ]
+  }
+}
 ```
 
-Each runtime JSON commit retains the previous valid document as
-`runtime.json.bak`. If the primary document is damaged at startup, ForgeBot
-loads that backup and reports `json_backup` as the source.
+`base_url` is the provider root. ForgeBot appends the protocol endpoint:
 
-To migrate the original single JSON file, move `server` into the startup YAML,
-move `log`, `bot`, `llm`, `gate`, and `platforms` into the runtime JSON, replace
-`llm.api_key` with `llm.api_key_ref`, and submit the actual key through the
-write-only secret endpoint.
+| Protocol | Endpoint |
+| --- | --- |
+| `anthropic_messages` | `<base_url>/v1/messages` |
+| `openai_responses` | `<base_url>/responses` |
+| `openai_completions` | `<base_url>/chat/completions` |
 
-### Management API
+## Configuration And Operations
 
-All management requests use `Authorization: Bearer <FORGEBOT_ADMIN_TOKEN>`.
-The API supports current configuration, validation, versioned updates, history,
-rollback, runtime restart, and write-only LLM API key management:
+ForgeBot separates startup configuration from hot-updateable application
+configuration:
+
+- YAML and documented environment variables configure the HTTP server, runtime
+  JSON path, SecretStore path, and management token.
+- Runtime JSON configures the Bot, LLM, gate, search, platforms,
+  administration, operations, and reflection.
+- LLM API keys are stored separately and can be replaced without exposing their
+  value in configuration reads or history.
+
+Runtime updates are full replacements guarded by `expected_version`; validation
+and candidate component startup happen before the new generation is published.
+The management API supports configuration history, rollback, runtime restart,
+document reload, reflection scans, and write-only API key management.
+
+Read [docs/configuration.md](docs/configuration.md) before deploying. It covers
+environment-variable precedence, path resolution, OneBot setup, search limits,
+SecretStore initialization, hot updates, rollback, and production hardening.
+
+## Management API
+
+All management requests require:
+
+```http
+Authorization: Bearer <FORGEBOT_ADMIN_TOKEN>
+```
+
+Available endpoints:
 
 ```text
 GET    /v1/admin/config
@@ -225,33 +186,31 @@ POST   /v1/admin/config/rollback
 GET    /v1/admin/runtime
 POST   /v1/admin/runtime/restart
 POST   /v1/admin/search/reload
+POST   /v1/admin/reflection/scan
 GET    /v1/admin/llm/api-key
 PUT    /v1/admin/llm/api-key
 DELETE /v1/admin/llm/api-key
 ```
 
-The API key write body is a single-purpose payload. The response exposes only
-configuration state, version, and update time:
+Configuration responses are intentionally redacted. In particular, the LLM
+API key is never returned, and OneBot credentials are represented only by
+configured/not-configured status.
+
+## Contributing
+
+Contributions are welcome, especially new platform adapters, protocol-compatible
+LLM providers, tests, documentation, and operational tooling. Keep new
+integrations behind the existing interfaces and preserve the bot core's
+protocol-neutral model.
+
+Before opening a pull request:
 
 ```powershell
-Invoke-RestMethod `
-  -Method Put `
-  -Uri http://127.0.0.1:8080/v1/admin/llm/api-key `
-  -Headers @{ Authorization = "Bearer $env:FORGEBOT_ADMIN_TOKEN" } `
-  -ContentType application/json `
-  -Body '{"api_key":"replace-with-provider-key"}'
+go test ./...
 ```
 
-Send a test message through the HTTP ingress:
+## License
 
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/v1/messages `
-  -ContentType application/json `
-  -Body '{"conversation_id":"local","user_id":"u1","message_id":"m1","text":"hello ForgeBot","mentioned":true}'
-```
-
-## Architecture
-
-See [docs/architecture.md](docs/architecture.md).
+No license has been selected for this repository yet. Until a license file is
+added, the source should not be assumed to be available for unrestricted
+redistribution or commercial use.
