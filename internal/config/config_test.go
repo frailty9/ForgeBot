@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,9 @@ func TestLoadDefaults(t *testing.T) {
 	if snapshot.Runtime.Search.Enabled || snapshot.Runtime.Search.Policy != "on_demand" || snapshot.Runtime.Search.QueryTimeout != 750*time.Millisecond {
 		t.Fatalf("search defaults = %+v", snapshot.Runtime.Search)
 	}
+	if !slices.Equal(snapshot.Runtime.Search.Extensions, []string{".md", ".mdx", ".txt"}) {
+		t.Fatalf("search extensions = %#v", snapshot.Runtime.Search.Extensions)
+	}
 }
 
 func TestSearchConfigJSONDefaultsAndValidation(t *testing.T) {
@@ -69,9 +73,9 @@ func TestSearchConfigRejectsUnsupportedModesAndBudgets(t *testing.T) {
 	cfg.DefaultResults = cfg.MaxResults + 1
 	cfg.MinMatchRatio = 0
 	cfg.QueryTimeout = 0
-	cfg.Extensions = []string{".md", ".txt", ".md"}
+	cfg.Extensions = []string{".md", ".rst", ".md"}
 	err := cfg.Validate()
-	for _, expected := range []string{"on_demand", "structured", "must be absolute", "must not exceed", "min_match_ratio", "query_timeout", "must be .md or .mdx", "is duplicated"} {
+	for _, expected := range []string{"on_demand", "structured", "must be absolute", "must not exceed", "min_match_ratio", "query_timeout", "must be .md, .mdx, or .txt", "is duplicated"} {
 		if err == nil || !strings.Contains(err.Error(), expected) {
 			t.Fatalf("expected %q in validation error, got %v", expected, err)
 		}

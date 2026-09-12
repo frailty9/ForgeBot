@@ -57,7 +57,7 @@ must not depend on or expose the complete Web administration service.
   Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions.
 - `internal/search`: protocol-neutral retrieval contract and bounded,
   injection-resistant context rendering.
-- `internal/search/structured`: MD/MDX parsing, BM25F in-memory indexing,
+- `internal/search/structured`: Markdown/MDX/plain-text parsing, BM25F in-memory indexing,
   deterministic ranking, and atomic index reload.
 - `internal/tooling`: explicit tool allow-list and normalized execution result.
 - `internal/tooling/searchdocs`: read-only adapter from the tool boundary to a
@@ -83,8 +83,9 @@ must not depend on or expose the complete Web administration service.
 
 ## Search Lifecycle
 
-Structured search parses local `.md` and `.mdx` files into heading-aware
-sections and builds an immutable in-memory BM25F index. Title, heading,
+Structured search parses local `.md`, `.mdx`, and `.txt` files and builds an
+immutable in-memory BM25F index. Markdown inputs produce heading-aware sections;
+plain-text inputs are bounded without interpreting Markdown syntax. Title, heading,
 frontmatter, path, code, and body fields receive distinct weights. Query term
 coverage filters weak results, and ties are resolved by stable path and section
 identity ordering.
@@ -99,6 +100,11 @@ operational event.
 `search.Retriever` is independent of the structured implementation. Vector and
 hybrid retrieval may implement the same contract later, but their dependencies,
 configuration values, and index files are deliberately absent today.
+
+`<document_root>/extra` is an optional convention for future Bot-promoted
+knowledge. That workflow may write managed `.md` files only under this subtree;
+the search service itself remains read-only and indexes the directory through
+its normal recursive scan.
 
 ## LLM Client Contract
 

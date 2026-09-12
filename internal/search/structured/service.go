@@ -64,6 +64,17 @@ func (o Options) validate() error {
 	if len(o.Extensions) == 0 {
 		return errors.New("structured search extensions are required")
 	}
+	seenExtensions := make(map[string]struct{}, len(o.Extensions))
+	for _, extension := range o.Extensions {
+		extension = strings.ToLower(strings.TrimSpace(extension))
+		if extension != ".md" && extension != ".mdx" && extension != ".txt" {
+			return fmt.Errorf("structured search extension %q is not supported", extension)
+		}
+		if _, exists := seenExtensions[extension]; exists {
+			return fmt.Errorf("structured search extension %q is duplicated", extension)
+		}
+		seenExtensions[extension] = struct{}{}
+	}
 	if o.DefaultResults <= 0 || o.MaxResults <= 0 || o.DefaultResults > o.MaxResults {
 		return errors.New("structured search result limits are invalid")
 	}

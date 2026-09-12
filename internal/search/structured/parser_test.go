@@ -86,3 +86,17 @@ func TestParserRejectsInvalidUTF8AndFrontmatter(t *testing.T) {
 		t.Fatal("invalid frontmatter accepted")
 	}
 }
+
+func TestParserTreatsTXTAsPlainText(t *testing.T) {
+	document, err := newParser(8000).Parse("extra/answer.txt", []byte("---\ntitle: not frontmatter\n---\n# not a heading\n\nAPI Key 使用说明"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.Title != "answer" || len(document.Sections) != 1 {
+		t.Fatalf("document = %+v", document)
+	}
+	section := document.Sections[0]
+	if len(section.Headings) != 0 || !strings.Contains(section.Body, "title: not frontmatter") || !strings.Contains(section.Body, "# not a heading") {
+		t.Fatalf("plain text section = %+v", section)
+	}
+}

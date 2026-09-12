@@ -24,7 +24,9 @@
 
 ## Phase 3: Local Document Intelligence
 
-- [x] Isolated MD/MDX parsing and structured BM25F search.
+- [x] Isolated Markdown, MDX, and plain-text parsing with structured BM25F search.
+- [ ] Promote administrator answers into managed Markdown under the optional
+  document-root `extra/` directory.
 - [x] Configurable document root and bounded indexing budgets.
 - [x] Atomic hot reload through operator command and authenticated admin API.
 - [x] On-demand LLM tool retrieval and bounded untrusted context builder.

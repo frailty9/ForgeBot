@@ -207,7 +207,7 @@ func DefaultRuntime() RuntimeConfig {
 		},
 		Search: SearchConfig{
 			Enabled: false, Policy: "on_demand", Backend: "structured",
-			Extensions: []string{".md", ".mdx"}, DefaultResults: 5, MaxResults: 8,
+			Extensions: []string{".md", ".mdx", ".txt"}, DefaultResults: 5, MaxResults: 8,
 			MinMatchRatio: 0.35, QueryTimeout: 750 * time.Millisecond, BuildTimeout: 20 * time.Second,
 			MaxQueriesPerTurn: 1, MaxContextChars: 12000, MaxSectionChars: 8000,
 			MaxFileBytes: 4 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 10000,
@@ -542,8 +542,8 @@ func (c SearchConfig) Validate() error {
 	seenExtensions := make(map[string]struct{}, len(c.Extensions))
 	for index, extension := range c.Extensions {
 		extension = strings.ToLower(strings.TrimSpace(extension))
-		if extension != ".md" && extension != ".mdx" {
-			problems = append(problems, fmt.Sprintf("search.extensions[%d] must be .md or .mdx", index))
+		if extension != ".md" && extension != ".mdx" && extension != ".txt" {
+			problems = append(problems, fmt.Sprintf("search.extensions[%d] must be .md, .mdx, or .txt", index))
 		} else if _, exists := seenExtensions[extension]; exists {
 			problems = append(problems, fmt.Sprintf("search.extensions[%d] is duplicated", index))
 		} else {

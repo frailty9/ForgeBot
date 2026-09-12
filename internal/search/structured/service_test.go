@@ -15,21 +15,26 @@ import (
 func TestServiceBuildSearchReloadAndFailureRetention(t *testing.T) {
 	root := t.TempDir()
 	writeDoc(t, root, "guide/auth.mdx", "# Authentication\n\nUse an API key.\n")
+	writeDoc(t, root, "extra/operator-answer.txt", "管理员确认：令牌通过控制台轮换。\n")
 	service, err := New(context.Background(), testOptions(root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	status := service.Status()
-	if status.State != searchcontract.StateReady || status.Documents != 1 || status.Sections != 1 {
+	if status.State != searchcontract.StateReady || status.Documents != 2 || status.Sections != 2 {
 		t.Fatalf("status = %+v", status)
 	}
 	response, err := service.Search(context.Background(), searchcontract.Query{Text: "authentication"})
 	if err != nil || len(response.Results) != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
+	response, err = service.Search(context.Background(), searchcontract.Query{Text: "控制台轮换"})
+	if err != nil || len(response.Results) != 1 || response.Results[0].Path != "extra/operator-answer.txt" {
+		t.Fatalf("text response=%+v err=%v", response, err)
+	}
 	writeDoc(t, root, "guide/retry.md", "# Retry\n\nUse exponential backoff.\n")
 	result, err := service.Reload(context.Background())
-	if err != nil || result.Documents != 2 {
+	if err != nil || result.Documents != 3 {
 		t.Fatalf("reload=%+v err=%v", result, err)
 	}
 	service.opts.Root = filepath.Join(root, "missing")
@@ -91,6 +96,11 @@ func TestServiceRejectsInvalidOptions(t *testing.T) {
 	if _, err := New(context.Background(), opts); err == nil {
 		t.Fatal("invalid resource limits accepted")
 	}
+	opts = testOptions(t.TempDir())
+	opts.Extensions = []string{".rst"}
+	if _, err := New(context.Background(), opts); err == nil {
+		t.Fatal("unsupported extension accepted")
+	}
 }
 
 func TestConcurrentSearchAndReload(t *testing.T) {
@@ -123,7 +133,7 @@ func TestConcurrentSearchAndReload(t *testing.T) {
 }
 
 func testOptions(root string) Options {
-	return Options{Root: root, Extensions: []string{".md", ".mdx"}, DefaultResults: 5, MaxResults: 8, MinMatchRatio: .35, QueryTimeout: time.Second, BuildTimeout: time.Second, MaxSectionChars: 8000, MaxFileBytes: 1 << 20, MaxTotalBytes: 10 << 20, MaxFiles: 100}
+	return Options{Root: root, Extensions: []string{".md", ".mdx", ".txt"}, DefaultResults: 5, MaxResults: 8, MinMatchRatio: .35, QueryTimeout: time.Second, BuildTimeout: time.Second, MaxSectionChars: 8000, MaxFileBytes: 1 << 20, MaxTotalBytes: 10 << 20, MaxFiles: 100}
 }
 
 func writeDoc(t *testing.T, root, relative, content string) {

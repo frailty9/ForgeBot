@@ -64,6 +64,9 @@ func (p *parser) Parse(path string, source []byte) (Document, error) {
 	}
 	path = filepath.ToSlash(filepath.Clean(path))
 	content := bytes.TrimPrefix(source, []byte{0xef, 0xbb, 0xbf})
+	if strings.EqualFold(filepath.Ext(path), ".txt") {
+		return p.parsePlainText(path, content), nil
+	}
 	meta, markdownSource, firstLine, err := parseFrontmatter(content)
 	if err != nil {
 		return Document{}, err
@@ -122,6 +125,26 @@ func (p *parser) Parse(path string, source []byte) (Document, error) {
 		sections[i].Title = title
 	}
 	return Document{Path: path, Title: title, Tags: append([]string(nil), meta.Tags...), Summary: firstNonEmpty(meta.Description, meta.Summary), Sections: sections}, nil
+}
+
+func (p *parser) parsePlainText(path string, source []byte) Document {
+	value := strings.ReplaceAll(string(source), "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	blocks := strings.FieldsFunc(value, func(r rune) bool { return r == '\n' })
+	sections := make([]Section, 0)
+	for _, body := range chunkBlocks(blocks, p.maxSectionChars) {
+		section := Section{
+			Path: path, Ordinal: len(sections), Body: body,
+			StartLine: 1, EndLine: strings.Count(value, "\n") + 1,
+		}
+		section.ID = sectionID(section)
+		sections = append(sections, section)
+	}
+	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	for index := range sections {
+		sections[index].Title = title
+	}
+	return Document{Path: path, Title: title, Sections: sections}
 }
 
 type sectionBuilder struct {

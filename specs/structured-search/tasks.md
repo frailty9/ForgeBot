@@ -7,7 +7,7 @@
   - 覆盖配置默认值、非法后端、预算边界、JSON 严格字段和历史兼容测试。
   - _Requirement: 13, 17, 19, 20_
 
-- [x] 2. 实现安全的 MD/MDX 解析与分段
+- [x] 2. 实现安全的 Markdown/MDX/TXT 解析与分段
   - 引入 Markdown AST 解析器，提取 frontmatter、标题层级、正文、列表、引用和 fenced code block。
   - 对 MDX import/export、JSX 与表达式执行容错文本提取，不执行 JavaScript。
   - 实现稳定 section ID、块边界拆分、相对路径规范化和 rune 字符预算。
@@ -72,7 +72,7 @@
   - _Requirement: 15, 16, 17, 19_
 
 - [x] 10. 完成端到端验证与项目文档
-  - 使用临时 MD/MDX 文档库验证普通问答零检索、显式搜索和 LLM 工具检索完整路径。
+  - 使用临时 Markdown/MDX/TXT 文档库验证普通问答零检索、显式搜索和 LLM 工具检索完整路径。
   - 验证 Search 配置更新、失败保活、回滚、文档重载及多个管理群通知行为。
   - 更新 README、架构文档、路线图和运行时配置说明。
   - 明确当前仅支持结构化后端，向量与混合检索继续挂起。
