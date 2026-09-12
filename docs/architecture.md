@@ -16,9 +16,12 @@ external platform
 ```
 
 Runtime configuration flows through `settings.Store -> runtime.Manager`. A
-candidate Engine and LLM client are built before persistence; only a successful
-configuration commit is atomically published. Existing requests finish on the
-previous generation while new requests use the replacement.
+generation owns its Engine, LLM client, Connector Set, and operator routing.
+Candidates are built before persistence; only a successful configuration commit
+is published. Platform changes stop the old Connector Set, start the candidate,
+and restore the old set if startup or persistence fails. Existing Engine
+requests finish on their previous generation while new requests use the
+replacement.
 
 Operator groups are configured by logical `ConversationID`, never by protocol
 or external account identifiers. Their commands pass through a dedicated,
@@ -87,7 +90,8 @@ ForgeBot protocol surface.
 
 Platform lifecycle contract:
 
-- Adapter.Start owns a blocking listener and returns when its listener stops.
+- Adapter.Start returns only after its listener is ready; later failures are
+  reported through Adapter.Errors.
 - Adapter.Stop is context-bounded and idempotent when the adapter is not running.
 - Adapters translate external events into messaging.InboundMessage and do not call the Bot Engine or read configuration files directly.
 

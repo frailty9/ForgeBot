@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
 )
@@ -33,20 +35,22 @@ const (
 type Action string
 
 const (
-	ActionNone          Action = "none"
-	ActionUpdateLog     Action = "update_log"
-	ActionReplaceLLM    Action = "replace_llm"
-	ActionReplaceSecret Action = "replace_secret"
-	ActionRestartEngine Action = "restart_engine"
-	ActionRestartBot    Action = "restart_bot"
+	ActionNone              Action = "none"
+	ActionUpdateLog         Action = "update_log"
+	ActionReplaceLLM        Action = "replace_llm"
+	ActionReplaceSecret     Action = "replace_secret"
+	ActionRestartEngine     Action = "restart_engine"
+	ActionRestartConnectors Action = "restart_connectors"
+	ActionRestartBot        Action = "restart_bot"
 )
 
 type Status struct {
-	State     State     `json:"state"`
-	Action    Action    `json:"action"`
-	Version   uint64    `json:"version"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Error     string    `json:"error,omitempty"`
+	State      State                      `json:"state"`
+	Action     Action                     `json:"action"`
+	Version    uint64                     `json:"version"`
+	UpdatedAt  time.Time                  `json:"updated_at"`
+	Error      string                     `json:"error,omitempty"`
+	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
 }
 
 type ApplyResult struct {
@@ -56,21 +60,23 @@ type ApplyResult struct {
 }
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
+type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
 type Persist func() (config.Snapshot, error)
 
 type Builder struct {
-	Sender        platform.Sender
-	Secrets       secret.Store
-	ClientFactory ClientFactory
-	ApplyLog      func(config.LogConfig)
+	Sender           platform.Sender
+	Secrets          secret.Store
+	ClientFactory    ClientFactory
+	ConnectorFactory ConnectorFactory
+	ApplyLog         func(config.LogConfig)
 }
 
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
-	return b.build(ctx, snapshot, "", "")
+	return b.build(ctx, snapshot, b.Sender, "", "")
 }
 
-func (b Builder) build(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (*bot.Engine, error) {
-	if b.Sender == nil {
+func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, secretRef, secretValue string) (*bot.Engine, error) {
+	if sender == nil {
 		return nil, errors.New("runtime sender is required")
 	}
 	clientFactory := b.ClientFactory
@@ -96,7 +102,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, secretRef,
 			}
 		}
 	}
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: b.Sender, LLM: client, Policy: policyFrom(snapshot.Runtime)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Policy: policyFrom(snapshot.Runtime)}, nil)
 }
 
 // ReplaceSecret builds a complete candidate runtime before making the secret
@@ -115,19 +121,21 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 		return activate()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	nextEngine, err := m.builder.build(ctx, current.snapshot, ref, value)
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, value)
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
 	if err := activate(); err != nil {
-		nextEngine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+		next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
-	old := m.current.Swap(&generation{snapshot: current.snapshot, engine: nextEngine})
+	if _, err := m.publish(ctx, current, next, nil); err != nil {
+		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
+		return err
+	}
 	m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, "")
-	m.drain(old, current.snapshot.Static.Server.ShutdownTimeout)
 	return nil
 }
 
@@ -145,47 +153,89 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 		return remove()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	nextEngine, err := m.builder.build(ctx, current.snapshot, ref, "")
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, "")
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
 	if err := remove(); err != nil {
-		nextEngine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+		next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
-	old := m.current.Swap(&generation{snapshot: current.snapshot, engine: nextEngine})
+	if _, err := m.publish(ctx, current, next, nil); err != nil {
+		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
+		return err
+	}
 	m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, "")
-	m.drain(old, current.snapshot.Static.Server.ShutdownTimeout)
 	return nil
 }
 
 type Manager struct {
 	applyMu  sync.Mutex
+	routeMu  sync.RWMutex
 	statusMu sync.RWMutex
 	current  atomic.Pointer[generation]
 	builder  Builder
 	status   Status
+	started  bool
+	runCtx   context.Context
+	errors   chan error
+	operator operations.Service
 }
 
 type generation struct {
-	snapshot config.Snapshot
-	engine   *bot.Engine
-	mu       sync.RWMutex
+	snapshot    config.Snapshot
+	engine      *bot.Engine
+	connectors  platform.ConnectorSet
+	handler     *operations.Router
+	watchCancel context.CancelFunc
+	mu          sync.RWMutex
 }
 
 func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) (*Manager, error) {
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
 	}
-	engine, err := builder.Build(ctx, snapshot)
+	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
+	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
 	if err != nil {
 		return nil, err
 	}
-	manager := &Manager{builder: builder, status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
-	manager.current.Store(&generation{snapshot: snapshot, engine: engine})
+	manager.current.Store(generation)
 	return manager, nil
+}
+
+func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, secretRef, secretValue string) (*generation, error) {
+	if connectors == nil && m.builder.ConnectorFactory != nil {
+		var err error
+		connectors, err = m.builder.ConnectorFactory(snapshot.Runtime.Platforms)
+		if err != nil {
+			return nil, fmt.Errorf("build connectors: %w", err)
+		}
+	}
+	sender := m.builder.Sender
+	if connectors != nil {
+		sender = connectors
+	}
+	engine, err := m.builder.build(ctx, snapshot, sender, secretRef, secretValue)
+	if err != nil {
+		return nil, err
+	}
+	policies := make([]operations.GroupPolicy, 0, len(snapshot.Runtime.Operations.Groups))
+	for _, group := range snapshot.Runtime.Operations.Groups {
+		commands := make([]operations.Command, 0, len(group.Commands))
+		for _, command := range group.Commands {
+			commands = append(commands, operations.Command(strings.ToLower(strings.TrimSpace(command))))
+		}
+		policies = append(policies, operations.GroupPolicy{ConversationID: group.ConversationID, Notifications: group.Notifications, Commands: commands})
+	}
+	router, err := operations.NewRouter(engine, m.operator, policies)
+	if err != nil {
+		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
+		return nil, err
+	}
+	return &generation{snapshot: snapshot, engine: engine, connectors: connectors, handler: router}, nil
 }
 
 func (m *Manager) Snapshot() (config.Snapshot, Status) {
@@ -198,8 +248,71 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	}
 	generation.mu.RLock()
 	snapshot := generation.snapshot
+	if generation.connectors != nil {
+		status.Connectors = generation.connectors.Status()
+	}
 	generation.mu.RUnlock()
 	return snapshot, status
+}
+
+func (m *Manager) Start(ctx context.Context) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	if m.started {
+		return errors.New("runtime is already started")
+	}
+	current := m.current.Load()
+	if current == nil {
+		return errors.New("runtime is stopped")
+	}
+	m.runCtx = ctx
+	if current.connectors != nil {
+		if err := current.connectors.Start(ctx, m); err != nil {
+			m.setStatus(StateDegraded, ActionRestartConnectors, current.snapshot.Version, err.Error())
+			return err
+		}
+		m.watchConnectorErrors(current)
+	}
+	m.started = true
+	m.setStatus(StateReady, ActionNone, current.snapshot.Version, "")
+	return nil
+}
+
+func (m *Manager) Errors() <-chan error { return m.errors }
+
+func (m *Manager) SetOperatorService(service operations.Service) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	m.operator = service
+	if current := m.current.Load(); current != nil {
+		current.handler.SetService(service)
+	}
+}
+
+func (m *Manager) watchConnectorErrors(generation *generation) {
+	watchCtx, cancel := context.WithCancel(m.runCtx)
+	generation.watchCancel = cancel
+	go func() {
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case err, ok := <-generation.connectors.Errors():
+				if !ok {
+					return
+				}
+				if err == nil {
+					continue
+				}
+				snapshot, _ := m.Snapshot()
+				m.setStatus(StateDegraded, ActionRestartConnectors, snapshot.Version, err.Error())
+				select {
+				case m.errors <- err:
+				default:
+				}
+			}
+		}
+	}()
 }
 
 func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyResult, error) {
@@ -220,15 +333,20 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 		return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: current.snapshot}, nil
 	}
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
-	nextEngine, err := m.builder.Build(ctx, snapshot)
+	connectors := current.connectors
+	if action == ActionRestartConnectors {
+		connectors = nil
+	}
+	next, err := m.buildGeneration(ctx, snapshot, connectors, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
 	}
-	next := &generation{snapshot: snapshot, engine: nextEngine}
-	old := m.current.Swap(next)
+	if _, err := m.publish(ctx, current, next, nil); err != nil {
+		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
+		return ApplyResult{}, err
+	}
 	m.setStatus(StateReady, action, snapshot.Version, "")
-	m.drain(old, snapshot.Static.Server.ShutdownTimeout)
 	return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: snapshot}, nil
 }
 
@@ -268,29 +386,33 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	candidate := current.snapshot
 	candidate.Runtime = runtimeConfig
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
-	nextEngine, err := m.builder.Build(ctx, candidate)
+	connectors := current.connectors
+	if action == ActionRestartConnectors {
+		connectors = nil
+	}
+	next, err := m.buildGeneration(ctx, candidate, connectors, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
 	}
-	persisted, err := persist()
+	persisted, err := m.publish(ctx, current, next, func() (config.Snapshot, error) {
+		persisted, persistErr := persist()
+		if persistErr != nil {
+			return config.Snapshot{}, persistErr
+		}
+		if !reflect.DeepEqual(persisted.Static, current.snapshot.Static) || !reflect.DeepEqual(persisted.Runtime, runtimeConfig) || persisted.Version <= current.snapshot.Version {
+			return config.Snapshot{}, errors.New("persisted runtime snapshot does not match candidate")
+		}
+		return persisted, nil
+	})
 	if err != nil {
-		nextEngine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
 	}
-	if !reflect.DeepEqual(persisted.Static, current.snapshot.Static) || !reflect.DeepEqual(persisted.Runtime, runtimeConfig) || persisted.Version <= current.snapshot.Version {
-		nextEngine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
-		err = errors.New("persisted runtime snapshot does not match candidate")
-		m.setStatus(StateDegraded, action, current.snapshot.Version, err.Error())
-		return ApplyResult{}, err
-	}
-	old := m.current.Swap(&generation{snapshot: persisted, engine: nextEngine})
 	if m.builder.ApplyLog != nil {
 		m.builder.ApplyLog(persisted.Runtime.Log)
 	}
 	m.setStatus(StateReady, action, persisted.Version, "")
-	m.drain(old, persisted.Static.Server.ShutdownTimeout)
 	return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: persisted}, nil
 }
 
@@ -302,36 +424,53 @@ func (m *Manager) Restart(ctx context.Context, reason string) error {
 		return errors.New("runtime is stopped")
 	}
 	m.setStatus(StateRestarting, ActionRestartBot, current.snapshot.Version, "")
-	nextEngine, err := m.builder.Build(ctx, current.snapshot)
+	next, err := m.buildGeneration(ctx, current.snapshot, nil, "", "")
 	if err != nil {
 		m.setStatus(StateReady, ActionRestartBot, current.snapshot.Version, err.Error())
 		return fmt.Errorf("restart runtime (%s): %w", reason, err)
 	}
-	old := m.current.Swap(&generation{snapshot: current.snapshot, engine: nextEngine})
+	if _, err := m.publish(ctx, current, next, nil); err != nil {
+		m.setStatus(StateReady, ActionRestartBot, current.snapshot.Version, err.Error())
+		return fmt.Errorf("restart runtime (%s): %w", reason, err)
+	}
 	m.setStatus(StateReady, ActionRestartBot, current.snapshot.Version, "")
-	m.drain(old, current.snapshot.Static.Server.ShutdownTimeout)
 	return nil
 }
 
-func (m *Manager) Shutdown(_ context.Context) error {
+func (m *Manager) Shutdown(ctx context.Context) error {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
-	old := m.current.Swap(nil)
+	m.routeMu.Lock()
+	defer m.routeMu.Unlock()
+	old := m.current.Load()
 	if old == nil {
 		return nil
 	}
+	if old.connectors != nil {
+		if err := old.connectors.Stop(ctx); err != nil {
+			m.setStatus(StateDegraded, ActionNone, old.snapshot.Version, err.Error())
+			return err
+		}
+	}
+	m.current.Store(nil)
+	if old.watchCancel != nil {
+		old.watchCancel()
+	}
 	m.drain(old, old.snapshot.Static.Server.ShutdownTimeout)
+	m.started = false
 	m.setStatus(StateStopped, ActionNone, old.snapshot.Version, "")
 	return nil
 }
 
 func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
+	m.routeMu.RLock()
+	defer m.routeMu.RUnlock()
 	generation := m.acquire()
 	if generation == nil {
 		return platform.HandleResult{}, errors.New("runtime is unavailable")
 	}
 	defer generation.mu.RUnlock()
-	return generation.engine.HandleInbound(ctx, message)
+	return generation.handler.HandleInbound(ctx, message)
 }
 
 func (m *Manager) GateStats() gate.Stats {
@@ -378,6 +517,64 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 	generation.mu.Unlock()
 }
 
+func (m *Manager) publish(_ context.Context, current, next *generation, persist func() (config.Snapshot, error)) (config.Snapshot, error) {
+	connectorsChanged := current.connectors != next.connectors
+	if connectorsChanged && m.started {
+		m.routeMu.Lock()
+		defer m.routeMu.Unlock()
+		stopCtx, cancel := context.WithTimeout(context.Background(), current.snapshot.Static.Server.ShutdownTimeout)
+		stopErr := current.connectors.Stop(stopCtx)
+		cancel()
+		if stopErr != nil {
+			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+			return config.Snapshot{}, stopErr
+		}
+		if err := next.connectors.Start(m.runCtx, m); err != nil {
+			restoreErr := current.connectors.Start(m.runCtx, m)
+			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+			if restoreErr != nil {
+				return config.Snapshot{}, errors.Join(err, fmt.Errorf("restore previous connectors: %w", restoreErr))
+			}
+			return config.Snapshot{}, err
+		}
+	}
+	published := next.snapshot
+	if persist != nil {
+		var err error
+		published, err = persist()
+		if err != nil {
+			m.rollbackConnectors(current, next, connectorsChanged)
+			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+			return config.Snapshot{}, err
+		}
+		next.snapshot = published
+	}
+	old := m.current.Swap(next)
+	if m.started {
+		if connectorsChanged {
+			if old.watchCancel != nil {
+				old.watchCancel()
+			}
+			m.watchConnectorErrors(next)
+		} else {
+			next.watchCancel = old.watchCancel
+			old.watchCancel = nil
+		}
+	}
+	m.drain(old, next.snapshot.Static.Server.ShutdownTimeout)
+	return published, nil
+}
+
+func (m *Manager) rollbackConnectors(current, next *generation, changed bool) {
+	if !changed || !m.started {
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), current.snapshot.Static.Server.ShutdownTimeout)
+	_ = next.connectors.Stop(stopCtx)
+	cancel()
+	_ = current.connectors.Start(m.runCtx, m)
+}
+
 func (m *Manager) setStatus(state State, action Action, version uint64, message string) {
 	m.statusMu.Lock()
 	m.status = Status{State: state, Action: action, Version: version, UpdatedAt: time.Now().UTC(), Error: message}
@@ -398,6 +595,9 @@ func classify(current, next config.RuntimeConfig) Action {
 	withoutLogCurrent.Log, withoutLogNext.Log = config.LogConfig{}, config.LogConfig{}
 	if reflect.DeepEqual(withoutLogCurrent, withoutLogNext) {
 		return ActionUpdateLog
+	}
+	if !reflect.DeepEqual(current.Platforms, next.Platforms) {
+		return ActionRestartConnectors
 	}
 	withoutLLMCurrent, withoutLLMNext := current, next
 	withoutLLMCurrent.LLM, withoutLLMNext.LLM = config.LLMConfig{}, config.LLMConfig{}

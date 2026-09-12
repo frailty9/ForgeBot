@@ -52,8 +52,9 @@ Example OneBot runtime settings:
 
 OneBot sends POST callbacks to the configured webhook path. `receive_secret`
 validates its `X-Signature` using HMAC-SHA1, while `send_token` is sent as a
-Bearer token on outbound API calls. Platform settings are currently applied at process startup; runtime
-adapter replacement is part of the Runtime lifecycle follow-up.
+Bearer token on outbound API calls. Platform setting changes rebuild and
+replace the Connector generation through `runtime.Manager`; failed startup or
+persistence restores the previous active connectors.
 
 Operator groups are an allow-listed, protocol-neutral operations boundary.
 They reference an existing logical conversation and never inherit the full Web

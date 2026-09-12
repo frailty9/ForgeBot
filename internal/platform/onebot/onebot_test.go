@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -115,6 +116,42 @@ func TestWebhookIgnoresUnboundGroup(t *testing.T) {
 	}))(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d", rr.Code)
+	}
+}
+
+func TestAdapterStartIsReadyAndCanRestartAfterStop(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig("http://127.0.0.1:5700")
+	cfg.WebhookAddr = addr
+	adapter, err := New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
+		return platform.HandleResult{}, nil
+	})
+	for cycle := 0; cycle < 2; cycle++ {
+		if err := adapter.Start(context.Background(), handler); err != nil {
+			t.Fatalf("start cycle %d: %v", cycle, err)
+		}
+		probe, err := net.DialTimeout("tcp", addr, time.Second)
+		if err != nil {
+			t.Fatalf("listener not ready on cycle %d: %v", cycle, err)
+		}
+		_ = probe.Close()
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err = adapter.Stop(stopCtx)
+		cancel()
+		if err != nil {
+			t.Fatalf("stop cycle %d: %v", cycle, err)
+		}
 	}
 }
 

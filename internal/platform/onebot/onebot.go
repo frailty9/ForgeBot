@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -46,6 +47,8 @@ type Adapter struct {
 	sender  *Sender
 	server  *http.Server
 	serverM sync.Mutex
+	done    chan struct{}
+	errors  chan error
 }
 
 func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
@@ -55,7 +58,7 @@ func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	a := &Adapter{cfg: cfg, logger: logger}
+	a := &Adapter{cfg: cfg, logger: logger, errors: make(chan error, 1)}
 	a.client = &http.Client{Timeout: cfg.Timeout}
 	a.sender = &Sender{cfg: cfg, client: a.client, logger: logger}
 	return a, nil
@@ -65,8 +68,9 @@ func (a *Adapter) ID() string { return a.cfg.ID }
 
 func (a *Adapter) Sender() platform.ConnectorSender { return a.sender }
 
-// Start serves OneBot HTTP callbacks until ctx is cancelled or the listener
-// fails. It is safe to call Stop after Start returns.
+func (a *Adapter) Errors() <-chan error { return a.errors }
+
+// Start binds the OneBot callback listener and returns once it is ready.
 func (a *Adapter) Start(ctx context.Context, handler platform.Handler) error {
 	if handler == nil {
 		return errors.New("onebot handler is required")
@@ -78,39 +82,62 @@ func (a *Adapter) Start(ctx context.Context, handler platform.Handler) error {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(a.cfg.WebhookPath, a.webhook(handler))
-	a.server = &http.Server{Addr: a.cfg.WebhookAddr, Handler: mux, ReadHeaderTimeout: a.cfg.Timeout}
-	server := a.server
+	server := &http.Server{Addr: a.cfg.WebhookAddr, Handler: mux, ReadHeaderTimeout: a.cfg.Timeout}
+	listener, err := net.Listen("tcp", a.cfg.WebhookAddr)
+	if err != nil {
+		a.serverM.Unlock()
+		return err
+	}
+	done := make(chan struct{})
+	a.server = server
+	a.done = done
 	a.serverM.Unlock()
 
-	stopDone := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.Timeout)
 			_ = server.Shutdown(shutdownCtx)
 			cancel()
-		case <-stopDone:
+		case <-done:
 		}
 	}()
-	err := server.ListenAndServe()
-	close(stopDone)
-	a.serverM.Lock()
-	a.server = nil
-	a.serverM.Unlock()
-	if err == http.ErrServerClosed {
-		return nil
-	}
-	return err
+	go func() {
+		err := server.Serve(listener)
+		a.serverM.Lock()
+		if a.server == server {
+			a.server = nil
+			a.done = nil
+		}
+		a.serverM.Unlock()
+		close(done)
+		if err != nil && err != http.ErrServerClosed {
+			select {
+			case a.errors <- err:
+			default:
+			}
+		}
+	}()
+	return nil
 }
 
 func (a *Adapter) Stop(ctx context.Context) error {
 	a.serverM.Lock()
 	server := a.server
+	done := a.done
 	a.serverM.Unlock()
 	if server == nil {
 		return nil
 	}
-	return server.Shutdown(ctx)
+	if err := server.Shutdown(ctx); err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {

@@ -4,6 +4,7 @@
 
 - [x] YAML startup config and JSON runtime config with validation.
 - [x] Versioned runtime settings, rollback, and atomic component replacement.
+- [x] Runtime-owned Connector lifecycle, status, replacement, and rollback.
 - [x] Encrypted write-only LLM secret management.
 - [x] Authenticated management API foundation.
 - App lifecycle and graceful shutdown.

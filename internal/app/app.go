@@ -11,7 +11,6 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/logging"
-	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	"github.com/soleapi/forgebot/internal/platform/onebot"
@@ -22,63 +21,21 @@ import (
 )
 
 type App struct {
-	cfg      config.Snapshot
-	logger   *slog.Logger
-	runtime  *runtimecfg.Manager
-	server   *server.Server
-	adapters []platform.Adapter
-	handler  platform.Handler
+	cfg     config.Snapshot
+	logger  *slog.Logger
+	runtime *runtimecfg.Manager
+	server  *server.Server
 }
 
 func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Controller) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	registry := platform.NewRegistry()
-	var adapters []platform.Adapter
-	for _, connector := range cfg.Runtime.Platforms.Connectors {
-		if !connector.Enabled {
-			continue
-		}
-		switch connector.Type {
-		case "echo":
-			if err := registry.RegisterConnector(connector.ID, memory.NewSender(logger)); err != nil {
-				return nil, err
-			}
-		case "onebot":
-			groups := make(map[string]string)
-			for _, binding := range cfg.Runtime.Platforms.Groups {
-				if binding.ConnectorID == connector.ID {
-					groups[binding.Target] = binding.ID
-				}
-			}
-			onebotConfig := connector.OneBot
-			onebotAdapter, err := onebot.New(onebot.Config{
-				ID: connector.ID, APIURL: onebotConfig.APIURL, SendToken: onebotConfig.SendToken,
-				ReceiveSecret: onebotConfig.ReceiveSecret,
-				WebhookAddr:   onebotConfig.WebhookAddr, WebhookPath: onebotConfig.WebhookPath,
-				RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout, Groups: groups,
-			}, logger)
-			if err != nil {
-				return nil, err
-			}
-			if err := registry.RegisterConnector(connector.ID, onebotAdapter.Sender()); err != nil {
-				return nil, err
-			}
-			adapters = append(adapters, onebotAdapter)
-		}
-	}
-	for _, binding := range cfg.Runtime.Platforms.Groups {
-		if err := registry.BindConversation(platform.ConversationBinding{ConversationID: binding.ID, ConnectorID: binding.ConnectorID, Target: binding.Target}); err != nil {
-			return nil, err
-		}
-	}
-
 	secretStore, err := buildSecretStore(cfg.Static)
 	if err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{Sender: registry, ApplyLog: func(logConfig config.LogConfig) {
+	builder := runtimecfg.Builder{ConnectorFactory: connectorFactory(logger), ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}
@@ -109,27 +66,50 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
-	operatorPolicies := make([]operations.GroupPolicy, 0, len(cfg.Runtime.Operations.Groups))
-	for _, group := range cfg.Runtime.Operations.Groups {
-		commands := make([]operations.Command, 0, len(group.Commands))
-		for _, command := range group.Commands {
-			commands = append(commands, operations.Command(strings.ToLower(strings.TrimSpace(command))))
-		}
-		operatorPolicies = append(operatorPolicies, operations.GroupPolicy{
-			ConversationID: group.ConversationID, Notifications: group.Notifications, Commands: commands,
-		})
-	}
-	operatorRouter, err := operations.NewRouter(runtimeManager, nil, operatorPolicies)
-	if err != nil {
-		return nil, err
-	}
-
 	return &App{
 		cfg: cfg, logger: logger, runtime: runtimeManager,
-		adapters: adapters,
-		handler:  operatorRouter,
-		server:   server.New(cfg, logger, runtimeManager, adminService),
+		server: server.New(cfg, logger, runtimeManager, adminService),
 	}, nil
+}
+
+func connectorFactory(logger *slog.Logger) runtimecfg.ConnectorFactory {
+	return func(cfg config.PlatformConfig) (platform.ConnectorSet, error) {
+		adapters := make([]platform.Adapter, 0, len(cfg.Connectors))
+		for _, connector := range cfg.Connectors {
+			if !connector.Enabled {
+				continue
+			}
+			switch connector.Type {
+			case "echo":
+				adapters = append(adapters, memory.NewAdapter(connector.ID, logger))
+			case "onebot":
+				groups := make(map[string]string)
+				for _, binding := range cfg.Groups {
+					if binding.ConnectorID == connector.ID {
+						groups[binding.Target] = binding.ID
+					}
+				}
+				onebotConfig := connector.OneBot
+				adapter, err := onebot.New(onebot.Config{
+					ID: connector.ID, APIURL: onebotConfig.APIURL, SendToken: onebotConfig.SendToken,
+					ReceiveSecret: onebotConfig.ReceiveSecret,
+					WebhookAddr:   onebotConfig.WebhookAddr, WebhookPath: onebotConfig.WebhookPath,
+					RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout, Groups: groups,
+				}, logger)
+				if err != nil {
+					return nil, err
+				}
+				adapters = append(adapters, adapter)
+			}
+		}
+		bindings := make([]platform.ConversationBinding, 0, len(cfg.Groups))
+		for _, binding := range cfg.Groups {
+			bindings = append(bindings, platform.ConversationBinding{
+				ConversationID: binding.ID, ConnectorID: binding.ConnectorID, Target: binding.Target,
+			})
+		}
+		return platform.NewSet(adapters, bindings)
+	}
 }
 
 func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
@@ -151,21 +131,18 @@ func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	if err := a.runtime.Start(ctx); err != nil {
+		return err
+	}
 	errs := make(chan error, 1)
 	go func() { errs <- a.server.Start() }()
-	for _, adapter := range a.adapters {
-		adapter := adapter
-		go func() {
-			if err := adapter.Start(ctx, a.handler); err != nil {
-				errs <- err
-			}
-		}()
-	}
 	select {
 	case <-ctx.Done():
 		return a.shutdown()
+	case err := <-a.runtime.Errors():
+		return errors.Join(err, a.shutdown())
 	case err := <-errs:
-		return err
+		return errors.Join(err, a.shutdown())
 	}
 }
 
@@ -173,12 +150,7 @@ func (a *App) shutdown() error {
 	a.logger.Info("shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), a.cfg.Static.Server.ShutdownTimeout)
 	defer cancel()
-	for _, adapter := range a.adapters {
-		if err := adapter.Stop(ctx); err != nil {
-			return err
-		}
-	}
-	if err := a.runtime.Shutdown(context.Background()); err != nil {
+	if err := a.runtime.Shutdown(ctx); err != nil {
 		return err
 	}
 	if err := a.server.Shutdown(ctx); err != nil {

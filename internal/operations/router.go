@@ -47,6 +47,8 @@ type Router struct {
 	groups  map[string]map[Command]struct{}
 }
 
+func (r *Router) SetService(service Service) { r.service = service }
+
 func NewRouter(next platform.Handler, service Service, policies []GroupPolicy) (*Router, error) {
 	if next == nil {
 		return nil, errors.New("operator router next handler is required")

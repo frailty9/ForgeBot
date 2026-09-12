@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/platform"
 )
 
 type Sender struct {
@@ -13,6 +14,22 @@ type Sender struct {
 	mu     sync.Mutex
 	sent   []messaging.OutboundMessage
 }
+
+type Adapter struct {
+	id     string
+	sender *Sender
+	errors chan error
+}
+
+func NewAdapter(id string, logger *slog.Logger) *Adapter {
+	return &Adapter{id: id, sender: NewSender(logger), errors: make(chan error)}
+}
+
+func (a *Adapter) ID() string                                    { return a.id }
+func (a *Adapter) Sender() platform.ConnectorSender              { return a.sender }
+func (a *Adapter) Errors() <-chan error                          { return a.errors }
+func (a *Adapter) Start(context.Context, platform.Handler) error { return nil }
+func (a *Adapter) Stop(context.Context) error                    { return nil }
 
 func NewSender(logger *slog.Logger) *Sender {
 	if logger == nil {

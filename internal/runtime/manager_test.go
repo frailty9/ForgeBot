@@ -152,6 +152,155 @@ func TestManagedSecretReplacementSwitchesOnlyAfterValidation(t *testing.T) {
 	assertReply(t, manager, sender.sender, "model-v1:new-key")
 }
 
+func TestManagerOwnsConnectorLifecycleAndReplacesPlatformGeneration(t *testing.T) {
+	snapshot := testSnapshot()
+	var sets []*fakeConnectorSet
+	factory := func(config.PlatformConfig) (platform.ConnectorSet, error) {
+		set := newFakeConnectorSet()
+		sets = append(sets, set)
+		return set, nil
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, status := manager.Snapshot()
+	if len(status.Connectors) != 1 || status.Connectors[0].State != platform.ConnectorRunning {
+		t.Fatalf("status = %+v", status)
+	}
+
+	nextRuntime := snapshot.Runtime
+	nextRuntime.Platforms.Groups = append([]config.GroupBindingConfig(nil), snapshot.Runtime.Platforms.Groups...)
+	nextRuntime.Platforms.Groups[0].Target = "next"
+	result, err := manager.CommitRuntime(context.Background(), nextRuntime, func() (config.Snapshot, error) {
+		next := snapshot
+		next.Version = 2
+		next.Runtime = nextRuntime
+		return next, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != ActionRestartConnectors || len(sets) != 2 {
+		t.Fatalf("result=%+v sets=%d", result, len(sets))
+	}
+	if sets[0].starts != 1 || sets[0].stops != 1 || sets[0].running {
+		t.Fatalf("old set = %+v", sets[0])
+	}
+	if sets[1].starts != 1 || sets[1].stops != 0 || !sets[1].running {
+		t.Fatalf("new set = %+v", sets[1])
+	}
+}
+
+func TestManagerRestoresConnectorsWhenCandidateStartFails(t *testing.T) {
+	snapshot := testSnapshot()
+	var sets []*fakeConnectorSet
+	factory := func(cfg config.PlatformConfig) (platform.ConnectorSet, error) {
+		set := newFakeConnectorSet()
+		if cfg.Groups[0].Target == "broken" {
+			set.failStart = errors.New("listen failed")
+		}
+		sets = append(sets, set)
+		return set, nil
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	nextRuntime := snapshot.Runtime
+	nextRuntime.Platforms.Groups = append([]config.GroupBindingConfig(nil), snapshot.Runtime.Platforms.Groups...)
+	nextRuntime.Platforms.Groups[0].Target = "broken"
+	persisted := false
+	_, err = manager.CommitRuntime(context.Background(), nextRuntime, func() (config.Snapshot, error) {
+		persisted = true
+		return config.Snapshot{}, nil
+	})
+	if err == nil || persisted {
+		t.Fatalf("err=%v persisted=%v", err, persisted)
+	}
+	current, _ := manager.Snapshot()
+	if current.Version != snapshot.Version || len(sets) != 2 || sets[0].starts != 2 || !sets[0].running {
+		t.Fatalf("current=%+v old=%+v", current, sets[0])
+	}
+}
+
+func TestManagerRestoresConnectorsWhenPersistenceFails(t *testing.T) {
+	snapshot := testSnapshot()
+	var sets []*fakeConnectorSet
+	factory := func(config.PlatformConfig) (platform.ConnectorSet, error) {
+		set := newFakeConnectorSet()
+		sets = append(sets, set)
+		return set, nil
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	nextRuntime := snapshot.Runtime
+	nextRuntime.Platforms.Groups = append([]config.GroupBindingConfig(nil), snapshot.Runtime.Platforms.Groups...)
+	nextRuntime.Platforms.Groups[0].Target = "next"
+	_, err = manager.CommitRuntime(context.Background(), nextRuntime, func() (config.Snapshot, error) {
+		return config.Snapshot{}, errors.New("disk full")
+	})
+	if err == nil {
+		t.Fatal("persistence failure accepted")
+	}
+	current, _ := manager.Snapshot()
+	if current.Version != snapshot.Version || len(sets) != 2 {
+		t.Fatalf("current=%+v sets=%d", current, len(sets))
+	}
+	if sets[0].starts != 2 || sets[0].stops != 1 || !sets[0].running {
+		t.Fatalf("old set = %+v", sets[0])
+	}
+	if sets[1].starts != 1 || sets[1].stops != 1 || sets[1].running {
+		t.Fatalf("candidate set = %+v", sets[1])
+	}
+}
+
+type fakeConnectorSet struct {
+	starts    int
+	stops     int
+	running   bool
+	failStart error
+	errors    chan error
+}
+
+func newFakeConnectorSet() *fakeConnectorSet {
+	return &fakeConnectorSet{errors: make(chan error), running: false}
+}
+
+func (s *fakeConnectorSet) Send(context.Context, messaging.OutboundMessage) error { return nil }
+func (s *fakeConnectorSet) Start(context.Context, platform.Handler) error {
+	s.starts++
+	if s.failStart != nil {
+		return s.failStart
+	}
+	s.running = true
+	return nil
+}
+func (s *fakeConnectorSet) Stop(context.Context) error {
+	s.stops++
+	s.running = false
+	return nil
+}
+func (s *fakeConnectorSet) Errors() <-chan error { return s.errors }
+func (s *fakeConnectorSet) Status() []platform.ConnectorStatus {
+	state := platform.ConnectorStopped
+	if s.running {
+		state = platform.ConnectorRunning
+	}
+	return []platform.ConnectorStatus{{ID: "fake", State: state}}
+}
+
 type recordingFactory struct {
 	mu        sync.Mutex
 	failModel string
