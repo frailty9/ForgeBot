@@ -77,17 +77,18 @@ func TestDeniedOperatorCommandDoesNotReachBot(t *testing.T) {
 	}
 }
 
-func TestUnknownOperatorCommandDoesNotReachBot(t *testing.T) {
+func TestUnknownOperatorCommandContinuesToBot(t *testing.T) {
+	nextCalls := 0
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
-		t.Fatal("bot handler called")
-		return platform.HandleResult{}, nil
+		nextCalls++
+		return platform.HandleResult{Accepted: true, Verdict: "bot"}, nil
 	}), nil, testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := router.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "ops", Text: "/unknown"})
-	if err != nil || result.Accepted || result.Verdict != "operator_command_unknown" {
-		t.Fatalf("result=%+v err=%v", result, err)
+	if err != nil || !result.Accepted || result.Verdict != "bot" || nextCalls != 1 {
+		t.Fatalf("result=%+v err=%v next_calls=%d", result, err, nextCalls)
 	}
 }
 

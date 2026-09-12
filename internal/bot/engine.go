@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
+	"github.com/soleapi/forgebot/internal/tooling"
 )
 
 type Policy struct {
@@ -18,6 +21,15 @@ type Policy struct {
 	SystemPrompt string
 	Model        string
 	Gate         GatePolicy
+	Search       SearchPolicy
+}
+
+type SearchPolicy struct {
+	Enabled           bool
+	DefaultResults    int
+	MaxResults        int
+	MaxQueriesPerTurn int
+	MaxContextChars   int
 }
 
 type GatePolicy struct {
@@ -34,9 +46,11 @@ type GatePolicy struct {
 }
 
 type Dependencies struct {
-	Sender platform.Sender
-	LLM    llm.Client
-	Policy Policy
+	Sender    platform.Sender
+	LLM       llm.Client
+	Retriever searchcontract.Retriever
+	Tools     tooling.Executor
+	Policy    Policy
 }
 
 type Engine struct {
@@ -138,6 +152,10 @@ func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text st
 }
 
 func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if query, explicit := explicitSearchQuery(text); explicit {
+		return e.explicitSearch(ctx, query)
+	}
 	if e.deps.LLM == nil {
 		name := strings.TrimSpace(e.deps.Policy.Name)
 		if name == "" {
@@ -145,15 +163,116 @@ func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
 		}
 		return name + " received: " + strings.TrimSpace(text), nil
 	}
+	messages := []llm.Message{llm.TextMessage(llm.RoleUser, text)}
+	tools := e.toolDefinitions()
 	response, err := e.deps.LLM.Complete(ctx, llm.Request{
 		Model:        e.deps.Policy.Model,
 		Instructions: e.deps.Policy.SystemPrompt,
-		Messages:     []llm.Message{llm.TextMessage(llm.RoleUser, strings.TrimSpace(text))},
+		Messages:     messages,
+		Tools:        tools,
 	})
 	if err != nil {
 		return "", err
 	}
-	return response.Text, nil
+	if len(response.Message.ToolCalls) == 0 {
+		return response.Text, nil
+	}
+	messages = append(messages, llm.AssistantToolCallMessage(response.Message))
+	budget := e.deps.Policy.Search.MaxQueriesPerTurn
+	if budget <= 0 {
+		budget = 1
+	}
+	for index, call := range response.Message.ToolCalls {
+		result := tooling.Result{Code: "budget_exhausted"}
+		if index < budget && e.deps.Tools != nil {
+			result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
+		}
+		payload, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
+		}
+		messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
+	}
+	final, err := e.deps.LLM.Complete(ctx, llm.Request{
+		Model: e.deps.Policy.Model, Instructions: e.deps.Policy.SystemPrompt, Messages: messages,
+	})
+	if err != nil {
+		return "", err
+	}
+	return final.Text, nil
+}
+
+func (e *Engine) toolDefinitions() []llm.ToolDefinition {
+	if !e.deps.Policy.Search.Enabled || e.deps.Tools == nil {
+		return nil
+	}
+	definitions := e.deps.Tools.Definitions()
+	result := make([]llm.ToolDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		result = append(result, llm.ToolDefinition{Name: definition.Name, Description: definition.Description, InputSchema: definition.InputSchema})
+	}
+	return result
+}
+
+func (e *Engine) explicitSearch(ctx context.Context, query string) (string, error) {
+	if !e.deps.Policy.Search.Enabled || e.deps.Retriever == nil {
+		return "文档检索尚未启用。", nil
+	}
+	if query == "" {
+		return "用法：/search <关键词或问题>", nil
+	}
+	response, err := e.deps.Retriever.Search(ctx, searchcontract.Query{Text: query, Limit: e.deps.Policy.Search.DefaultResults})
+	if err != nil {
+		return "", fmt.Errorf("search documents: %w", err)
+	}
+	contextText, selected := searchcontract.BuildContext(response, e.deps.Policy.Search.MaxContextChars)
+	if contextText == "" {
+		return "未在文档库中找到可靠结果。", nil
+	}
+	if e.deps.LLM == nil {
+		return formatSearchResults(selected), nil
+	}
+	result, err := e.deps.LLM.Complete(ctx, llm.Request{
+		Model: e.deps.Policy.Model, Instructions: e.deps.Policy.SystemPrompt,
+		Messages: []llm.Message{
+			llm.TextMessage(llm.RoleUser, query),
+			llm.TextMessage(llm.RoleUser, contextText+"\n\n请根据以上资料回答原问题，并引用 source 路径。"),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+func explicitSearchQuery(text string) (string, bool) {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return "", false
+	}
+	command := strings.ToLower(fields[0])
+	if at := strings.IndexByte(command, '@'); at >= 0 {
+		command = command[:at]
+	}
+	if command != "/search" {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(text, fields[0])), true
+}
+
+func formatSearchResults(results []searchcontract.Result) string {
+	var builder strings.Builder
+	builder.WriteString("文档检索结果：")
+	for index, result := range results {
+		fmt.Fprintf(&builder, "\n%d. %s", index+1, result.Path)
+		if len(result.Headings) > 0 {
+			builder.WriteString(" - " + strings.Join(result.Headings, " > "))
+		}
+		if result.Snippet != "" {
+			builder.WriteString("\n" + result.Snippet)
+		}
+	}
+	return builder.String()
 }
 
 func validateInbound(msg messaging.InboundMessage) error {

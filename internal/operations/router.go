@@ -90,7 +90,7 @@ func (r *Router) HandleInbound(ctx context.Context, message messaging.InboundMes
 		return r.next.HandleInbound(ctx, message)
 	}
 	if !request.Command.Valid() {
-		return r.respond(ctx, message, "未知管理命令。", false, "operator_command_unknown")
+		return r.next.HandleInbound(ctx, message)
 	}
 	if _, ok := allowed[request.Command]; !ok {
 		return r.respond(ctx, message, "此管理群未启用该命令。", false, "operator_command_denied")
