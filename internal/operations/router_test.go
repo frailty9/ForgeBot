@@ -2,7 +2,9 @@ package operations
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -14,9 +16,9 @@ func (f handlerFunc) HandleInbound(ctx context.Context, msg messaging.InboundMes
 	return f(ctx, msg)
 }
 
-type serviceFunc func(context.Context, Request) (string, error)
+type serviceFunc func(context.Context, Request) (Result, error)
 
-func (f serviceFunc) Execute(ctx context.Context, request Request) (string, error) {
+func (f serviceFunc) Execute(ctx context.Context, request Request) (Result, error) {
 	return f(ctx, request)
 }
 
@@ -25,13 +27,13 @@ func TestOperatorCommandTakesPriorityOverBot(t *testing.T) {
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
 		nextCalls++
 		return platform.HandleResult{}, nil
-	}), serviceFunc(func(_ context.Context, request Request) (string, error) {
+	}), serviceFunc(func(_ context.Context, request Request) (Result, error) {
 		serviceCalls++
 		if request.Command != CommandStatus || request.ConversationID != "ops" || request.UserID != "u1" {
 			t.Fatalf("request = %+v", request)
 		}
-		return "ready", nil
-	}), []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
+		return Result{Reply: "ready"}, nil
+	}), testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func TestNonCommandInOperatorGroupContinuesToBot(t *testing.T) {
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
 		nextCalls++
 		return platform.HandleResult{Accepted: true, Verdict: "bot"}, nil
-	}), nil, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
+	}), nil, testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestDeniedOperatorCommandDoesNotReachBot(t *testing.T) {
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
 		t.Fatal("bot handler called")
 		return platform.HandleResult{}, nil
-	}), nil, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
+	}), nil, testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func TestUnknownOperatorCommandDoesNotReachBot(t *testing.T) {
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
 		t.Fatal("bot handler called")
 		return platform.HandleResult{}, nil
-	}), nil, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
+	}), nil, testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +96,7 @@ func TestOperatorCommandOutsideOperatorGroupContinuesToBot(t *testing.T) {
 	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
 		nextCalls++
 		return platform.HandleResult{Accepted: true, Verdict: "bot"}, nil
-	}), nil, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
+	}), nil, testSender{}, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandStatus}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,4 +104,56 @@ func TestOperatorCommandOutsideOperatorGroupContinuesToBot(t *testing.T) {
 	if err != nil || result.Verdict != "bot" || nextCalls != 1 {
 		t.Fatalf("result=%+v err=%v next_calls=%d", result, err, nextCalls)
 	}
+}
+
+func TestFollowupRunsAfterAcknowledgementAndSendsCompletion(t *testing.T) {
+	sender := &recordingSender{sent: make(chan messaging.OutboundMessage, 2)}
+	acknowledged := make(chan struct{})
+	router, err := NewRouter(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
+		t.Fatal("bot handler called")
+		return platform.HandleResult{}, nil
+	}), serviceFunc(func(context.Context, Request) (Result, error) {
+		return Result{Reply: "accepted", Followup: func(context.Context) (string, error) {
+			<-acknowledged
+			return "complete", nil
+		}}, nil
+	}), sender, []GroupPolicy{{ConversationID: "ops", Commands: []Command{CommandRestart}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := router.HandleInbound(context.Background(), messaging.InboundMessage{
+		ConversationID: "ops", UserID: "u", MessageID: "m", Text: "/restart",
+	})
+	if err != nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	first := <-sender.sent
+	if first.Text != "accepted" {
+		t.Fatalf("first reply = %+v", first)
+	}
+	close(acknowledged)
+	select {
+	case second := <-sender.sent:
+		if second.Text != "complete" || second.ConversationID != "ops" || second.ReplyToMessageID != "m" {
+			t.Fatalf("followup = %+v", second)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("followup was not sent")
+	}
+}
+
+type testSender struct{}
+
+func (testSender) Send(context.Context, messaging.OutboundMessage) error { return nil }
+
+type recordingSender struct {
+	mu   sync.Mutex
+	sent chan messaging.OutboundMessage
+}
+
+func (s *recordingSender) Send(_ context.Context, message messaging.OutboundMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent <- message
+	return nil
 }

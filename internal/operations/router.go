@@ -30,9 +30,14 @@ type Request struct {
 	MessageID      string
 }
 
+type Result struct {
+	Reply    string
+	Followup func(context.Context) (string, error)
+}
+
 // Service is intentionally narrower than the Web administration service.
 type Service interface {
-	Execute(context.Context, Request) (string, error)
+	Execute(context.Context, Request) (Result, error)
 }
 
 type GroupPolicy struct {
@@ -44,16 +49,20 @@ type GroupPolicy struct {
 type Router struct {
 	next    platform.Handler
 	service Service
+	sender  platform.Sender
 	groups  map[string]map[Command]struct{}
 }
 
 func (r *Router) SetService(service Service) { r.service = service }
 
-func NewRouter(next platform.Handler, service Service, policies []GroupPolicy) (*Router, error) {
+func NewRouter(next platform.Handler, service Service, sender platform.Sender, policies []GroupPolicy) (*Router, error) {
 	if next == nil {
 		return nil, errors.New("operator router next handler is required")
 	}
-	router := &Router{next: next, service: service, groups: make(map[string]map[Command]struct{}, len(policies))}
+	if len(policies) > 0 && sender == nil {
+		return nil, errors.New("operator router sender is required")
+	}
+	router := &Router{next: next, service: service, sender: sender, groups: make(map[string]map[Command]struct{}, len(policies))}
 	for _, policy := range policies {
 		conversationID := strings.TrimSpace(policy.ConversationID)
 		if conversationID == "" {
@@ -81,19 +90,47 @@ func (r *Router) HandleInbound(ctx context.Context, message messaging.InboundMes
 		return r.next.HandleInbound(ctx, message)
 	}
 	if !request.Command.Valid() {
-		return platform.HandleResult{Accepted: false, Verdict: "operator_command_unknown"}, nil
+		return r.respond(ctx, message, "未知管理命令。", false, "operator_command_unknown")
 	}
 	if _, ok := allowed[request.Command]; !ok {
-		return platform.HandleResult{Accepted: false, Verdict: "operator_command_denied"}, nil
+		return r.respond(ctx, message, "此管理群未启用该命令。", false, "operator_command_denied")
 	}
 	if r.service == nil {
-		return platform.HandleResult{Accepted: false, Verdict: "operator_unavailable"}, nil
+		return r.respond(ctx, message, "管理能力尚未就绪。", false, "operator_unavailable")
 	}
-	_, err := r.service.Execute(ctx, request)
+	result, err := r.service.Execute(ctx, request)
 	if err != nil {
-		return platform.HandleResult{Accepted: false, Verdict: "operator_failed"}, err
+		return r.respond(ctx, message, "管理命令执行失败："+err.Error(), false, "operator_failed")
+	}
+	if strings.TrimSpace(result.Reply) != "" {
+		if _, err := r.respond(ctx, message, result.Reply, true, "operator_command"); err != nil {
+			return platform.HandleResult{Accepted: false, Verdict: "operator_reply_failed"}, err
+		}
+	}
+	if result.Followup != nil {
+		go r.runFollowup(request, result.Followup)
 	}
 	return platform.HandleResult{Accepted: true, Verdict: "operator_command"}, nil
+}
+
+func (r *Router) respond(ctx context.Context, message messaging.InboundMessage, text string, accepted bool, verdict string) (platform.HandleResult, error) {
+	err := r.sender.Send(ctx, messaging.OutboundMessage{
+		ConversationID: message.ConversationID, ReplyToMessageID: message.MessageID, Text: text,
+	})
+	return platform.HandleResult{Accepted: accepted, Verdict: verdict}, err
+}
+
+func (r *Router) runFollowup(request Request, followup func(context.Context) (string, error)) {
+	text, err := followup(context.Background())
+	if err != nil {
+		text = "管理命令执行失败：" + err.Error()
+	}
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	_ = r.sender.Send(context.Background(), messaging.OutboundMessage{
+		ConversationID: request.ConversationID, ReplyToMessageID: request.MessageID, Text: text,
+	})
 }
 
 func Parse(message messaging.InboundMessage) (Request, bool) {

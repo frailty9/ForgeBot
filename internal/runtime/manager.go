@@ -50,6 +50,7 @@ type Status struct {
 	Version    uint64                     `json:"version"`
 	UpdatedAt  time.Time                  `json:"updated_at"`
 	Error      string                     `json:"error,omitempty"`
+	Paused     bool                       `json:"paused"`
 	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
 }
 
@@ -176,12 +177,14 @@ type Manager struct {
 	routeMu  sync.RWMutex
 	statusMu sync.RWMutex
 	current  atomic.Pointer[generation]
+	snapshot atomic.Pointer[config.Snapshot]
 	builder  Builder
 	status   Status
 	started  bool
 	runCtx   context.Context
 	errors   chan error
 	operator operations.Service
+	paused   atomic.Bool
 }
 
 type generation struct {
@@ -203,6 +206,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
+	manager.storeSnapshot(snapshot)
 	return manager, nil
 }
 
@@ -230,7 +234,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		}
 		policies = append(policies, operations.GroupPolicy{ConversationID: group.ConversationID, Notifications: group.Notifications, Commands: commands})
 	}
-	router, err := operations.NewRouter(engine, m.operator, policies)
+	router, err := operations.NewRouter(pausedHandler{manager: m, next: engine}, m.operator, sender, policies)
 	if err != nil {
 		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 		return nil, err
@@ -238,21 +242,37 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	return &generation{snapshot: snapshot, engine: engine, connectors: connectors, handler: router}, nil
 }
 
+type pausedHandler struct {
+	manager *Manager
+	next    platform.Handler
+}
+
+func (h pausedHandler) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
+	if h.manager.Paused() {
+		return platform.HandleResult{Accepted: false, Verdict: "paused"}, nil
+	}
+	return h.next.HandleInbound(ctx, message)
+}
+
 func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	generation := m.current.Load()
 	m.statusMu.RLock()
 	status := m.status
+	status.Paused = m.paused.Load()
 	m.statusMu.RUnlock()
 	if generation == nil {
 		return config.Snapshot{}, status
 	}
-	generation.mu.RLock()
-	snapshot := generation.snapshot
+	snapshot := *m.snapshot.Load()
 	if generation.connectors != nil {
 		status.Connectors = generation.connectors.Status()
 	}
-	generation.mu.RUnlock()
 	return snapshot, status
+}
+
+func (m *Manager) storeSnapshot(snapshot config.Snapshot) {
+	copy := snapshot
+	m.snapshot.Store(&copy)
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -279,6 +299,10 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 func (m *Manager) Errors() <-chan error { return m.errors }
+
+func (m *Manager) Paused() bool { return m.paused.Load() }
+
+func (m *Manager) SetPaused(paused bool) { m.paused.Store(paused) }
 
 func (m *Manager) SetOperatorService(service operations.Service) {
 	m.applyMu.Lock()
@@ -377,6 +401,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 		current.mu.Lock()
 		current.snapshot = persisted
 		current.mu.Unlock()
+		m.storeSnapshot(persisted)
 		if action == ActionUpdateLog && m.builder.ApplyLog != nil {
 			m.builder.ApplyLog(persisted.Runtime.Log)
 		}
@@ -550,6 +575,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		next.snapshot = published
 	}
 	old := m.current.Swap(next)
+	m.storeSnapshot(next.snapshot)
 	if m.started {
 		if connectorsChanged {
 			if old.watchCancel != nil {

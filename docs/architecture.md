@@ -46,6 +46,8 @@ must not depend on or expose the complete Web administration service.
   sender, independently constructed behind the platform interfaces.
 - `internal/operations`: protocol-neutral operator-group command policy and
   routing contract; command implementations are introduced separately.
+- `internal/operator`: restricted runtime operations exposed to operator groups;
+  it cannot access secrets or arbitrary administration/configuration methods.
 - `internal/bot`: orchestration layer.
 - `internal/gate`: group message buffering and deduplication.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for

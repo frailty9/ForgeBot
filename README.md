@@ -60,8 +60,12 @@ Operator groups are an allow-listed, protocol-neutral operations boundary.
 They reference an existing logical conversation and never inherit the full Web
 administration API. In an operator group, slash commands are intercepted before
 ordinary Bot handling; non-command messages continue through the normal Bot
-pipeline. Command implementations remain disabled until the Runtime lifecycle
-can safely execute them.
+pipeline.
+
+Available operator-group commands are `/status`, `/restart`, `/pause`,
+`/resume`, and `/gate on|off`. Restart and Gate updates acknowledge first, then
+report completion after the versioned runtime operation finishes. `/reload-docs`
+is reserved but reports unavailable until structured search is introduced.
 
 ## Quick Start
 

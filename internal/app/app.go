@@ -11,6 +11,7 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/logging"
+	"github.com/soleapi/forgebot/internal/operator"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	"github.com/soleapi/forgebot/internal/platform/onebot"
@@ -66,6 +67,11 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
+	operatorService, err := operator.New(runtimeManager, settingsStore)
+	if err != nil {
+		return nil, err
+	}
+	runtimeManager.SetOperatorService(operatorService)
 	return &App{
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		server: server.New(cfg, logger, runtimeManager, adminService),
