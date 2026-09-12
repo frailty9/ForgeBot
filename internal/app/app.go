@@ -11,6 +11,7 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/logging"
+	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
@@ -22,10 +23,11 @@ import (
 )
 
 type App struct {
-	cfg     config.Snapshot
-	logger  *slog.Logger
-	runtime *runtimecfg.Manager
-	server  *server.Server
+	cfg      config.Snapshot
+	logger   *slog.Logger
+	runtime  *runtimecfg.Manager
+	server   *server.Server
+	notifier *notification.Dispatcher
 }
 
 func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Controller) (*App, error) {
@@ -72,9 +74,14 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		return nil, err
 	}
 	runtimeManager.SetOperatorService(operatorService)
+	notifier, err := notification.NewDispatcher(runtimeManager, runtimeManager, logger, 64)
+	if err != nil {
+		return nil, err
+	}
+	runtimeManager.SetNotificationPublisher(notifier)
 	return &App{
 		cfg: cfg, logger: logger, runtime: runtimeManager,
-		server: server.New(cfg, logger, runtimeManager, adminService),
+		server: server.New(cfg, logger, runtimeManager, adminService), notifier: notifier,
 	}, nil
 }
 
@@ -137,16 +144,18 @@ func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	notificationCtx, stopNotifications := context.WithCancel(ctx)
+	defer stopNotifications()
+	go a.notifier.Run(notificationCtx)
 	if err := a.runtime.Start(ctx); err != nil {
 		return err
 	}
+	a.notifier.Publish(notification.Event{Level: notification.LevelInfo, Component: "runtime", Code: "started", Message: "ForgeBot 已启动。"})
 	errs := make(chan error, 1)
 	go func() { errs <- a.server.Start() }()
 	select {
 	case <-ctx.Done():
 		return a.shutdown()
-	case err := <-a.runtime.Errors():
-		return errors.Join(err, a.shutdown())
 	case err := <-errs:
 		return errors.Join(err, a.shutdown())
 	}

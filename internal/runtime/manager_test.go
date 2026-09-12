@@ -12,6 +12,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -273,6 +274,65 @@ type fakeConnectorSet struct {
 	failStart error
 	errors    chan error
 }
+
+func TestNotificationTargetsFollowCurrentRuntimeSnapshot(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Runtime.Operations.Groups = []config.OperatorGroupConfig{{
+		ConversationID: "local", Notifications: true, Commands: []string{"status"},
+	}}
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets := manager.NotificationTargets(); len(targets) != 1 || targets[0] != "local" {
+		t.Fatalf("targets = %v", targets)
+	}
+	next := snapshot
+	next.Version = 2
+	next.Runtime.Operations.Groups = []config.OperatorGroupConfig{{
+		ConversationID: "local", Notifications: false, Commands: []string{"status"},
+	}}
+	if _, err := manager.Apply(context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	if targets := manager.NotificationTargets(); len(targets) != 0 {
+		t.Fatalf("targets = %v", targets)
+	}
+}
+
+func TestConnectorFailureDegradesRuntimeAndPublishesEvent(t *testing.T) {
+	set := newFakeConnectorSet()
+	publisher := &recordingPublisher{events: make(chan notification.Event, 2)}
+	manager, err := NewManager(context.Background(), testSnapshot(), Builder{
+		ConnectorFactory: func(config.PlatformConfig) (platform.ConnectorSet, error) { return set, nil },
+		Notifications:    publisher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	set.errors <- errors.New("connection lost")
+	select {
+	case event := <-publisher.events:
+		if event.Level != notification.LevelError || event.Component != "runtime" || event.Code != string(ActionRestartConnectors) {
+			t.Fatalf("event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("notification was not published")
+	}
+	_, status := manager.Snapshot()
+	if status.State != StateDegraded || status.Error != "connection lost" {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+type recordingPublisher struct{ events chan notification.Event }
+
+func (p *recordingPublisher) Publish(event notification.Event) { p.events <- event }
 
 func newFakeConnectorSet() *fakeConnectorSet {
 	return &fakeConnectorSet{errors: make(chan error), running: false}

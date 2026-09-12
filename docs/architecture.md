@@ -48,6 +48,8 @@ must not depend on or expose the complete Web administration service.
   routing contract; command implementations are introduced separately.
 - `internal/operator`: restricted runtime operations exposed to operator groups;
   it cannot access secrets or arbitrary administration/configuration methods.
+- `internal/notification`: bounded, non-blocking operational event dispatch to
+  the currently configured notification-enabled operator groups.
 - `internal/bot`: orchestration layer.
 - `internal/gate`: group message buffering and deduplication.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for

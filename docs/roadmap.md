@@ -47,7 +47,8 @@ tool-call assembly remain follow-up work.
 
 - [x] Operator-group configuration, command allow-list, and routing contract.
 - [x] Runtime-backed status, restart, pause/resume, and Gate commands.
-- [ ] Structured-search reload command and system event notifications.
+- [x] Non-blocking runtime, Connector, and LLM failure notifications.
+- [ ] Structured-search reload command and richer domain notifications.
 - MCP registry.
 - Tool execution sandbox policy.
 - Metrics and tracing.

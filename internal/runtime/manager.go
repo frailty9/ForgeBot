@@ -15,6 +15,7 @@ import (
 	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -70,6 +71,7 @@ type Builder struct {
 	ClientFactory    ClientFactory
 	ConnectorFactory ConnectorFactory
 	ApplyLog         func(config.LogConfig)
+	Notifications    notification.Publisher
 }
 
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
@@ -300,6 +302,35 @@ func (m *Manager) Start(ctx context.Context) error {
 
 func (m *Manager) Errors() <-chan error { return m.errors }
 
+func (m *Manager) SetNotificationPublisher(publisher notification.Publisher) {
+	m.applyMu.Lock()
+	m.builder.Notifications = publisher
+	m.applyMu.Unlock()
+}
+
+func (m *Manager) NotificationTargets() []string {
+	snapshot, _ := m.Snapshot()
+	targets := make([]string, 0, len(snapshot.Runtime.Operations.Groups))
+	for _, group := range snapshot.Runtime.Operations.Groups {
+		if group.Notifications {
+			targets = append(targets, group.ConversationID)
+		}
+	}
+	return targets
+}
+
+func (m *Manager) SendNotification(ctx context.Context, conversationID, text string) error {
+	generation := m.acquire()
+	if generation == nil {
+		return errors.New("runtime is unavailable")
+	}
+	defer generation.mu.RUnlock()
+	if generation.connectors == nil {
+		return errors.New("runtime connectors are unavailable")
+	}
+	return generation.connectors.Send(ctx, messaging.OutboundMessage{ConversationID: conversationID, Text: text})
+}
+
 func (m *Manager) Paused() bool { return m.paused.Load() }
 
 func (m *Manager) SetPaused(paused bool) { m.paused.Store(paused) }
@@ -495,7 +526,17 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 		return platform.HandleResult{}, errors.New("runtime is unavailable")
 	}
 	defer generation.mu.RUnlock()
-	return generation.handler.HandleInbound(ctx, message)
+	result, err := generation.handler.HandleInbound(ctx, message)
+	if err != nil {
+		component := "bot"
+		if result.Verdict == "llm_failed" {
+			component = "llm"
+		} else if result.Verdict == "send_failed" || result.Verdict == "operator_reply_failed" {
+			component = "connector"
+		}
+		m.notify(notification.Event{Level: notification.LevelError, Component: component, Code: result.Verdict, Message: err.Error()})
+	}
+	return result, err
 }
 
 func (m *Manager) GateStats() gate.Stats {
@@ -605,6 +646,15 @@ func (m *Manager) setStatus(state State, action Action, version uint64, message 
 	m.statusMu.Lock()
 	m.status = Status{State: state, Action: action, Version: version, UpdatedAt: time.Now().UTC(), Error: message}
 	m.statusMu.Unlock()
+	if message != "" {
+		m.notify(notification.Event{Level: notification.LevelError, Component: "runtime", Code: string(action), Message: message})
+	}
+}
+
+func (m *Manager) notify(event notification.Event) {
+	if m.builder.Notifications != nil {
+		m.builder.Notifications.Publish(event)
+	}
 }
 
 func (m *Manager) readStatus() Status {

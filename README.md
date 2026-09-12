@@ -66,6 +66,9 @@ Available operator-group commands are `/status`, `/restart`, `/pause`,
 `/resume`, and `/gate on|off`. Restart and Gate updates acknowledge first, then
 report completion after the versioned runtime operation finishes. `/reload-docs`
 is reserved but reports unavailable until structured search is introduced.
+Runtime, Connector, and LLM failures are dispatched asynchronously to operator
+groups with `notifications: true`; delivery failure is logged and never blocks
+the component that emitted the event.
 
 ## Quick Start
 
