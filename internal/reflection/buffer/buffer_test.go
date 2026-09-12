@@ -39,6 +39,9 @@ func TestBufferAggregatesMultiMessageAdministratorAnswer(t *testing.T) {
 	if !b.ObserveAt(base.Add(2*time.Minute+30*time.Second), reanchor) {
 		t.Fatal("re-anchored continuation rejected")
 	}
+	if b.ObserveAt(base.Add(2*time.Minute+31*time.Second), reanchor) {
+		t.Fatal("duplicate answer accepted")
+	}
 	got := b.Ready(base.Add(6 * time.Minute))
 	if len(got) != 1 || len(got[0].Answers) != 3 || got[0].Question.MessageID != "q1" {
 		t.Fatalf("ready = %+v", got)
@@ -97,5 +100,23 @@ func TestBufferEnforcesGlobalCapacityAcrossConversations(t *testing.T) {
 	b.ObserveAt(base.Add(2*time.Second), msg("one", "u", "q3", "three", false))
 	if got := b.Stats(base.Add(3 * time.Second)); got.Messages != 2 || got.Questions != 2 {
 		t.Fatalf("global capacity stats = %+v", got)
+	}
+}
+
+func TestBufferEnforcesCapacityAfterRepeatedAnchor(t *testing.T) {
+	b, err := New(Config{ConversationIDs: []string{"support"}, MessageTTL: time.Hour, QuietWindow: time.Minute, MaxSessionDuration: time.Hour, MaxMessagesPerConversation: 2, MaxMessagesTotal: 2, MaxMessageChars: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)
+	b.ObserveAt(base, msg("support", "u", "q1", "question", false))
+	answer := msg("support", "admin", "a1", "answer", true)
+	answer.ReplyToMessageID = "q1"
+	b.ObserveAt(base.Add(time.Second), answer)
+	reanchor := msg("support", "admin", "a2", "more", true)
+	reanchor.ReplyToMessageID = "q1"
+	b.ObserveAt(base.Add(2*time.Second), reanchor)
+	if got := b.Stats(base.Add(3 * time.Second)); got.Messages > 2 {
+		t.Fatalf("capacity exceeded after repeated anchor: %+v", got)
 	}
 }

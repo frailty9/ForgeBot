@@ -226,18 +226,20 @@ type Manager struct {
 	operator        operations.Service
 	paused          atomic.Bool
 	reloadingSearch atomic.Bool
+	reflection      *reflectionbuffer.Buffer
 }
 
 type generation struct {
-	snapshot    config.Snapshot
-	engine      *bot.Engine
-	connectors  platform.ConnectorSet
-	handler     *operations.Router
-	retriever   searchcontract.Retriever
-	admins      administration.Resolver
-	reflection  *reflectionbuffer.Buffer
-	watchCancel context.CancelFunc
-	mu          sync.RWMutex
+	snapshot          config.Snapshot
+	engine            *bot.Engine
+	connectors        platform.ConnectorSet
+	handler           *operations.Router
+	retriever         searchcontract.Retriever
+	admins            administration.Resolver
+	reflection        *reflectionbuffer.Buffer
+	reflectionEnabled bool
+	watchCancel       context.CancelFunc
+	mu                sync.RWMutex
 }
 
 func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) (*Manager, error) {
@@ -293,26 +295,45 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 			ConversationID: administrator.ConversationID, UserID: administrator.UserID,
 		})
 	}
-	var reflection *reflectionbuffer.Buffer
-	if snapshot.Runtime.Reflection.Enabled {
-		reflection, err = reflectionbuffer.New(reflectionbuffer.Config{
-			ConversationIDs:            snapshot.Runtime.Reflection.ConversationIDs,
-			MessageTTL:                 snapshot.Runtime.Reflection.MessageTTL,
-			QuietWindow:                snapshot.Runtime.Reflection.QuietWindow,
-			MaxSessionDuration:         snapshot.Runtime.Reflection.MaxSessionDuration,
-			MaxMessagesPerConversation: snapshot.Runtime.Reflection.MaxMessagesPerConversation,
-			MaxMessagesTotal:           snapshot.Runtime.Reflection.MaxMessagesTotal,
-			MaxMessageChars:            snapshot.Runtime.Reflection.MaxMessageChars,
-		})
-		if err != nil {
-			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
-			return nil, fmt.Errorf("build reflection buffer: %w", err)
-		}
+	reflection, err := m.ensureReflectionBuffer(snapshot.Runtime.Reflection)
+	if err != nil {
+		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
+		return nil, fmt.Errorf("build reflection buffer: %w", err)
 	}
 	return &generation{
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
 		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
+		reflectionEnabled: snapshot.Runtime.Reflection.Enabled,
 	}, nil
+}
+
+func (m *Manager) ensureReflectionBuffer(cfg config.ReflectionConfig) (*reflectionbuffer.Buffer, error) {
+	if m.reflection != nil {
+		return m.reflection, nil
+	}
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	b, err := reflectionbuffer.New(reflectionbuffer.Config{
+		ConversationIDs: cfg.ConversationIDs, MessageTTL: cfg.MessageTTL,
+		QuietWindow: cfg.QuietWindow, MaxSessionDuration: cfg.MaxSessionDuration,
+		MaxMessagesPerConversation: cfg.MaxMessagesPerConversation,
+		MaxMessagesTotal:           cfg.MaxMessagesTotal, MaxMessageChars: cfg.MaxMessageChars,
+	})
+	if err != nil {
+		return nil, err
+	}
+	m.reflection = b
+	return b, nil
+}
+
+func reflectionBufferConfig(cfg config.ReflectionConfig) reflectionbuffer.Config {
+	return reflectionbuffer.Config{
+		ConversationIDs: cfg.ConversationIDs, MessageTTL: cfg.MessageTTL,
+		QuietWindow: cfg.QuietWindow, MaxSessionDuration: cfg.MaxSessionDuration,
+		MaxMessagesPerConversation: cfg.MaxMessagesPerConversation,
+		MaxMessagesTotal:           cfg.MaxMessagesTotal, MaxMessageChars: cfg.MaxMessageChars,
+	}
 }
 
 type pausedHandler struct {
@@ -634,7 +655,7 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 	}
 	defer generation.mu.RUnlock()
 	message = generation.admins.Mark(message)
-	if generation.reflection != nil {
+	if generation.reflectionEnabled && generation.reflection != nil {
 		generation.reflection.Observe(message)
 	}
 	result, err := generation.handler.HandleInbound(ctx, message)
@@ -695,6 +716,7 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 }
 
 func (m *Manager) publish(_ context.Context, current, next *generation, persist func() (config.Snapshot, error)) (config.Snapshot, error) {
+	previousReflection := m.reflection
 	connectorsChanged := current.connectors != next.connectors
 	if connectorsChanged && m.started {
 		m.routeMu.Lock()
@@ -703,6 +725,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		stopErr := current.connectors.Stop(stopCtx)
 		cancel()
 		if stopErr != nil {
+			m.reflection = previousReflection
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, stopErr
 		}
@@ -710,8 +733,10 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 			restoreErr := current.connectors.Start(m.runCtx, m)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			if restoreErr != nil {
+				m.reflection = previousReflection
 				return config.Snapshot{}, errors.Join(err, fmt.Errorf("restore previous connectors: %w", restoreErr))
 			}
+			m.reflection = previousReflection
 			return config.Snapshot{}, err
 		}
 	}
@@ -720,11 +745,20 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		var err error
 		published, err = persist()
 		if err != nil {
+			m.reflection = previousReflection
 			m.rollbackConnectors(current, next, connectorsChanged)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, err
 		}
 		next.snapshot = published
+	}
+	if next.reflectionEnabled && m.reflection != nil {
+		if err := m.reflection.UpdateConfig(reflectionBufferConfig(next.snapshot.Runtime.Reflection)); err != nil {
+			m.reflection = previousReflection
+			m.rollbackConnectors(current, next, connectorsChanged)
+			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+			return config.Snapshot{}, err
+		}
 	}
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)

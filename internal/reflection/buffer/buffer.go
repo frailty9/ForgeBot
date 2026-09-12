@@ -65,11 +65,40 @@ type Buffer struct {
 	sessions      map[string]*session
 }
 
+// UpdateConfig applies a validated policy to the existing observation window.
+// Messages and open sessions are retained; capacity and conversation changes
+// take effect immediately and may evict the oldest entries.
+func (b *Buffer) UpdateConfig(cfg Config) error {
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
+	conversations := make(map[string]struct{}, len(cfg.ConversationIDs))
+	for _, id := range cfg.ConversationIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return ErrInvalidConfig
+		}
+		if _, exists := conversations[id]; exists {
+			return ErrInvalidConfig
+		}
+		conversations[id] = struct{}{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.conversations = conversations
+	b.messageTTL = cfg.MessageTTL
+	b.quietWindow = cfg.QuietWindow
+	b.maxDuration = cfg.MaxSessionDuration
+	b.maxPerGroup = cfg.MaxMessagesPerConversation
+	b.maxTotal = cfg.MaxMessagesTotal
+	b.maxChars = cfg.MaxMessageChars
+	b.enforceCapacityLocked()
+	return nil
+}
+
 func New(cfg Config) (*Buffer, error) {
-	if cfg.MessageTTL <= 0 || cfg.QuietWindow <= 0 || cfg.MaxSessionDuration <= 0 ||
-		cfg.MaxMessagesPerConversation <= 0 || cfg.MaxMessagesTotal <= 0 || cfg.MaxMessageChars <= 0 ||
-		len(cfg.ConversationIDs) == 0 || cfg.QuietWindow > cfg.MaxSessionDuration {
-		return nil, ErrInvalidConfig
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
 	}
 	conversations := make(map[string]struct{}, len(cfg.ConversationIDs))
 	for _, id := range cfg.ConversationIDs {
@@ -88,6 +117,15 @@ func New(cfg Config) (*Buffer, error) {
 		maxTotal: cfg.MaxMessagesTotal, maxChars: cfg.MaxMessageChars,
 		questions: make(map[string]question), sessions: make(map[string]*session),
 	}, nil
+}
+
+func validateConfig(cfg Config) error {
+	if cfg.MessageTTL <= 0 || cfg.QuietWindow <= 0 || cfg.MaxSessionDuration <= 0 ||
+		cfg.MaxMessagesPerConversation <= 0 || cfg.MaxMessagesTotal <= 0 || cfg.MaxMessageChars <= 0 ||
+		len(cfg.ConversationIDs) == 0 || cfg.QuietWindow > cfg.MaxSessionDuration {
+		return ErrInvalidConfig
+	}
+	return nil
 }
 
 // Observe uses the message timestamp when present and is intended for tests or
@@ -124,7 +162,7 @@ func (b *Buffer) ObserveAt(now time.Time, message messaging.InboundMessage) bool
 	if strings.TrimSpace(message.MessageID) == "" {
 		return false
 	}
-	if _, exists := b.questions[key]; exists {
+	if b.messageSeenLocked(conversationID, message.MessageID) {
 		return false
 	}
 	b.questions[key] = question{message: message, seenAt: now}
@@ -134,7 +172,7 @@ func (b *Buffer) ObserveAt(now time.Time, message messaging.InboundMessage) bool
 }
 
 func (b *Buffer) observeAdministratorLocked(now time.Time, message messaging.InboundMessage) bool {
-	if strings.TrimSpace(message.UserID) == "" {
+	if strings.TrimSpace(message.UserID) == "" || strings.TrimSpace(message.MessageID) == "" || b.messageSeenLocked(message.ConversationID, message.MessageID) {
 		return false
 	}
 	if replyID := strings.TrimSpace(message.ReplyToMessageID); replyID != "" {
@@ -144,6 +182,7 @@ func (b *Buffer) observeAdministratorLocked(now time.Time, message messaging.Inb
 			if existing, alreadyOpen := b.sessions[key]; alreadyOpen && !existing.closed {
 				existing.Answers = append(existing.Answers, message)
 				existing.LastAt = now
+				b.enforceCapacityLocked()
 				return true
 			}
 			b.sessions[key] = &session{AnswerSession: AnswerSession{
@@ -174,6 +213,27 @@ func (b *Buffer) observeAdministratorLocked(now time.Time, message messaging.Inb
 	latest.LastAt = now
 	b.enforceCapacityLocked()
 	return true
+}
+
+func (b *Buffer) messageSeenLocked(conversationID, messageID string) bool {
+	key := messageKey(conversationID, messageID)
+	if _, exists := b.questions[key]; exists {
+		return true
+	}
+	for _, candidate := range b.sessions {
+		if candidate.Question.ConversationID != conversationID {
+			continue
+		}
+		if candidate.Question.MessageID == messageID {
+			return true
+		}
+		for _, answer := range candidate.Answers {
+			if answer.MessageID == messageID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Ready returns closed answer sessions without removing them. Call Complete
