@@ -10,6 +10,90 @@ import (
 	"github.com/soleapi/forgebot/internal/llm"
 )
 
+func (r ReflectionConfig) MarshalJSON() ([]byte, error) {
+	type encoded struct {
+		Enabled                    bool     `json:"enabled"`
+		Mode                       string   `json:"mode"`
+		ConversationIDs            []string `json:"conversation_ids"`
+		ScanInterval               string   `json:"scan_interval"`
+		MessageTTL                 string   `json:"message_ttl"`
+		QuietWindow                string   `json:"quiet_window"`
+		MaxSessionDuration         string   `json:"max_session_duration"`
+		MaxMessagesPerConversation int      `json:"max_messages_per_conversation"`
+		MaxMessagesTotal           int      `json:"max_messages_total"`
+		MaxMessageChars            int      `json:"max_message_chars"`
+		MaxPairsPerScan            int      `json:"max_pairs_per_scan"`
+		MinConfidence              float64  `json:"min_confidence"`
+		ExtraDirectory             string   `json:"extra_directory"`
+	}
+	return json.Marshal(encoded{r.Enabled, r.Mode, r.ConversationIDs, r.ScanInterval.String(), r.MessageTTL.String(), r.QuietWindow.String(), r.MaxSessionDuration.String(), r.MaxMessagesPerConversation, r.MaxMessagesTotal, r.MaxMessageChars, r.MaxPairsPerScan, r.MinConfidence, r.ExtraDirectory})
+}
+
+func (r *ReflectionConfig) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		Enabled                    *bool           `json:"enabled"`
+		Mode                       *string         `json:"mode"`
+		ConversationIDs            *[]string       `json:"conversation_ids"`
+		ScanInterval               json.RawMessage `json:"scan_interval"`
+		MessageTTL                 json.RawMessage `json:"message_ttl"`
+		QuietWindow                json.RawMessage `json:"quiet_window"`
+		MaxSessionDuration         json.RawMessage `json:"max_session_duration"`
+		MaxMessagesPerConversation *int            `json:"max_messages_per_conversation"`
+		MaxMessagesTotal           *int            `json:"max_messages_total"`
+		MaxMessageChars            *int            `json:"max_message_chars"`
+		MaxPairsPerScan            *int            `json:"max_pairs_per_scan"`
+		MinConfidence              *float64        `json:"min_confidence"`
+		ExtraDirectory             *string         `json:"extra_directory"`
+	}
+	defaults := DefaultRuntime().Reflection
+	var value raw
+	if err := decodeStrictJSON(data, &value); err != nil {
+		return err
+	}
+	*r = defaults
+	if value.Enabled != nil {
+		r.Enabled = *value.Enabled
+	}
+	if value.Mode != nil {
+		r.Mode = *value.Mode
+	}
+	if value.ConversationIDs != nil {
+		r.ConversationIDs = append([]string(nil), (*value.ConversationIDs)...)
+	}
+	var err error
+	if r.ScanInterval, err = decodeDuration(value.ScanInterval, defaults.ScanInterval); err != nil {
+		return fmt.Errorf("scan_interval: %w", err)
+	}
+	if r.MessageTTL, err = decodeDuration(value.MessageTTL, defaults.MessageTTL); err != nil {
+		return fmt.Errorf("message_ttl: %w", err)
+	}
+	if r.QuietWindow, err = decodeDuration(value.QuietWindow, defaults.QuietWindow); err != nil {
+		return fmt.Errorf("quiet_window: %w", err)
+	}
+	if r.MaxSessionDuration, err = decodeDuration(value.MaxSessionDuration, defaults.MaxSessionDuration); err != nil {
+		return fmt.Errorf("max_session_duration: %w", err)
+	}
+	if value.MaxMessagesPerConversation != nil {
+		r.MaxMessagesPerConversation = *value.MaxMessagesPerConversation
+	}
+	if value.MaxMessagesTotal != nil {
+		r.MaxMessagesTotal = *value.MaxMessagesTotal
+	}
+	if value.MaxMessageChars != nil {
+		r.MaxMessageChars = *value.MaxMessageChars
+	}
+	if value.MaxPairsPerScan != nil {
+		r.MaxPairsPerScan = *value.MaxPairsPerScan
+	}
+	if value.MinConfidence != nil {
+		r.MinConfidence = *value.MinConfidence
+	}
+	if value.ExtraDirectory != nil {
+		r.ExtraDirectory = *value.ExtraDirectory
+	}
+	return nil
+}
+
 func (g GateConfig) MarshalJSON() ([]byte, error) {
 	type encodedGateConfig struct {
 		Enabled        bool   `json:"enabled"`

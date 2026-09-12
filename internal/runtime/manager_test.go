@@ -15,6 +15,7 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -144,6 +145,33 @@ func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *te
 	message := generation.admins.Mark(messaging.InboundMessage{ConversationID: "local", UserID: "admin"})
 	if !message.Administrator {
 		t.Fatal("updated administrator resolver is not active")
+	}
+}
+
+func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
+	snapshot := testSnapshot()
+	root := t.TempDir()
+	snapshot.Runtime.Search.Enabled = true
+	snapshot.Runtime.Search.DocumentRoot = root
+	snapshot.Runtime.Reflection.Enabled = true
+	snapshot.Runtime.Reflection.Mode = "auto"
+	snapshot.Runtime.Platforms.Groups[0].ID = "c"
+	snapshot.Runtime.Reflection.ConversationIDs = []string{"c"}
+	manager, err := NewManager(context.Background(), snapshot, Builder{
+		Sender: registeredSender(t).registry,
+		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) {
+			return &runtimeSearch{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "member", MessageID: "q1", Text: "Question"}); err != nil {
+		t.Fatal(err)
+	}
+	generation := manager.current.Load()
+	if generation.reflection == nil || generation.reflection.Stats(time.Now()).Questions != 1 {
+		t.Fatalf("reflection stats = %+v", generation.reflection.Stats(time.Now()))
 	}
 }
 

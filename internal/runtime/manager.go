@@ -19,6 +19,7 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
+	reflectionbuffer "github.com/soleapi/forgebot/internal/reflection/buffer"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -234,6 +235,7 @@ type generation struct {
 	handler     *operations.Router
 	retriever   searchcontract.Retriever
 	admins      administration.Resolver
+	reflection  *reflectionbuffer.Buffer
 	watchCancel context.CancelFunc
 	mu          sync.RWMutex
 }
@@ -291,9 +293,25 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 			ConversationID: administrator.ConversationID, UserID: administrator.UserID,
 		})
 	}
+	var reflection *reflectionbuffer.Buffer
+	if snapshot.Runtime.Reflection.Enabled {
+		reflection, err = reflectionbuffer.New(reflectionbuffer.Config{
+			ConversationIDs:            snapshot.Runtime.Reflection.ConversationIDs,
+			MessageTTL:                 snapshot.Runtime.Reflection.MessageTTL,
+			QuietWindow:                snapshot.Runtime.Reflection.QuietWindow,
+			MaxSessionDuration:         snapshot.Runtime.Reflection.MaxSessionDuration,
+			MaxMessagesPerConversation: snapshot.Runtime.Reflection.MaxMessagesPerConversation,
+			MaxMessagesTotal:           snapshot.Runtime.Reflection.MaxMessagesTotal,
+			MaxMessageChars:            snapshot.Runtime.Reflection.MaxMessageChars,
+		})
+		if err != nil {
+			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
+			return nil, fmt.Errorf("build reflection buffer: %w", err)
+		}
+	}
 	return &generation{
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
-		retriever: retriever, admins: administration.New(adminIdentities),
+		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
 	}, nil
 }
 
@@ -616,6 +634,9 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 	}
 	defer generation.mu.RUnlock()
 	message = generation.admins.Mark(message)
+	if generation.reflection != nil {
+		generation.reflection.Observe(message)
+	}
 	result, err := generation.handler.HandleInbound(ctx, message)
 	if err != nil {
 		component := "bot"
