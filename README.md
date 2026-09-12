@@ -16,6 +16,9 @@ retrieval, tools, and LLM providers through explicit interfaces.
 - Platform sender registry.
 - OneBot 11 HTTP webhook adapter with outbound `send_msg` support.
 - Reusable group message gate with buffering, deduplication, and stats.
+- On-demand local MD/MDX structured search with atomic hot reload.
+- A restricted, allow-listed tool executor; ordinary messages do not search
+  unless the model requests `search_docs`.
 - A deliberately small LLM boundary supporting Anthropic Messages, OpenAI
   Responses, and OpenAI Chat Completions, including normalized JSON and SSE
   clients.
@@ -70,12 +73,53 @@ ordinary Bot handling; non-command messages continue through the normal Bot
 pipeline.
 
 Available operator-group commands are `/status`, `/restart`, `/pause`,
-`/resume`, and `/gate on|off`. Restart and Gate updates acknowledge first, then
-report completion after the versioned runtime operation finishes. `/reload-docs`
-is reserved but reports unavailable until structured search is introduced.
+`/resume`, `/gate on|off`, and `/reload-docs`. Restart, Gate, and document
+reload operations acknowledge first, then report completion after the runtime
+operation finishes.
 Runtime, Connector, and LLM failures are dispatched asynchronously to operator
 groups with `notifications: true`; delivery failure is logged and never blocks
 the component that emitted the event.
+
+## Local Document Search
+
+Search is disabled by default. Enable it in runtime JSON and set an absolute
+local document root:
+
+```json
+{
+  "search": {
+    "enabled": true,
+    "policy": "on_demand",
+    "backend": "structured",
+    "document_root": "D:/Project/ForgeBot/forgebot-docs",
+    "extensions": [".md", ".mdx"],
+    "default_results": 5,
+    "max_results": 8,
+    "min_match_ratio": 0.35,
+    "query_timeout": "750ms",
+    "build_timeout": "20s",
+    "max_queries_per_turn": 1,
+    "max_context_chars": 12000,
+    "max_section_chars": 8000,
+    "max_file_bytes": 4194304,
+    "max_total_bytes": 268435456,
+    "max_files": 10000
+  }
+}
+```
+
+Ordinary questions go to the LLM without a preliminary index query. The LLM
+may request the read-only `search_docs` tool when project facts are needed;
+the default budget permits one search and at most two LLM requests per turn.
+Use `/search <query>` to skip that decision and search immediately. Search
+results enter the prompt as bounded, untrusted reference data with source
+paths. Vector and hybrid backends are intentionally unavailable at this stage.
+
+Changing Search configuration builds a complete candidate index before the
+new runtime JSON is persisted. A failed build leaves the old configuration and
+index active. `/reload-docs` and the admin reload endpoint rebuild the current
+index atomically without changing the configuration version or restarting
+platform connectors.
 
 ## Quick Start
 
@@ -156,6 +200,7 @@ PUT    /v1/admin/config
 POST   /v1/admin/config/rollback
 GET    /v1/admin/runtime
 POST   /v1/admin/runtime/restart
+POST   /v1/admin/search/reload
 GET    /v1/admin/llm/api-key
 PUT    /v1/admin/llm/api-key
 DELETE /v1/admin/llm/api-key

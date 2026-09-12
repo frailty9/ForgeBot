@@ -16,7 +16,8 @@ external platform
 ```
 
 Runtime configuration flows through `settings.Store -> runtime.Manager`. A
-generation owns its Engine, LLM client, Connector Set, and operator routing.
+generation owns its Engine, LLM client, Retriever, restricted Tool Executor,
+Connector Set, and operator routing.
 Candidates are built before persistence; only a successful configuration commit
 is published. Platform changes stop the old Connector Set, start the candidate,
 and restore the old set if startup or persistence fails. Existing Engine
@@ -54,6 +55,13 @@ must not depend on or expose the complete Web administration service.
 - `internal/gate`: group message buffering and deduplication.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for
   Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions.
+- `internal/search`: protocol-neutral retrieval contract and bounded,
+  injection-resistant context rendering.
+- `internal/search/structured`: MD/MDX parsing, BM25F in-memory indexing,
+  deterministic ranking, and atomic index reload.
+- `internal/tooling`: explicit tool allow-list and normalized execution result.
+- `internal/tooling/searchdocs`: read-only adapter from the tool boundary to a
+  configured Retriever.
 
 ## Design Rules
 
@@ -66,6 +74,31 @@ must not depend on or expose the complete Web administration service.
 6. The LLM boundary supports exactly three wire protocols:
    `anthropic_messages`, `openai_responses`, and `openai_completions`.
    Vendors are configuration targets, not new protocol abstractions.
+7. Retrieval is on-demand. Normal messages are never prefetched from the
+   document index; an explicit `/search` or an LLM `search_docs` call triggers
+   retrieval.
+8. Retrieved documents are untrusted data, never instructions. Tool execution
+   is bounded and allow-listed; it has no implicit Shell, secret, network, or
+   configuration access.
+
+## Search Lifecycle
+
+Structured search parses local `.md` and `.mdx` files into heading-aware
+sections and builds an immutable in-memory BM25F index. Title, heading,
+frontmatter, path, code, and body fields receive distinct weights. Query term
+coverage filters weak results, and ties are resolved by stable path and section
+identity ordering.
+
+Search configuration belongs to versioned runtime JSON. A configuration update
+builds its candidate index before persistence and generation publication. Other
+runtime changes and explicit Bot restart reuse the current Retriever. A document
+reload builds beside the active immutable index, then atomically swaps the index
+snapshot; failed reloads retain the old snapshot and publish a bounded
+operational event.
+
+`search.Retriever` is independent of the structured implementation. Vector and
+hybrid retrieval may implement the same contract later, but their dependencies,
+configuration values, and index files are deliberately absent today.
 
 ## LLM Client Contract
 
@@ -88,9 +121,11 @@ ForgeBot protocol surface.
    streaming edit behavior.
 2. Personal QQ / OneBot adapter: reuse DTOs, HMAC-SHA1 verification, segment
    parsing, reply segment construction, and HTTP send API.
-3. Structured search: migrate MuseBot `structuredsearch` as `internal/search`.
-4. LLM protocol clients: implemented behind `internal/llm.Client`; retry
-   policy and richer tool-call streaming are follow-up work.
+3. Structured search: implemented as an isolated Retriever with no MuseBot
+   global configuration or runtime dependencies.
+4. LLM protocol clients: implemented behind `internal/llm.Client`, including
+   non-streaming tool-call round trips; retry policy and streamed tool-call
+   assembly remain follow-up work.
 
 Platform lifecycle contract:
 

@@ -24,10 +24,12 @@
 
 ## Phase 3: Local Document Intelligence
 
-- Migrate MD/MDX structured search.
-- Configurable document root.
-- Hot reload and webhook reload.
-- Context builder for LLM prompts.
+- [x] Isolated MD/MDX parsing and structured BM25F search.
+- [x] Configurable document root and bounded indexing budgets.
+- [x] Atomic hot reload through operator command and authenticated admin API.
+- [x] On-demand LLM tool retrieval and bounded untrusted context builder.
+- [ ] Vector and hybrid retrieval remain suspended until document scale
+  justifies embedding infrastructure.
 
 ## Phase 4: LLM Provider Layer
 
@@ -40,15 +42,15 @@
 - [x] Provider-independent request/response contract.
 
 The current clients cover request serialization, authentication, normalized
-non-streaming responses, and SSE text deltas. Retry policy and richer streamed
-tool-call assembly remain follow-up work.
+non-streaming responses, complete non-streaming tool-call round trips, and SSE
+text deltas. Retry policy and streamed tool-call assembly remain follow-up work.
 
 ## Phase 5: Tools and Operations
 
 - [x] Operator-group configuration, command allow-list, and routing contract.
 - [x] Runtime-backed status, restart, pause/resume, and Gate commands.
 - [x] Non-blocking runtime, Connector, and LLM failure notifications.
-- [ ] Structured-search reload command and richer domain notifications.
+- [x] Structured-search reload command, status, and domain notifications.
 - MCP registry.
 - Tool execution sandbox policy.
 - Metrics and tracing.
