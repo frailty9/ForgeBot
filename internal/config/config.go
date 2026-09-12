@@ -575,6 +575,18 @@ func (c ReflectionConfig) Validate(search SearchConfig, platforms PlatformConfig
 	if c.Enabled && strings.TrimSpace(c.ExtraDirectory) != "extra" {
 		problems = append(problems, "reflection.extra_directory must be extra")
 	}
+	if c.Enabled {
+		hasMarkdown := false
+		for _, extension := range search.Extensions {
+			if strings.EqualFold(strings.TrimSpace(extension), ".md") {
+				hasMarkdown = true
+				break
+			}
+		}
+		if !hasMarkdown {
+			problems = append(problems, "reflection requires search.extensions to include .md")
+		}
+	}
 	knownConversations := make(map[string]struct{}, len(platforms.Groups))
 	for _, group := range platforms.Groups {
 		knownConversations[strings.TrimSpace(group.ID)] = struct{}{}

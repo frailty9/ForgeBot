@@ -24,15 +24,15 @@ type Config struct {
 }
 
 type Stats struct {
-	Running      bool
-	Scans        uint64
-	Skipped      uint64
-	Processed    uint64
-	Retried      uint64
-	LastStarted  time.Time
-	LastFinished time.Time
-	LastError    string
-	Ready        int
+	Running      bool      `json:"running"`
+	Scans        uint64    `json:"scans"`
+	Skipped      uint64    `json:"skipped"`
+	Processed    uint64    `json:"processed"`
+	Retried      uint64    `json:"retried"`
+	LastStarted  time.Time `json:"last_started,omitempty"`
+	LastFinished time.Time `json:"last_finished,omitempty"`
+	LastError    string    `json:"last_error,omitempty"`
+	Ready        int       `json:"ready"`
 }
 
 type Scanner struct {

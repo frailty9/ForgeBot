@@ -175,6 +175,55 @@ func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
 	}
 }
 
+func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
+	snapshot := testSnapshot()
+	root := t.TempDir()
+	snapshot.Runtime.Search.Enabled = true
+	snapshot.Runtime.Search.DocumentRoot = root
+	snapshot.Runtime.Reflection.Enabled = true
+	snapshot.Runtime.Reflection.Mode = "auto"
+	snapshot.Runtime.Platforms.Groups[0].ID = "c"
+	snapshot.Runtime.Reflection.ConversationIDs = []string{"c"}
+	snapshot.Runtime.Reflection.QuietWindow = time.Millisecond
+	snapshot.Runtime.Reflection.MaxSessionDuration = time.Second
+	snapshot.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "c", UserID: "admin"}}
+	store := configuredSecrets(t, "key")
+	search := &runtimeSearch{status: searchcontract.Status{Enabled: true, State: searchcontract.StateReady}}
+	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
+		return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":true,"title":"Key rotation","question":"How do I rotate a key?","answer":"Create a replacement key and revoke the old one.","tags":["api-key"],"confidence":0.98,"reason":"reusable"}`}, nil
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{
+		Sender: registeredSender(t).registry, Secrets: store, ClientFactory: clientFactory,
+		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) { return search, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "member", MessageID: "q1", Text: "How do I rotate a key?"}); err != nil {
+		t.Fatal(err)
+	}
+	answer := messaging.InboundMessage{ConversationID: "c", UserID: "admin", MessageID: "a1", ReplyToMessageID: "q1", Text: "Create a replacement key and revoke the old one."}
+	if _, err := manager.HandleInbound(context.Background(), answer); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	result, err := manager.ScanReflection(context.Background())
+	if err != nil || result.Processed != 1 || result.Retried != 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	entries, err := filepath.Glob(filepath.Join(root, "extra", "*.md"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if search.reloads != 1 {
+		t.Fatalf("reloads=%d", search.reloads)
+	}
+	_, status := manager.Snapshot()
+	if !status.Reflection.Active || status.Reflection.Pipeline.Published != 1 {
+		t.Fatalf("reflection status=%+v", status.Reflection)
+	}
+}
+
 func TestManagedSecretReplacementSwitchesOnlyAfterValidation(t *testing.T) {
 	ctx := context.Background()
 	store := configuredSecrets(t, "old-key")
@@ -437,6 +486,19 @@ func (f *recordingFactory) New(cfg llm.ClientConfig) (llm.Client, error) {
 type responseClient struct {
 	protocol llm.Protocol
 	text     string
+}
+
+type reflectionResponseClient struct {
+	protocol llm.Protocol
+	response string
+}
+
+func (c *reflectionResponseClient) Protocol() llm.Protocol { return c.protocol }
+func (c *reflectionResponseClient) Complete(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{Text: c.response}, nil
+}
+func (c *reflectionResponseClient) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, error) {
+	return nil, nil
 }
 
 func (c *responseClient) Protocol() llm.Protocol { return c.protocol }

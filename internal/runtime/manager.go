@@ -30,7 +30,11 @@ import (
 	"github.com/soleapi/forgebot/internal/tooling/searchdocs"
 )
 
-var ErrStaticConfigChanged = errors.New("static configuration requires a process restart")
+var (
+	ErrStaticConfigChanged   = errors.New("static configuration requires a process restart")
+	ErrReflectionDisabled    = errors.New("reflection is disabled")
+	ErrReflectionUnavailable = errors.New("reflection scanner is unavailable")
+)
 
 type State string
 
@@ -64,6 +68,22 @@ type Status struct {
 	Paused     bool                       `json:"paused"`
 	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
 	Search     searchcontract.Status      `json:"search"`
+	Reflection ReflectionStatus           `json:"reflection"`
+}
+
+type ReflectionStatus struct {
+	Enabled  bool                     `json:"enabled"`
+	Active   bool                     `json:"active"`
+	Buffer   reflectionbuffer.Stats   `json:"buffer"`
+	Scanner  reflectionscanner.Stats  `json:"scanner"`
+	Pipeline reflectionpipeline.Stats `json:"pipeline"`
+}
+
+type ReflectionScanResult struct {
+	Processed int              `json:"processed"`
+	Retried   int              `json:"retried"`
+	Skipped   bool             `json:"skipped"`
+	Status    ReflectionStatus `json:"status"`
 }
 
 type ApplyResult struct {
@@ -218,35 +238,35 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 }
 
 type Manager struct {
-	applyMu           sync.Mutex
-	routeMu           sync.RWMutex
-	statusMu          sync.RWMutex
-	current           atomic.Pointer[generation]
-	snapshot          atomic.Pointer[config.Snapshot]
-	builder           Builder
-	status            Status
-	started           bool
-	runCtx            context.Context
-	errors            chan error
-	operator          operations.Service
-	paused            atomic.Bool
-	reloadingSearch   atomic.Bool
-	reflection        *reflectionbuffer.Buffer
-	reflectionScanner *reflectionscanner.Scanner
+	applyMu         sync.Mutex
+	routeMu         sync.RWMutex
+	statusMu        sync.RWMutex
+	current         atomic.Pointer[generation]
+	snapshot        atomic.Pointer[config.Snapshot]
+	builder         Builder
+	status          Status
+	started         bool
+	runCtx          context.Context
+	errors          chan error
+	operator        operations.Service
+	paused          atomic.Bool
+	reloadingSearch atomic.Bool
+	reflection      *reflectionbuffer.Buffer
 }
 
 type generation struct {
-	snapshot          config.Snapshot
-	engine            *bot.Engine
-	connectors        platform.ConnectorSet
-	handler           *operations.Router
-	retriever         searchcontract.Retriever
-	admins            administration.Resolver
-	reflection        *reflectionbuffer.Buffer
-	reflectionEnabled bool
-	reflectionScanner *reflectionscanner.Scanner
-	watchCancel       context.CancelFunc
-	mu                sync.RWMutex
+	snapshot           config.Snapshot
+	engine             *bot.Engine
+	connectors         platform.ConnectorSet
+	handler            *operations.Router
+	retriever          searchcontract.Retriever
+	admins             administration.Resolver
+	reflection         *reflectionbuffer.Buffer
+	reflectionEnabled  bool
+	reflectionScanner  *reflectionscanner.Scanner
+	reflectionPipeline *reflectionpipeline.Processor
+	watchCancel        context.CancelFunc
+	mu                 sync.RWMutex
 }
 
 func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) (*Manager, error) {
@@ -259,6 +279,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
+	manager.reflection = generation.reflection
 	manager.storeSnapshot(snapshot)
 	return manager, nil
 }
@@ -308,14 +329,15 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		return nil, fmt.Errorf("build reflection buffer: %w", err)
 	}
 	var reflectionScanner *reflectionscanner.Scanner
+	var reflectionPipeline *reflectionpipeline.Processor
 	if snapshot.Runtime.Reflection.Enabled && reflection != nil {
-		client, clientErr := m.buildReflectionClient(ctx, snapshot, "", "")
+		client, clientErr := m.buildReflectionClient(ctx, snapshot, secretRef, secretValue)
 		if clientErr != nil {
 			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 			return nil, clientErr
 		}
 		if client != nil {
-			reflectionScanner, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, retriever)
+			reflectionScanner, reflectionPipeline, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, retriever)
 		}
 		if err != nil {
 			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
@@ -325,31 +347,34 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	return &generation{
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
 		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
-		reflectionEnabled: snapshot.Runtime.Reflection.Enabled,
-		reflectionScanner: reflectionScanner,
+		reflectionEnabled:  snapshot.Runtime.Reflection.Enabled,
+		reflectionScanner:  reflectionScanner,
+		reflectionPipeline: reflectionPipeline,
 	}, nil
 }
 
-func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, retriever searchcontract.Retriever) (*reflectionscanner.Scanner, error) {
+func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, retriever searchcontract.Retriever) (*reflectionscanner.Scanner, *reflectionpipeline.Processor, error) {
 	if m.builder.ReflectionFactory != nil {
-		return m.builder.ReflectionFactory(ctx, snapshot, client, retriever)
+		scanner, err := m.builder.ReflectionFactory(ctx, snapshot, client, retriever)
+		return scanner, nil, err
 	}
 	if retriever == nil || strings.TrimSpace(snapshot.Runtime.Search.DocumentRoot) == "" {
-		return nil, errors.New("reflection requires an active search retriever")
+		return nil, nil, errors.New("reflection requires an active search retriever")
 	}
 	r, err := reflectionreflector.New(client, snapshot.Runtime.LLM.Model)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	publisher, err := markdown.New(markdown.Config{Root: snapshot.Runtime.Search.DocumentRoot, ExtraDirectory: snapshot.Runtime.Reflection.ExtraDirectory, MaxBytes: snapshot.Runtime.Search.MaxFileBytes})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	processor, err := reflectionpipeline.New(reflectionpipeline.Config{Reflector: r, Publisher: publisher, MinConfidence: snapshot.Runtime.Reflection.MinConfidence, Reload: func(reloadCtx context.Context) error { _, reloadErr := m.ReloadSearch(reloadCtx, ""); return reloadErr }})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return reflectionscanner.New(reflectionscanner.Config{Interval: snapshot.Runtime.Reflection.ScanInterval, MaxSessions: snapshot.Runtime.Reflection.MaxPairsPerScan, Buffer: b, ProcessBatch: processor.ProcessBatch})
+	scanner, err := reflectionscanner.New(reflectionscanner.Config{Interval: snapshot.Runtime.Reflection.ScanInterval, MaxSessions: snapshot.Runtime.Reflection.MaxPairsPerScan, Buffer: b, ProcessBatch: processor.ProcessBatch})
+	return scanner, processor, err
 }
 
 func (m *Manager) buildReflectionClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
@@ -390,7 +415,6 @@ func (m *Manager) ensureReflectionBuffer(cfg config.ReflectionConfig) (*reflecti
 	if err != nil {
 		return nil, err
 	}
-	m.reflection = b
 	return b, nil
 }
 
@@ -433,7 +457,46 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	} else {
 		status.Search = searchcontract.Status{Enabled: false, State: searchcontract.StateDisabled}
 	}
+	status.Reflection = m.reflectionStatus(generation)
 	return snapshot, status
+}
+
+func (m *Manager) reflectionStatus(generation *generation) ReflectionStatus {
+	status := ReflectionStatus{Enabled: generation.reflectionEnabled, Active: generation.reflectionEnabled && generation.reflectionScanner != nil}
+	if generation.reflection != nil {
+		status.Buffer = generation.reflection.Stats(time.Now().UTC())
+	}
+	if generation.reflectionScanner != nil {
+		status.Scanner = generation.reflectionScanner.Stats()
+	}
+	if generation.reflectionPipeline != nil {
+		status.Pipeline = generation.reflectionPipeline.Stats()
+	}
+	return status
+}
+
+func (m *Manager) ScanReflection(ctx context.Context) (ReflectionScanResult, error) {
+	generation := m.acquire()
+	if generation == nil {
+		return ReflectionScanResult{}, errors.New("runtime is unavailable")
+	}
+	if !generation.reflectionEnabled {
+		generation.mu.RUnlock()
+		return ReflectionScanResult{}, ErrReflectionDisabled
+	}
+	scanner := generation.reflectionScanner
+	generation.mu.RUnlock()
+	if scanner == nil {
+		return ReflectionScanResult{}, ErrReflectionUnavailable
+	}
+	processed, retried, skipped := scanner.ScanOnce(ctx)
+	current := m.acquire()
+	if current == nil {
+		return ReflectionScanResult{Processed: processed, Retried: retried, Skipped: skipped}, nil
+	}
+	status := m.reflectionStatus(current)
+	current.mu.RUnlock()
+	return ReflectionScanResult{Processed: processed, Retried: retried, Skipped: skipped, Status: status}, nil
 }
 
 func (m *Manager) storeSnapshot(snapshot config.Snapshot) {
@@ -831,12 +894,15 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		next.snapshot = published
 	}
 	if next.reflectionEnabled && m.reflection != nil {
-		if err := m.reflection.UpdateConfig(reflectionBufferConfig(next.snapshot.Runtime.Reflection)); err != nil {
+		if err := next.reflection.UpdateConfig(reflectionBufferConfig(next.snapshot.Runtime.Reflection)); err != nil {
 			m.reflection = previousReflection
 			m.rollbackConnectors(current, next, connectorsChanged)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, err
 		}
+	}
+	if next.reflection != nil {
+		m.reflection = next.reflection
 	}
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)

@@ -108,6 +108,20 @@ func TestAdminSearchReloadRequiresAuthenticationAndReportsDisabled(t *testing.T)
 	}
 }
 
+func TestAdminReflectionScanRequiresAuthenticationAndReportsDisabled(t *testing.T) {
+	fixture := newAdminFixture(t)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/reflection/scan", nil)
+	response := httptest.NewRecorder()
+	fixture.server.server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", response.Code)
+	}
+	response = fixture.request(t, http.MethodPost, "/v1/admin/reflection/scan", "")
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "reflection is disabled") {
+		t.Fatalf("disabled scan = %d %s", response.Code, response.Body.String())
+	}
+}
+
 type adminFixture struct {
 	server     *Server
 	secretPath string

@@ -35,9 +35,9 @@ type AnswerSession struct {
 }
 
 type Stats struct {
-	Questions int
-	Sessions  int
-	Messages  int
+	Questions int `json:"questions"`
+	Sessions  int `json:"sessions"`
+	Messages  int `json:"messages"`
 }
 
 type question struct {

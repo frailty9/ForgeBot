@@ -117,6 +117,10 @@ func (s *Service) ReloadSearch(ctx context.Context) (searchcontract.ReloadResult
 	return s.runtime.ReloadSearch(ctx, "")
 }
 
+func (s *Service) ScanReflection(ctx context.Context) (runtimecfg.ReflectionScanResult, error) {
+	return s.runtime.ScanReflection(ctx)
+}
+
 func (s *Service) APIKeyStatus(ctx context.Context) (secret.Status, error) {
 	if s.secrets == nil {
 		return secret.Status{}, ErrUnavailable
