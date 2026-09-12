@@ -107,7 +107,8 @@ func connectorFactory(logger *slog.Logger) runtimecfg.ConnectorFactory {
 					ID: connector.ID, APIURL: onebotConfig.APIURL, SendToken: onebotConfig.SendToken,
 					ReceiveSecret: onebotConfig.ReceiveSecret,
 					WebhookAddr:   onebotConfig.WebhookAddr, WebhookPath: onebotConfig.WebhookPath,
-					RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout, Groups: groups,
+					RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout,
+					ReplayTTL: onebotConfig.ReplayTTL, ReplayMax: onebotConfig.ReplayMax, Groups: groups,
 				}, logger)
 				if err != nil {
 					return nil, err

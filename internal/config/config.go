@@ -164,6 +164,8 @@ type OneBotConnectorConfig struct {
 	WebhookPath   string        `json:"webhook_path" yaml:"webhook_path"`
 	RequestLimit  int64         `json:"request_limit" yaml:"request_limit"`
 	Timeout       time.Duration `json:"timeout" yaml:"timeout"`
+	ReplayTTL     time.Duration `json:"replay_ttl" yaml:"replay_ttl"`
+	ReplayMax     int           `json:"replay_max" yaml:"replay_max"`
 }
 
 func DefaultStatic() StaticConfig {
@@ -601,6 +603,12 @@ func (c OneBotConnectorConfig) Validate(prefix string) error {
 	if c.Timeout <= 0 {
 		problems = append(problems, prefix+".timeout must be positive")
 	}
+	if c.ReplayTTL <= 0 {
+		problems = append(problems, prefix+".replay_ttl must be positive")
+	}
+	if c.ReplayMax <= 0 {
+		problems = append(problems, prefix+".replay_max must be positive")
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -709,6 +717,8 @@ func (c PlatformConfig) Public() map[string]any {
 				"api_url": connector.OneBot.APIURL, "webhook_addr": connector.OneBot.WebhookAddr,
 				"webhook_path": connector.OneBot.WebhookPath, "request_limit": connector.OneBot.RequestLimit,
 				"timeout":                   connector.OneBot.Timeout.String(),
+				"replay_ttl":                connector.OneBot.ReplayTTL.String(),
+				"replay_max":                connector.OneBot.ReplayMax,
 				"send_token_configured":     strings.TrimSpace(connector.OneBot.SendToken) != "",
 				"receive_secret_configured": strings.TrimSpace(connector.OneBot.ReceiveSecret) != "",
 			}

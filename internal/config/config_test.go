@@ -103,6 +103,27 @@ func TestRuntimeConfigRejectsAPIKey(t *testing.T) {
 	}
 }
 
+func TestOneBotConfigDecodesDurationsAndReplayDefaults(t *testing.T) {
+	var connector OneBotConnectorConfig
+	err := json.Unmarshal([]byte(`{
+		"api_url":"http://127.0.0.1:5700","webhook_addr":"127.0.0.1:8090",
+		"webhook_path":"/onebot","request_limit":1024,"timeout":"15s"
+	}`), &connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connector.Timeout != 15*time.Second || connector.ReplayTTL != 5*time.Minute || connector.ReplayMax != 10000 {
+		t.Fatalf("connector = %+v", connector)
+	}
+	data, err := json.Marshal(connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"timeout":"15s"`) || !strings.Contains(string(data), `"replay_ttl":"5m0s"`) {
+		t.Fatalf("encoded = %s", data)
+	}
+}
+
 func TestPublicSnapshotNeverIncludesSecretOrReference(t *testing.T) {
 	snapshot := DefaultSnapshot()
 	snapshot.Runtime.LLM.APIKeyRef = "llm/private-reference"
@@ -204,7 +225,7 @@ func TestEnvironmentPathsAreNotRelativeToYAML(t *testing.T) {
 
 func TestPlatformConfigSupportsMultipleConnectorInstancesAndGroups(t *testing.T) {
 	onebotConfig := func(port string) *OneBotConnectorConfig {
-		return &OneBotConnectorConfig{APIURL: "http://127.0.0.1:" + port, WebhookAddr: "127.0.0.1:8" + port, WebhookPath: "/onebot/" + port, RequestLimit: 1024, Timeout: time.Second}
+		return &OneBotConnectorConfig{APIURL: "http://127.0.0.1:" + port, WebhookAddr: "127.0.0.1:8" + port, WebhookPath: "/onebot/" + port, RequestLimit: 1024, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100}
 	}
 	cfg := PlatformConfig{
 		Connectors: []ConnectorConfig{
@@ -239,7 +260,7 @@ func TestPlatformConfigRejectsAmbiguousOrUnavailableBindings(t *testing.T) {
 func TestPlatformConfigRejectsOneBotWithoutGroups(t *testing.T) {
 	cfg := PlatformConfig{Connectors: []ConnectorConfig{{
 		ID: "qq-main", Type: "onebot", Enabled: true,
-		OneBot: &OneBotConnectorConfig{APIURL: "http://127.0.0.1:5700", WebhookAddr: "127.0.0.1:8090", WebhookPath: "/onebot", RequestLimit: 1024, Timeout: time.Second},
+		OneBot: &OneBotConnectorConfig{APIURL: "http://127.0.0.1:5700", WebhookAddr: "127.0.0.1:8090", WebhookPath: "/onebot", RequestLimit: 1024, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100},
 	}}}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "must bind at least one group") {
 		t.Fatalf("unexpected error: %v", err)

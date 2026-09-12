@@ -39,7 +39,9 @@ Example OneBot runtime settings:
         "webhook_addr": "127.0.0.1:8090",
         "webhook_path": "/onebot/qq-main",
         "request_limit": 1048576,
-        "timeout": "15s"
+        "timeout": "15s",
+        "replay_ttl": "5m",
+        "replay_max": 10000
       }
     }],
     "groups": [
@@ -55,6 +57,11 @@ validates its `X-Signature` using HMAC-SHA1, while `send_token` is sent as a
 Bearer token on outbound API calls. Platform setting changes rebuild and
 replace the Connector generation through `runtime.Manager`; failed startup or
 persistence restores the previous active connectors.
+
+Accepted OneBot message events are deduplicated by connector/account/group/user/message
+identity. `replay_ttl` controls the replay window and `replay_max` bounds memory
+usage. Array message segments are preferred for clean text extraction; CQ codes
+are removed when only `raw_message` is available.
 
 Operator groups are an allow-listed, protocol-neutral operations boundary.
 They reference an existing logical conversation and never inherit the full Web

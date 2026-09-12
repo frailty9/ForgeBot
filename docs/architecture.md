@@ -98,6 +98,8 @@ Platform lifecycle contract:
   reported through Adapter.Errors.
 - Adapter.Stop is context-bounded and idempotent when the adapter is not running.
 - Adapters translate external events into messaging.InboundMessage and do not call the Bot Engine or read configuration files directly.
+- OneBot accepts only bound group events and suppresses duplicate event identities
+  within a configurable, bounded replay window before invoking the runtime.
 
 The Bot core identifies chats only by logical `ConversationID`. The current
 configuration exposes group bindings exclusively, so every active conversation

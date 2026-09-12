@@ -37,6 +37,8 @@ type Config struct {
 	WebhookPath   string
 	RequestLimit  int64
 	Timeout       time.Duration
+	ReplayTTL     time.Duration
+	ReplayMax     int
 	Groups        map[string]string
 }
 
@@ -49,6 +51,7 @@ type Adapter struct {
 	serverM sync.Mutex
 	done    chan struct{}
 	errors  chan error
+	replay  *replayCache
 }
 
 func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
@@ -58,7 +61,10 @@ func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	a := &Adapter{cfg: cfg, logger: logger, errors: make(chan error, 1)}
+	a := &Adapter{
+		cfg: cfg, logger: logger, errors: make(chan error, 1),
+		replay: newReplayCache(cfg.ReplayTTL, cfg.ReplayMax),
+	}
 	a.client = &http.Client{Timeout: cfg.Timeout}
 	a.sender = &Sender{cfg: cfg, client: a.client, logger: logger}
 	return a, nil
@@ -170,6 +176,10 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1002"})
 			return
 		}
+		if a.replay.seenOrAdd(event.identity(), time.Now()) {
+			writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
+			return
+		}
 		result, err := handler.HandleInbound(r.Context(), msg)
 		if err != nil {
 			a.logger.ErrorContext(r.Context(), "onebot inbound message failed", "err", err, "message_id", msg.MessageID)
@@ -261,6 +271,10 @@ type rawEvent struct {
 	Message    json.RawMessage `json:"message"`
 }
 
+func (e rawEvent) identity() string {
+	return scalar(e.SelfID) + "\x00" + scalar(e.GroupID) + "\x00" + scalar(e.UserID) + "\x00" + scalar(e.MessageID)
+}
+
 func (e rawEvent) message(groups map[string]string) (messaging.InboundMessage, error) {
 	if e.PostType != "message" || e.MessageType != "group" {
 		return messaging.InboundMessage{}, ErrNotMessageEvent
@@ -273,9 +287,9 @@ func (e rawEvent) message(groups map[string]string) (messaging.InboundMessage, e
 	if externalGroupID == "" || scalar(e.UserID) == "" || scalar(e.MessageID) == "" {
 		return messaging.InboundMessage{}, errors.New("onebot message identifiers are required")
 	}
-	text := strings.TrimSpace(e.RawMessage)
+	text := extractText(e.Message)
 	if text == "" {
-		text = extractText(e.Message)
+		text = stripCQ(strings.TrimSpace(e.RawMessage))
 	}
 	return messaging.InboundMessage{ConversationID: groupID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname, MessageID: scalar(e.MessageID), Text: text, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)), Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0)}, nil
 }
@@ -320,6 +334,21 @@ func extractText(raw json.RawMessage) string {
 	return strings.TrimSpace(b.String())
 }
 
+func stripCQ(text string) string {
+	for {
+		start := strings.Index(text, "[CQ:")
+		if start < 0 {
+			break
+		}
+		end := strings.IndexByte(text[start:], ']')
+		if end < 0 {
+			break
+		}
+		text = text[:start] + text[start+end+1:]
+	}
+	return strings.TrimSpace(text)
+}
+
 func mentions(raw json.RawMessage, rawMessage, selfID string) bool {
 	if selfID == "" {
 		return false
@@ -359,6 +388,12 @@ func validateConfig(cfg Config) error {
 	}
 	if cfg.Timeout <= 0 {
 		problems = append(problems, "onebot timeout must be positive")
+	}
+	if cfg.ReplayTTL <= 0 {
+		problems = append(problems, "onebot replay_ttl must be positive")
+	}
+	if cfg.ReplayMax <= 0 {
+		problems = append(problems, "onebot replay_max must be positive")
 	}
 	if len(cfg.Groups) == 0 {
 		problems = append(problems, "onebot connector must bind at least one group")

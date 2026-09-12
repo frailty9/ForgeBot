@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +26,11 @@ func (f handlerFunc) HandleInbound(ctx context.Context, msg messaging.InboundMes
 }
 
 func testConfig(apiURL string) Config {
-	return Config{ID: "qq-main", APIURL: apiURL, WebhookAddr: "127.0.0.1:0", WebhookPath: "/onebot", RequestLimit: 1 << 20, Timeout: time.Second, Groups: map[string]string{"8": "support"}}
+	return Config{
+		ID: "qq-main", APIURL: apiURL, WebhookAddr: "127.0.0.1:0", WebhookPath: "/onebot",
+		RequestLimit: 1 << 20, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100,
+		Groups: map[string]string{"8": "support"},
+	}
 }
 
 func TestWebhookMapsGroupMessageAndAuth(t *testing.T) {
@@ -116,6 +122,105 @@ func TestWebhookIgnoresUnboundGroup(t *testing.T) {
 	}))(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d", rr.Code)
+	}
+}
+
+func TestWebhookRejectsReplayWithoutCallingHandlerAgain(t *testing.T) {
+	adapter, err := New(testConfig("http://127.0.0.1:5700"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 42,
+		"user_id": 7, "group_id": 8, "self_id": 99, "raw_message": "/restart",
+	})
+	calls := 0
+	handler := handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
+		calls++
+		return platform.HandleResult{Accepted: true}, nil
+	})
+	for range 2 {
+		response := httptest.NewRecorder()
+		adapter.webhook(handler)(response, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d", calls)
+	}
+}
+
+func TestMessageSegmentsProduceCleanText(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage(`42`),
+		UserID: json.RawMessage(`7`), GroupID: json.RawMessage(`8`), SelfID: json.RawMessage(`99`),
+		RawMessage: "[CQ:at,qq=99] /status",
+		Message:    json.RawMessage(`[{"type":"at","data":{"qq":"99"}},{"type":"text","data":{"text":" /status"}}]`),
+	}
+	message, err := event.message(map[string]string{"8": "ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Text != "/status" || !message.Command || !message.Mentioned {
+		t.Fatalf("message = %+v", message)
+	}
+}
+
+func TestReplayCacheExpiresAndEvicts(t *testing.T) {
+	cache := newReplayCache(time.Second, 2)
+	now := time.Unix(100, 0)
+	if cache.seenOrAdd("a", now) || !cache.seenOrAdd("a", now) {
+		t.Fatal("duplicate was not detected")
+	}
+	if cache.seenOrAdd("b", now) || cache.seenOrAdd("c", now) {
+		t.Fatal("new key was rejected")
+	}
+	if cache.seenOrAdd("a", now) {
+		t.Fatal("oldest key was not evicted")
+	}
+	if cache.seenOrAdd("a", now.Add(2*time.Second)) {
+		t.Fatal("expired key was treated as replay")
+	}
+}
+
+func TestReplayCacheAllowsOnlyOneConcurrentFirstSeen(t *testing.T) {
+	cache := newReplayCache(time.Minute, 100)
+	now := time.Unix(100, 0)
+	var firstSeen atomic.Int32
+	var group sync.WaitGroup
+	for range 32 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if !cache.seenOrAdd("same-event", now) {
+				firstSeen.Add(1)
+			}
+		}()
+	}
+	group.Wait()
+	if got := firstSeen.Load(); got != 1 {
+		t.Fatalf("first seen count = %d", got)
+	}
+}
+
+func TestMessageSegmentsProduceCleanTextAndMention(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage("42"),
+		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"), SelfID: json.RawMessage("99"),
+		RawMessage: "[CQ:at,qq=99] hello [CQ:image,file=x]",
+		Message: mustJSON(t, []map[string]any{
+			{"type": "at", "data": map[string]string{"qq": "99"}},
+			{"type": "text", "data": map[string]string{"text": " hello "}},
+			{"type": "image", "data": map[string]string{"file": "x"}},
+		}),
+	}
+	message, err := event.message(map[string]string{"8": "support"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Text != "hello" || !message.Mentioned {
+		t.Fatalf("message = %+v", message)
 	}
 }
 

@@ -45,7 +45,9 @@
           "webhook_addr": "127.0.0.1:8090",
           "webhook_path": "/onebot/qq-main",
           "request_limit": 1048576,
-          "timeout": "15s"
+          "timeout": "15s",
+          "replay_ttl": "5m",
+          "replay_max": 10000
         }
       }
     ],

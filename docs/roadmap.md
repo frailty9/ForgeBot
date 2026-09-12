@@ -20,7 +20,7 @@
   lifecycle replacement remains a follow-up).
 - [x] Conversation-neutral core naming; current bindings remain group-only.
 - Shared adapter test harness.
-- Webhook authentication and replay protection.
+- [x] Webhook authentication and bounded replay protection.
 
 ## Phase 3: Local Document Intelligence
 
