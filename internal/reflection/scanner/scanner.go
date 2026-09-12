@@ -15,11 +15,12 @@ import (
 var ErrInvalidConfig = errors.New("reflection scanner configuration is invalid")
 
 type Config struct {
-	Interval    time.Duration
-	MaxSessions int
-	Buffer      *buffer.Buffer
-	Process     func(context.Context, buffer.AnswerSession) error
-	Now         func() time.Time
+	Interval     time.Duration
+	MaxSessions  int
+	Buffer       *buffer.Buffer
+	Process      func(context.Context, buffer.AnswerSession) error
+	ProcessBatch func(context.Context, []buffer.AnswerSession) []error
+	Now          func() time.Time
 }
 
 type Stats struct {
@@ -34,26 +35,27 @@ type Stats struct {
 }
 
 type Scanner struct {
-	interval    time.Duration
-	maxSessions int
-	buf         *buffer.Buffer
-	process     func(context.Context, buffer.AnswerSession) error
-	now         func() time.Time
-	running     atomic.Bool
-	mu          sync.RWMutex
-	stats       Stats
-	cancel      context.CancelFunc
-	done        chan struct{}
+	interval     time.Duration
+	maxSessions  int
+	buf          *buffer.Buffer
+	process      func(context.Context, buffer.AnswerSession) error
+	processBatch func(context.Context, []buffer.AnswerSession) []error
+	now          func() time.Time
+	running      atomic.Bool
+	mu           sync.RWMutex
+	stats        Stats
+	cancel       context.CancelFunc
+	done         chan struct{}
 }
 
 func New(cfg Config) (*Scanner, error) {
-	if cfg.Interval <= 0 || cfg.MaxSessions <= 0 || cfg.Buffer == nil || cfg.Process == nil {
+	if cfg.Interval <= 0 || cfg.MaxSessions <= 0 || cfg.Buffer == nil || (cfg.Process == nil && cfg.ProcessBatch == nil) {
 		return nil, ErrInvalidConfig
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Scanner{interval: cfg.Interval, maxSessions: cfg.MaxSessions, buf: cfg.Buffer, process: cfg.Process, now: cfg.Now}, nil
+	return &Scanner{interval: cfg.Interval, maxSessions: cfg.MaxSessions, buf: cfg.Buffer, process: cfg.Process, processBatch: cfg.ProcessBatch, now: cfg.Now}, nil
 }
 
 // Start launches the ticker. Calling Start more than once is safe and does
@@ -116,6 +118,29 @@ func (s *Scanner) ScanOnce(ctx context.Context) (processed, retried int, skipped
 	ready := s.buf.Ready(now)
 	if len(ready) > s.maxSessions {
 		ready = ready[:s.maxSessions]
+	}
+	if s.processBatch != nil {
+		errs := s.processBatch(ctx, ready)
+		for i, candidate := range ready {
+			var err error
+			if i < len(errs) {
+				err = errs[i]
+			}
+			if err != nil {
+				_ = s.buf.Retry(candidate.Key)
+				retried++
+				s.mu.Lock()
+				s.stats.LastError = err.Error()
+				s.mu.Unlock()
+				continue
+			}
+			if err := s.buf.Complete(candidate.Key); err != nil {
+				retried++
+				continue
+			}
+			processed++
+		}
+		return processed, retried, false
 	}
 	for _, candidate := range ready {
 		if err := s.process(ctx, candidate); err != nil {

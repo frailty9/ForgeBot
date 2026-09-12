@@ -79,3 +79,24 @@ func TestScannerSingleFlight(t *testing.T) {
 	close(release)
 	<-done
 }
+
+func TestScanOnceUsesBatchProcessor(t *testing.T) {
+	b := scannerBuffer(t)
+	s, err := New(Config{
+		Interval: time.Minute, MaxSessions: 10, Buffer: b,
+		Now: func() time.Time { return time.Date(2026, 9, 12, 8, 3, 0, 0, time.UTC) },
+		ProcessBatch: func(_ context.Context, sessions []buffer.AnswerSession) []error {
+			if len(sessions) != 1 {
+				t.Fatalf("batch size = %d", len(sessions))
+			}
+			return []error{nil}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, retried, skipped := s.ScanOnce(context.Background())
+	if processed != 1 || retried != 0 || skipped {
+		t.Fatalf("result=%d/%d/%v", processed, retried, skipped)
+	}
+}
