@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/operations"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
@@ -18,6 +20,7 @@ type fakeRuntime struct {
 	paused   bool
 	restarts int
 	commits  int
+	reloads  int
 }
 
 func (r *fakeRuntime) Snapshot() (config.Snapshot, runtimecfg.Status) { return r.snapshot, r.status }
@@ -26,6 +29,10 @@ func (r *fakeRuntime) SetPaused(value bool)                           { r.paused
 func (r *fakeRuntime) Restart(context.Context, string) error {
 	r.restarts++
 	return nil
+}
+func (r *fakeRuntime) ReloadSearch(context.Context, string) (searchcontract.ReloadResult, error) {
+	r.reloads++
+	return searchcontract.ReloadResult{Documents: 2, Sections: 5, Warnings: 1, Took: 15 * time.Millisecond}, nil
 }
 func (r *fakeRuntime) CommitRuntime(_ context.Context, cfg config.RuntimeConfig, persist runtimecfg.Persist) (runtimecfg.ApplyResult, error) {
 	r.commits++
@@ -93,11 +100,16 @@ func TestGateRequiresStoreAndUsesDeferredCommit(t *testing.T) {
 	}
 }
 
-func TestReloadDocsReportsUnavailable(t *testing.T) {
-	service, _ := New(&fakeRuntime{snapshot: config.DefaultSnapshot()}, nil)
-	_, err := service.Execute(context.Background(), operations.Request{Command: operations.CommandReloadDocs})
-	if !errors.Is(err, ErrCapabilityUnavailable) {
-		t.Fatalf("err=%v", err)
+func TestReloadDocsUsesDeferredFollowup(t *testing.T) {
+	runtime := &fakeRuntime{snapshot: config.DefaultSnapshot()}
+	service, _ := New(runtime, nil)
+	result, err := service.Execute(context.Background(), operations.Request{Command: operations.CommandReloadDocs, ConversationID: "ops"})
+	if err != nil || result.Followup == nil || runtime.reloads != 0 {
+		t.Fatalf("result=%+v err=%v reloads=%d", result, err, runtime.reloads)
+	}
+	text, err := result.Followup(context.Background())
+	if err != nil || runtime.reloads != 1 || !strings.Contains(text, "文档 2") || !strings.Contains(text, "分段 5") {
+		t.Fatalf("text=%q err=%v reloads=%d", text, err, runtime.reloads)
 	}
 }
 

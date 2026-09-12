@@ -76,3 +76,25 @@ func TestPublishDoesNotBlockWhenQueueIsFull(t *testing.T) {
 		t.Fatal("Publish blocked")
 	}
 }
+
+func TestDispatcherSkipsExcludedConversation(t *testing.T) {
+	sender := &recordingSender{sent: make(map[string][]string), done: make(chan struct{}, 1)}
+	dispatcher, err := NewDispatcher(targets{"source", "other"}, sender, slog.New(slog.NewTextHandler(io.Discard, nil)), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go dispatcher.Run(ctx)
+	dispatcher.Publish(Event{Component: "search", Code: "reload_failed", ExcludeConversationID: "source"})
+	select {
+	case <-sender.done:
+	case <-time.After(time.Second):
+		t.Fatal("notification was not delivered")
+	}
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	if len(sender.sent["source"]) != 0 || len(sender.sent["other"]) != 1 {
+		t.Fatalf("sent = %+v", sender.sent)
+	}
+}

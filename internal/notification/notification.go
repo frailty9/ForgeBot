@@ -16,11 +16,12 @@ const (
 )
 
 type Event struct {
-	Level     Level
-	Component string
-	Code      string
-	Message   string
-	At        time.Time
+	Level                 Level
+	Component             string
+	Code                  string
+	Message               string
+	At                    time.Time
+	ExcludeConversationID string
 }
 
 type Publisher interface {
@@ -82,6 +83,9 @@ func (d *Dispatcher) Run(ctx context.Context) {
 func (d *Dispatcher) dispatch(ctx context.Context, event Event) {
 	text := format(event)
 	for _, conversationID := range d.targets.NotificationTargets() {
+		if conversationID == event.ExcludeConversationID {
+			continue
+		}
 		if err := d.sender.SendNotification(ctx, conversationID, text); err != nil {
 			d.logger.ErrorContext(ctx, "send operator notification", "err", err, "conversation_id", conversationID, "component", event.Component, "code", event.Code)
 		}

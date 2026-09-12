@@ -7,6 +7,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/config"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/settings"
 )
@@ -110,6 +111,10 @@ func (s *Service) RuntimeStatus() runtimecfg.Status {
 
 func (s *Service) Restart(ctx context.Context, reason string) error {
 	return s.runtime.Restart(ctx, strings.TrimSpace(reason))
+}
+
+func (s *Service) ReloadSearch(ctx context.Context) (searchcontract.ReloadResult, error) {
+	return s.runtime.ReloadSearch(ctx, "")
 }
 
 func (s *Service) APIKeyStatus(ctx context.Context) (secret.Status, error) {

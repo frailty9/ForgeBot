@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/operations"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
@@ -25,6 +27,7 @@ type Runtime interface {
 	CommitRuntime(context.Context, config.RuntimeConfig, runtimecfg.Persist) (runtimecfg.ApplyResult, error)
 	Paused() bool
 	SetPaused(bool)
+	ReloadSearch(context.Context, string) (searchcontract.ReloadResult, error)
 }
 
 func New(runtime Runtime, store settings.Store) (*Service, error) {
@@ -69,7 +72,19 @@ func (s *Service) Execute(_ context.Context, request operations.Request) (operat
 	case operations.CommandGate:
 		return s.gate(request)
 	case operations.CommandReloadDocs:
-		return operations.Result{}, ErrCapabilityUnavailable
+		if err := requireNoArguments(request); err != nil {
+			return operations.Result{}, err
+		}
+		return operations.Result{
+			Reply: "文档索引重载已受理。",
+			Followup: func(ctx context.Context) (string, error) {
+				result, err := s.runtime.ReloadSearch(ctx, request.ConversationID)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("文档索引重载完成：文档 %d，分段 %d，警告 %d，耗时 %s。", result.Documents, result.Sections, result.Warnings, result.Took.Round(time.Millisecond)), nil
+			},
+		}, nil
 	default:
 		return operations.Result{}, operations.ErrUnsupportedCommand
 	}
@@ -84,8 +99,12 @@ func (s *Service) status() string {
 	if len(connectorStates) == 0 {
 		connectorStates = append(connectorStates, "无")
 	}
-	return fmt.Sprintf("Runtime: %s\n版本: %d\nBot: %s\nGate: %s\nConnector: %s",
-		status.State, snapshot.Version, enabled(!s.runtime.Paused()), enabled(snapshot.Runtime.Gate.Enabled), strings.Join(connectorStates, ", "))
+	searchState := "off"
+	if status.Search.Enabled {
+		searchState = fmt.Sprintf("%s (%d documents, %d sections)", status.Search.State, status.Search.Documents, status.Search.Sections)
+	}
+	return fmt.Sprintf("Runtime: %s\n版本: %d\nBot: %s\nGate: %s\nSearch: %s\nConnector: %s",
+		status.State, snapshot.Version, enabled(!s.runtime.Paused()), enabled(snapshot.Runtime.Gate.Enabled), searchState, strings.Join(connectorStates, ", "))
 }
 
 func (s *Service) gate(request operations.Request) (operations.Result, error) {

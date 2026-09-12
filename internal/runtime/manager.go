@@ -18,7 +18,10 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
+	"github.com/soleapi/forgebot/internal/tooling"
+	"github.com/soleapi/forgebot/internal/tooling/searchdocs"
 )
 
 var ErrStaticConfigChanged = errors.New("static configuration requires a process restart")
@@ -40,6 +43,7 @@ const (
 	ActionUpdateLog         Action = "update_log"
 	ActionReplaceLLM        Action = "replace_llm"
 	ActionReplaceSecret     Action = "replace_secret"
+	ActionReplaceSearch     Action = "replace_search"
 	ActionRestartEngine     Action = "restart_engine"
 	ActionRestartConnectors Action = "restart_connectors"
 	ActionRestartBot        Action = "restart_bot"
@@ -53,6 +57,7 @@ type Status struct {
 	Error      string                     `json:"error,omitempty"`
 	Paused     bool                       `json:"paused"`
 	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
+	Search     searchcontract.Status      `json:"search"`
 }
 
 type ApplyResult struct {
@@ -63,6 +68,7 @@ type ApplyResult struct {
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
 type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
+type SearchFactory func(context.Context, config.SearchConfig) (searchcontract.Retriever, error)
 type Persist func() (config.Snapshot, error)
 
 type Builder struct {
@@ -70,15 +76,20 @@ type Builder struct {
 	Secrets          secret.Store
 	ClientFactory    ClientFactory
 	ConnectorFactory ConnectorFactory
+	SearchFactory    SearchFactory
 	ApplyLog         func(config.LogConfig)
 	Notifications    notification.Publisher
 }
 
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
-	return b.build(ctx, snapshot, b.Sender, "", "")
+	retriever, err := b.buildSearch(ctx, snapshot.Runtime.Search, nil)
+	if err != nil {
+		return nil, err
+	}
+	return b.build(ctx, snapshot, b.Sender, retriever, "", "")
 }
 
-func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, secretRef, secretValue string) (*bot.Engine, error) {
+func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, secretRef, secretValue string) (*bot.Engine, error) {
 	if sender == nil {
 		return nil, errors.New("runtime sender is required")
 	}
@@ -105,7 +116,32 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 			}
 		}
 	}
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Policy: policyFrom(snapshot.Runtime)}, nil)
+	var executor tooling.Executor
+	if snapshot.Runtime.Search.Enabled && retriever != nil {
+		searchConfig := snapshot.Runtime.Search
+		executor = tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars))
+	}
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policyFrom(snapshot.Runtime)}, nil)
+}
+
+func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if current != nil {
+		return current, nil
+	}
+	if b.SearchFactory == nil {
+		return nil, errors.New("search factory is required when search is enabled")
+	}
+	retriever, err := b.SearchFactory(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build search index: %w", err)
+	}
+	if retriever == nil {
+		return nil, errors.New("search factory returned nil retriever")
+	}
+	return retriever, nil
 }
 
 // ReplaceSecret builds a complete candidate runtime before making the secret
@@ -124,7 +160,7 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 		return activate()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, value)
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, current.retriever, ref, value)
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
@@ -156,7 +192,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 		return remove()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, "")
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, current.retriever, ref, "")
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
@@ -194,6 +230,7 @@ type generation struct {
 	engine      *bot.Engine
 	connectors  platform.ConnectorSet
 	handler     *operations.Router
+	retriever   searchcontract.Retriever
 	watchCancel context.CancelFunc
 	mu          sync.RWMutex
 }
@@ -203,7 +240,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
-	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
+	generation, err := manager.buildGeneration(ctx, snapshot, nil, nil, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +249,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	return manager, nil
 }
 
-func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, secretRef, secretValue string) (*generation, error) {
+func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, retriever searchcontract.Retriever, secretRef, secretValue string) (*generation, error) {
 	if connectors == nil && m.builder.ConnectorFactory != nil {
 		var err error
 		connectors, err = m.builder.ConnectorFactory(snapshot.Runtime.Platforms)
@@ -224,7 +261,11 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if connectors != nil {
 		sender = connectors
 	}
-	engine, err := m.builder.build(ctx, snapshot, sender, secretRef, secretValue)
+	retriever, err := m.builder.buildSearch(ctx, snapshot.Runtime.Search, retriever)
+	if err != nil {
+		return nil, err
+	}
+	engine, err := m.builder.build(ctx, snapshot, sender, retriever, secretRef, secretValue)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +282,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 		return nil, err
 	}
-	return &generation{snapshot: snapshot, engine: engine, connectors: connectors, handler: router}, nil
+	return &generation{snapshot: snapshot, engine: engine, connectors: connectors, handler: router, retriever: retriever}, nil
 }
 
 type pausedHandler struct {
@@ -268,6 +309,11 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	snapshot := *m.snapshot.Load()
 	if generation.connectors != nil {
 		status.Connectors = generation.connectors.Status()
+	}
+	if generation.retriever != nil {
+		status.Search = generation.retriever.Status()
+	} else {
+		status.Search = searchcontract.Status{Enabled: false, State: searchcontract.StateDisabled}
 	}
 	return snapshot, status
 }
@@ -389,10 +435,14 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 	}
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
 	connectors := current.connectors
-	if action == ActionRestartConnectors {
+	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, snapshot.Runtime.Platforms) {
 		connectors = nil
 	}
-	next, err := m.buildGeneration(ctx, snapshot, connectors, "", "")
+	retriever := current.retriever
+	if !reflect.DeepEqual(current.snapshot.Runtime.Search, snapshot.Runtime.Search) {
+		retriever = nil
+	}
+	next, err := m.buildGeneration(ctx, snapshot, connectors, retriever, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
@@ -443,10 +493,14 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	candidate.Runtime = runtimeConfig
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
 	connectors := current.connectors
-	if action == ActionRestartConnectors {
+	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, runtimeConfig.Platforms) {
 		connectors = nil
 	}
-	next, err := m.buildGeneration(ctx, candidate, connectors, "", "")
+	retriever := current.retriever
+	if !reflect.DeepEqual(current.snapshot.Runtime.Search, runtimeConfig.Search) {
+		retriever = nil
+	}
+	next, err := m.buildGeneration(ctx, candidate, connectors, retriever, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
@@ -480,7 +534,7 @@ func (m *Manager) Restart(ctx context.Context, reason string) error {
 		return errors.New("runtime is stopped")
 	}
 	m.setStatus(StateRestarting, ActionRestartBot, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, nil, "", "")
+	next, err := m.buildGeneration(ctx, current.snapshot, nil, current.retriever, "", "")
 	if err != nil {
 		m.setStatus(StateReady, ActionRestartBot, current.snapshot.Version, err.Error())
 		return fmt.Errorf("restart runtime (%s): %w", reason, err)
@@ -516,6 +570,25 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	m.started = false
 	m.setStatus(StateStopped, ActionNone, old.snapshot.Version, "")
 	return nil
+}
+
+func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontract.ReloadResult, error) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	current := m.current.Load()
+	if current == nil {
+		return searchcontract.ReloadResult{}, errors.New("runtime is stopped")
+	}
+	if !current.snapshot.Runtime.Search.Enabled || current.retriever == nil {
+		return searchcontract.ReloadResult{}, searchcontract.ErrDisabled
+	}
+	result, err := current.retriever.Reload(ctx)
+	if err != nil {
+		m.notify(notification.Event{Level: notification.LevelError, Component: "search", Code: "reload_failed", Message: err.Error(), ExcludeConversationID: strings.TrimSpace(source)})
+		return searchcontract.ReloadResult{}, err
+	}
+	m.notify(notification.Event{Level: notification.LevelInfo, Component: "search", Code: "reloaded", Message: fmt.Sprintf("文档索引重载完成：documents=%d sections=%d warnings=%d", result.Documents, result.Sections, result.Warnings), ExcludeConversationID: strings.TrimSpace(source)})
+	return result, nil
 }
 
 func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
@@ -675,6 +748,9 @@ func classify(current, next config.RuntimeConfig) Action {
 	if !reflect.DeepEqual(current.Platforms, next.Platforms) {
 		return ActionRestartConnectors
 	}
+	if !reflect.DeepEqual(current.Search, next.Search) {
+		return ActionReplaceSearch
+	}
 	withoutLLMCurrent, withoutLLMNext := current, next
 	withoutLLMCurrent.LLM, withoutLLMNext.LLM = config.LLMConfig{}, config.LLMConfig{}
 	if reflect.DeepEqual(withoutLLMCurrent, withoutLLMNext) {
@@ -685,7 +761,11 @@ func classify(current, next config.RuntimeConfig) Action {
 
 func policyFrom(runtime config.RuntimeConfig) bot.Policy {
 	g := runtime.Gate
-	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Gate: bot.GatePolicy{
+	s := runtime.Search
+	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Search: bot.SearchPolicy{
+		Enabled: s.Enabled, DefaultResults: s.DefaultResults, MaxResults: s.MaxResults,
+		MaxQueriesPerTurn: s.MaxQueriesPerTurn, MaxContextChars: s.MaxContextChars,
+	}, Gate: bot.GatePolicy{
 		Enabled: g.Enabled, RequireMention: g.RequireMention, Silence: g.Silence,
 		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow, DedupTTL: g.DedupTTL,
 		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,

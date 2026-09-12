@@ -18,6 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
@@ -54,6 +55,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.Handle("POST /v1/admin/config/rollback", s.authorize(http.HandlerFunc(s.adminRollback)))
 	mux.Handle("GET /v1/admin/runtime", s.authorize(http.HandlerFunc(s.adminRuntime)))
 	mux.Handle("POST /v1/admin/runtime/restart", s.authorize(http.HandlerFunc(s.adminRestart)))
+	mux.Handle("POST /v1/admin/search/reload", s.authorize(http.HandlerFunc(s.adminSearchReload)))
 	mux.Handle("GET /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyStatus)))
 	mux.Handle("PUT /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyReplace)))
 	mux.Handle("DELETE /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyDelete)))
@@ -174,6 +176,15 @@ func (s *Server) adminRestart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.admin.RuntimeStatus())
 }
 
+func (s *Server) adminSearchReload(w http.ResponseWriter, r *http.Request) {
+	result, err := s.admin.ReloadSearch(r.Context())
+	if err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) adminAPIKeyStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := s.admin.APIKeyStatus(r.Context())
 	if err != nil {
@@ -230,6 +241,9 @@ func (s *Server) writeAdminError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	}
 	if errors.Is(err, admin.ErrUnavailable) {
+		status = http.StatusServiceUnavailable
+	}
+	if errors.Is(err, searchcontract.ErrDisabled) || errors.Is(err, searchcontract.ErrNoIndex) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})

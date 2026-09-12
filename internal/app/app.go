@@ -17,6 +17,8 @@ import (
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	"github.com/soleapi/forgebot/internal/platform/onebot"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
+	"github.com/soleapi/forgebot/internal/search/structured"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/server"
 	"github.com/soleapi/forgebot/internal/settings"
@@ -38,7 +40,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{ConnectorFactory: connectorFactory(logger), ApplyLog: func(logConfig config.LogConfig) {
+	builder := runtimecfg.Builder{ConnectorFactory: connectorFactory(logger), SearchFactory: searchFactory, ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}
@@ -83,6 +85,16 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		server: server.New(cfg, logger, runtimeManager, adminService), notifier: notifier,
 	}, nil
+}
+
+func searchFactory(ctx context.Context, cfg config.SearchConfig) (searchcontract.Retriever, error) {
+	return structured.New(ctx, structured.Options{
+		Root: cfg.DocumentRoot, Extensions: cfg.Extensions, DefaultResults: cfg.DefaultResults,
+		MaxResults: cfg.MaxResults, MinMatchRatio: cfg.MinMatchRatio,
+		QueryTimeout: cfg.QueryTimeout, BuildTimeout: cfg.BuildTimeout,
+		MaxSectionChars: cfg.MaxSectionChars, MaxFileBytes: cfg.MaxFileBytes,
+		MaxTotalBytes: cfg.MaxTotalBytes, MaxFiles: cfg.MaxFiles,
+	})
 }
 
 func connectorFactory(logger *slog.Logger) runtimecfg.ConnectorFactory {
