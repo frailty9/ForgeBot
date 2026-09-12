@@ -46,6 +46,92 @@ func (l LLMConfig) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (s SearchConfig) MarshalJSON() ([]byte, error) {
+	type encoded SearchConfig
+	return json.Marshal(struct {
+		encoded
+		QueryTimeout string `json:"query_timeout"`
+		BuildTimeout string `json:"build_timeout"`
+	}{encoded: encoded(s), QueryTimeout: s.QueryTimeout.String(), BuildTimeout: s.BuildTimeout.String()})
+}
+
+func (s *SearchConfig) UnmarshalJSON(data []byte) error {
+	type rawConfig struct {
+		Enabled           *bool           `json:"enabled"`
+		Policy            *string         `json:"policy"`
+		Backend           *string         `json:"backend"`
+		DocumentRoot      *string         `json:"document_root"`
+		Extensions        *[]string       `json:"extensions"`
+		DefaultResults    *int            `json:"default_results"`
+		MaxResults        *int            `json:"max_results"`
+		MinMatchRatio     *float64        `json:"min_match_ratio"`
+		QueryTimeout      json.RawMessage `json:"query_timeout"`
+		BuildTimeout      json.RawMessage `json:"build_timeout"`
+		MaxQueriesPerTurn *int            `json:"max_queries_per_turn"`
+		MaxContextChars   *int            `json:"max_context_chars"`
+		MaxSectionChars   *int            `json:"max_section_chars"`
+		MaxFileBytes      *int64          `json:"max_file_bytes"`
+		MaxTotalBytes     *int64          `json:"max_total_bytes"`
+		MaxFiles          *int            `json:"max_files"`
+	}
+	defaults := DefaultRuntime().Search
+	var raw rawConfig
+	if err := decodeStrictJSON(data, &raw); err != nil {
+		return err
+	}
+	*s = defaults
+	if raw.Enabled != nil {
+		s.Enabled = *raw.Enabled
+	}
+	if raw.Policy != nil {
+		s.Policy = *raw.Policy
+	}
+	if raw.Backend != nil {
+		s.Backend = *raw.Backend
+	}
+	if raw.DocumentRoot != nil {
+		s.DocumentRoot = *raw.DocumentRoot
+	}
+	if raw.Extensions != nil {
+		s.Extensions = append([]string(nil), (*raw.Extensions)...)
+	}
+	if raw.DefaultResults != nil {
+		s.DefaultResults = *raw.DefaultResults
+	}
+	if raw.MaxResults != nil {
+		s.MaxResults = *raw.MaxResults
+	}
+	if raw.MinMatchRatio != nil {
+		s.MinMatchRatio = *raw.MinMatchRatio
+	}
+	if raw.MaxQueriesPerTurn != nil {
+		s.MaxQueriesPerTurn = *raw.MaxQueriesPerTurn
+	}
+	if raw.MaxContextChars != nil {
+		s.MaxContextChars = *raw.MaxContextChars
+	}
+	if raw.MaxSectionChars != nil {
+		s.MaxSectionChars = *raw.MaxSectionChars
+	}
+	if raw.MaxFileBytes != nil {
+		s.MaxFileBytes = *raw.MaxFileBytes
+	}
+	if raw.MaxTotalBytes != nil {
+		s.MaxTotalBytes = *raw.MaxTotalBytes
+	}
+	if raw.MaxFiles != nil {
+		s.MaxFiles = *raw.MaxFiles
+	}
+	var err error
+	if s.QueryTimeout, err = decodeDuration(raw.QueryTimeout, defaults.QueryTimeout); err != nil {
+		return fmt.Errorf("query_timeout: %w", err)
+	}
+	if s.BuildTimeout, err = decodeDuration(raw.BuildTimeout, defaults.BuildTimeout); err != nil {
+		return fmt.Errorf("build_timeout: %w", err)
+	}
+	return nil
+}
+
 func (c OneBotConnectorConfig) MarshalJSON() ([]byte, error) {
 	type encoded struct {
 		APIURL        string `json:"api_url"`
