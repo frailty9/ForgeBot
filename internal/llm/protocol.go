@@ -89,6 +89,20 @@ func TextMessage(role Role, text string) Message {
 	}
 }
 
+func AssistantToolCallMessage(message Message) Message {
+	message.Role = RoleAssistant
+	message.Content = append([]ContentPart(nil), message.Content...)
+	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	return message
+}
+
+func ToolResultMessage(callID, name, payload string) Message {
+	return Message{
+		Role: RoleTool, Name: name, ToolCallID: callID,
+		Content: []ContentPart{{Type: "text", Text: payload}},
+	}
+}
+
 func (m Message) Text() string {
 	var builder strings.Builder
 	for _, part := range m.Content {

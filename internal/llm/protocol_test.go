@@ -61,3 +61,14 @@ func TestClientProtocolIsExplicit(t *testing.T) {
 		t.Fatalf("protocol = %s", client.Protocol())
 	}
 }
+
+func TestToolMessageConstructors(t *testing.T) {
+	assistant := AssistantToolCallMessage(Message{ToolCalls: []ToolCall{{ID: "call-1", Name: "search_docs", Arguments: `{"query":"auth"}`}}})
+	if assistant.Role != RoleAssistant || len(assistant.ToolCalls) != 1 {
+		t.Fatalf("assistant = %+v", assistant)
+	}
+	result := ToolResultMessage("call-1", "search_docs", `{"ok":true}`)
+	if result.Role != RoleTool || result.ToolCallID != "call-1" || result.Name != "search_docs" || result.Text() != `{"ok":true}` {
+		t.Fatalf("result = %+v", result)
+	}
+}

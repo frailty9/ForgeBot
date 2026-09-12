@@ -108,7 +108,27 @@ func (c *openAIResponsesClient) payload(req Request, stream bool) map[string]any
 			}
 			continue
 		}
+		if message.Role == RoleTool {
+			input = append(input, map[string]any{
+				"type": "function_call_output", "call_id": message.ToolCallID,
+				"output": message.Text(),
+			})
+			continue
+		}
+		if message.Role == RoleAssistant && len(message.ToolCalls) > 0 {
+			if text := message.Text(); text != "" {
+				input = append(input, map[string]any{"type": "message", "role": "assistant", "content": responsesContent(message.Content)})
+			}
+			for _, call := range message.ToolCalls {
+				input = append(input, map[string]any{
+					"type": "function_call", "call_id": call.ID,
+					"name": call.Name, "arguments": call.Arguments,
+				})
+			}
+			continue
+		}
 		item := map[string]any{
+			"type":    "message",
 			"role":    string(message.Role),
 			"content": responsesContent(message.Content),
 		}

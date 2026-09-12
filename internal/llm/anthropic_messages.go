@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -137,12 +138,32 @@ func (c *anthropicMessagesClient) payload(req Request, stream bool) map[string]a
 			}
 			continue
 		}
-		role := string(message.Role)
-		if role == string(RoleTool) {
-			role = "user"
+		if message.Role == RoleTool {
+			messages = append(messages, map[string]any{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "tool_result", "tool_use_id": message.ToolCallID,
+					"content": message.Text(),
+				}},
+			})
+			continue
+		}
+		if message.Role == RoleAssistant && len(message.ToolCalls) > 0 {
+			content := make([]map[string]any, 0, len(message.ToolCalls)+1)
+			if text := message.Text(); text != "" {
+				content = append(content, map[string]any{"type": "text", "text": text})
+			}
+			for _, call := range message.ToolCalls {
+				content = append(content, map[string]any{
+					"type": "tool_use", "id": call.ID, "name": call.Name,
+					"input": toolArguments(call.Arguments),
+				})
+			}
+			messages = append(messages, map[string]any{"role": "assistant", "content": content})
+			continue
 		}
 		messages = append(messages, map[string]any{
-			"role":    role,
+			"role":    string(message.Role),
 			"content": stringOrParts(message.Content),
 		})
 	}
@@ -172,6 +193,14 @@ func (c *anthropicMessagesClient) payload(req Request, stream bool) map[string]a
 		payload["metadata"] = req.Metadata
 	}
 	return payload
+}
+
+func toolArguments(arguments string) any {
+	var value any
+	if err := json.Unmarshal([]byte(arguments), &value); err == nil {
+		return value
+	}
+	return map[string]any{}
 }
 
 func normalizeAnthropicResponse(raw map[string]any) Response {
