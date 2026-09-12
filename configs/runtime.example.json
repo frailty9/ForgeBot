@@ -81,5 +81,10 @@
         "commands": ["status", "restart", "pause", "resume", "gate", "reload_docs"]
       }
     ]
+  },
+  "administration": {
+    "administrators": [
+      {"conversation_id": "local", "user_id": "replace-with-platform-user-id"}
+    ]
   }
 }

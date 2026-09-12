@@ -20,15 +20,17 @@ type Media struct {
 }
 
 type InboundMessage struct {
-	ConversationID string    `json:"conversation_id"`
-	UserID         string    `json:"user_id"`
-	UserName       string    `json:"user_name,omitempty"`
-	MessageID      string    `json:"message_id"`
-	Text           string    `json:"text,omitempty"`
-	Media          []Media   `json:"media,omitempty"`
-	Mentioned      bool      `json:"mentioned,omitempty"`
-	Command        bool      `json:"command,omitempty"`
-	At             time.Time `json:"at,omitempty"`
+	ConversationID   string    `json:"conversation_id"`
+	UserID           string    `json:"user_id"`
+	UserName         string    `json:"user_name,omitempty"`
+	MessageID        string    `json:"message_id"`
+	ReplyToMessageID string    `json:"reply_to_message_id,omitempty"`
+	Text             string    `json:"text,omitempty"`
+	Media            []Media   `json:"media,omitempty"`
+	Mentioned        bool      `json:"mentioned,omitempty"`
+	Command          bool      `json:"command,omitempty"`
+	Administrator    bool      `json:"-"`
+	At               time.Time `json:"at,omitempty"`
 }
 
 func (m InboundMessage) SessionKey() string {

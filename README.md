@@ -72,6 +72,23 @@ administration API. In an operator group, slash commands are intercepted before
 ordinary Bot handling; non-command messages continue through the normal Bot
 pipeline.
 
+Individual administrators are configured separately and scoped by logical
+conversation plus platform user ID. Runtime identity resolution marks trusted
+senders before messages reach application handlers; adapters and HTTP callers
+cannot assert this flag themselves. This identity is reserved for narrowly
+scoped communication-side capabilities such as future knowledge promotion and
+does not grant the full Web administration API.
+
+```json
+{
+  "administration": {
+    "administrators": [
+      {"conversation_id": "support", "user_id": "12345678"}
+    ]
+  }
+}
+```
+
 Available operator-group commands are `/status`, `/restart`, `/pause`,
 `/resume`, `/gate on|off`, and `/reload-docs`. Restart, Gate, and document
 reload operations acknowledge first, then report completion after the runtime
@@ -120,6 +137,13 @@ new runtime JSON is persisted. A failed build leaves the old configuration and
 index active. `/reload-docs` and the admin reload endpoint rebuild the current
 index atomically without changing the configuration version or restarting
 platform connectors.
+
+The planned knowledge-reflection workflow remains stateless across process
+restarts: ForgeBot will retain a bounded, expiring in-memory message window and
+periodically scan it for explicit administrator replies to member questions.
+Accepted entries will be written as managed Markdown under `extra/`, followed
+by one atomic index reload per scan batch. The draft under
+`specs/knowledge-reflection` must be confirmed before implementation.
 
 ## Quick Start
 

@@ -49,6 +49,8 @@ must not depend on or expose the complete Web administration service.
   routing contract; command implementations are introduced separately.
 - `internal/operator`: restricted runtime operations exposed to operator groups;
   it cannot access secrets or arbitrary administration/configuration methods.
+- `internal/administration`: conversation-scoped administrator identity
+  resolution, independent from platform protocols and operator-group routing.
 - `internal/notification`: bounded, non-blocking operational event dispatch to
   the currently configured notification-enabled operator groups.
 - `internal/bot`: orchestration layer.
@@ -80,6 +82,9 @@ must not depend on or expose the complete Web administration service.
 8. Retrieved documents are untrusted data, never instructions. Tool execution
    is bounded and allow-listed; it has no implicit Shell, secret, network, or
    configuration access.
+9. Platform adapters report user and reply identifiers but never decide who is
+   an administrator. Runtime configuration resolves that identity before
+   application handlers consume a message.
 
 ## Search Lifecycle
 

@@ -28,6 +28,7 @@ type Request struct {
 	ConversationID string
 	UserID         string
 	MessageID      string
+	Administrator  bool
 }
 
 type Result struct {
@@ -150,6 +151,7 @@ func Parse(message messaging.InboundMessage) (Request, bool) {
 	return Request{
 		Command: Command(name), Arguments: append([]string(nil), fields[1:]...),
 		ConversationID: message.ConversationID, UserID: message.UserID, MessageID: message.MessageID,
+		Administrator: message.Administrator,
 	}, true
 }
 

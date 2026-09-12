@@ -291,7 +291,12 @@ func (e rawEvent) message(groups map[string]string) (messaging.InboundMessage, e
 	if text == "" {
 		text = stripCQ(strings.TrimSpace(e.RawMessage))
 	}
-	return messaging.InboundMessage{ConversationID: groupID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname, MessageID: scalar(e.MessageID), Text: text, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)), Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0)}, nil
+	return messaging.InboundMessage{
+		ConversationID: groupID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname,
+		MessageID: scalar(e.MessageID), ReplyToMessageID: replyToMessageID(e.Message, e.RawMessage),
+		Text: text, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)),
+		Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0),
+	}, nil
 }
 
 func scalar(raw json.RawMessage) string {
@@ -332,6 +337,48 @@ func extractText(raw json.RawMessage) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func replyToMessageID(raw json.RawMessage, rawMessage string) string {
+	var segments []struct {
+		Type string `json:"type"`
+		Data struct {
+			ID json.RawMessage `json:"id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &segments) == nil {
+		for _, segment := range segments {
+			if segment.Type == "reply" {
+				if id := scalar(segment.Data.ID); id != "" {
+					return id
+				}
+			}
+		}
+	}
+	return cqParameter(rawMessage, "reply", "id")
+}
+
+func cqParameter(message, segmentType, parameter string) string {
+	prefix := "[CQ:" + segmentType
+	for offset := 0; ; {
+		start := strings.Index(message[offset:], prefix)
+		if start < 0 {
+			return ""
+		}
+		start += offset
+		end := strings.IndexByte(message[start:], ']')
+		if end < 0 {
+			return ""
+		}
+		fields := strings.Split(message[start+len(prefix):start+end], ",")
+		for _, field := range fields {
+			key, value, ok := strings.Cut(field, "=")
+			if ok && strings.TrimSpace(key) == parameter {
+				return strings.TrimSpace(value)
+			}
+		}
+		offset = start + end + 1
+	}
 }
 
 func stripCQ(text string) string {

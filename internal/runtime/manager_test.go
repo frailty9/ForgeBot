@@ -117,6 +117,36 @@ func TestCommitRuntimeUpdatesLogInPlace(t *testing.T) {
 	}
 }
 
+func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *testing.T) {
+	snapshot := testSnapshot()
+	var sets []*fakeConnectorSet
+	manager, err := NewManager(context.Background(), snapshot, Builder{
+		ConnectorFactory: func(config.PlatformConfig) (platform.ConnectorSet, error) {
+			set := newFakeConnectorSet()
+			sets = append(sets, set)
+			return set, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := snapshot
+	next.Version = 2
+	next.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "local", UserID: "admin"}}
+	result, err := manager.Apply(context.Background(), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != ActionRestartEngine || len(sets) != 1 {
+		t.Fatalf("result=%+v connector sets=%d", result, len(sets))
+	}
+	generation := manager.current.Load()
+	message := generation.admins.Mark(messaging.InboundMessage{ConversationID: "local", UserID: "admin"})
+	if !message.Administrator {
+		t.Fatal("updated administrator resolver is not active")
+	}
+}
+
 func TestManagedSecretReplacementSwitchesOnlyAfterValidation(t *testing.T) {
 	ctx := context.Background()
 	store := configuredSecrets(t, "old-key")

@@ -53,13 +53,14 @@ type StaticConfig struct {
 }
 
 type RuntimeConfig struct {
-	Log        LogConfig        `json:"log"`
-	Bot        BotConfig        `json:"bot"`
-	Gate       GateConfig       `json:"gate"`
-	LLM        LLMConfig        `json:"llm"`
-	Search     SearchConfig     `json:"search"`
-	Platforms  PlatformConfig   `json:"platforms"`
-	Operations OperationsConfig `json:"operations"`
+	Log            LogConfig            `json:"log"`
+	Bot            BotConfig            `json:"bot"`
+	Gate           GateConfig           `json:"gate"`
+	LLM            LLMConfig            `json:"llm"`
+	Search         SearchConfig         `json:"search"`
+	Platforms      PlatformConfig       `json:"platforms"`
+	Administration AdministrationConfig `json:"administration"`
+	Operations     OperationsConfig     `json:"operations"`
 }
 
 type RuntimeDocument struct {
@@ -163,6 +164,17 @@ type GroupBindingConfig struct {
 
 type OperationsConfig struct {
 	Groups []OperatorGroupConfig `json:"groups" yaml:"groups"`
+}
+
+type AdministrationConfig struct {
+	Administrators []AdministratorConfig `json:"administrators" yaml:"administrators"`
+}
+
+// AdministratorConfig scopes a platform user ID to a logical conversation.
+// User IDs are not assumed to be globally unique across connectors or accounts.
+type AdministratorConfig struct {
+	ConversationID string `json:"conversation_id" yaml:"conversation_id"`
+	UserID         string `json:"user_id" yaml:"user_id"`
 }
 
 // OperatorGroupConfig grants a logical conversation a deliberately small
@@ -507,8 +519,43 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Platforms.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := c.Administration.Validate(c.Platforms); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if err := c.Operations.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func (c AdministrationConfig) Validate(platforms PlatformConfig) error {
+	conversations := make(map[string]struct{}, len(platforms.Groups))
+	for _, group := range platforms.Groups {
+		conversations[strings.TrimSpace(group.ID)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(c.Administrators))
+	var problems []string
+	for index, administrator := range c.Administrators {
+		conversationID := strings.TrimSpace(administrator.ConversationID)
+		userID := strings.TrimSpace(administrator.UserID)
+		prefix := fmt.Sprintf("administration.administrators[%d]", index)
+		if conversationID == "" {
+			problems = append(problems, prefix+".conversation_id is required")
+		} else if _, exists := conversations[conversationID]; !exists {
+			problems = append(problems, prefix+".conversation_id must reference a bound conversation")
+		}
+		if userID == "" {
+			problems = append(problems, prefix+".user_id is required")
+		}
+		key := conversationID + "\x00" + userID
+		if _, exists := seen[key]; exists {
+			problems = append(problems, prefix+" is duplicated")
+		} else {
+			seen[key] = struct{}{}
+		}
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -823,9 +870,10 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"dedup_max": c.Runtime.Gate.DedupMax, "max_buffered": c.Runtime.Gate.MaxBuffered,
 				"max_text_len": c.Runtime.Gate.MaxTextLen, "max_concurrent": c.Runtime.Gate.MaxConcurrent,
 			},
-			"search":     c.Runtime.Search,
-			"platforms":  c.Runtime.Platforms.Public(),
-			"operations": c.Runtime.Operations,
+			"search":         c.Runtime.Search,
+			"platforms":      c.Runtime.Platforms.Public(),
+			"administration": c.Runtime.Administration,
+			"operations":     c.Runtime.Operations,
 		},
 	}
 }

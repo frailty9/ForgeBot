@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/administration"
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/gate"
@@ -232,6 +233,7 @@ type generation struct {
 	connectors  platform.ConnectorSet
 	handler     *operations.Router
 	retriever   searchcontract.Retriever
+	admins      administration.Resolver
 	watchCancel context.CancelFunc
 	mu          sync.RWMutex
 }
@@ -283,7 +285,16 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 		return nil, err
 	}
-	return &generation{snapshot: snapshot, engine: engine, connectors: connectors, handler: router, retriever: retriever}, nil
+	adminIdentities := make([]administration.Identity, 0, len(snapshot.Runtime.Administration.Administrators))
+	for _, administrator := range snapshot.Runtime.Administration.Administrators {
+		adminIdentities = append(adminIdentities, administration.Identity{
+			ConversationID: administrator.ConversationID, UserID: administrator.UserID,
+		})
+	}
+	return &generation{
+		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
+		retriever: retriever, admins: administration.New(adminIdentities),
+	}, nil
 }
 
 type pausedHandler struct {
@@ -604,6 +615,7 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 		return platform.HandleResult{}, errors.New("runtime is unavailable")
 	}
 	defer generation.mu.RUnlock()
+	message = generation.admins.Mark(message)
 	result, err := generation.handler.HandleInbound(ctx, message)
 	if err != nil {
 		component := "bot"

@@ -19,6 +19,8 @@
 - [x] Personal QQ / OneBot adapter (HTTP webhook and `send_msg`; runtime
   lifecycle replacement remains a follow-up).
 - [x] Conversation-neutral core naming; current bindings remain group-only.
+- [x] Protocol-neutral reply relationships and conversation-scoped individual
+  administrator identity.
 - Shared adapter test harness.
 - [x] Webhook authentication and bounded replay protection.
 
@@ -27,6 +29,8 @@
 - [x] Isolated Markdown, MDX, and plain-text parsing with structured BM25F search.
 - [ ] Promote administrator answers into managed Markdown under the optional
   document-root `extra/` directory.
+- [ ] Periodically scan a bounded in-memory message window for explicit
+  administrator reply pairs; do not persist chat history.
 - [x] Configurable document root and bounded indexing budgets.
 - [x] Atomic hot reload through operator command and authenticated admin API.
 - [x] On-demand LLM tool retrieval and bounded untrusted context builder.

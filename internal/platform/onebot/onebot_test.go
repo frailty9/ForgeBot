@@ -224,6 +224,40 @@ func TestMessageSegmentsProduceCleanTextAndMention(t *testing.T) {
 	}
 }
 
+func TestMessageExtractsReplyRelationship(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage("42"),
+		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"), SelfID: json.RawMessage("99"),
+		RawMessage: "[CQ:reply,id=123] answer",
+		Message: mustJSON(t, []map[string]any{
+			{"type": "reply", "data": map[string]any{"id": 123}},
+			{"type": "text", "data": map[string]string{"text": " answer"}},
+		}),
+	}
+	message, err := event.message(map[string]string{"8": "support"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.ReplyToMessageID != "123" || message.Text != "answer" {
+		t.Fatalf("message = %+v", message)
+	}
+}
+
+func TestMessageExtractsReplyRelationshipFromCQFallback(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage("42"),
+		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"),
+		RawMessage: "[CQ:reply,id=123] answer", Message: json.RawMessage(`"answer"`),
+	}
+	message, err := event.message(map[string]string{"8": "support"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.ReplyToMessageID != "123" || message.Text != "answer" {
+		t.Fatalf("message = %+v", message)
+	}
+}
+
 func TestAdapterStartIsReadyAndCanRestartAfterStop(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
