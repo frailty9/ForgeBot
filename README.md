@@ -55,6 +55,13 @@ validates its `X-Signature` using HMAC-SHA1, while `send_token` is sent as a
 Bearer token on outbound API calls. Platform settings are currently applied at process startup; runtime
 adapter replacement is part of the Runtime lifecycle follow-up.
 
+Operator groups are an allow-listed, protocol-neutral operations boundary.
+They reference an existing logical conversation and never inherit the full Web
+administration API. In an operator group, slash commands are intercepted before
+ordinary Bot handling; non-command messages continue through the normal Bot
+pipeline. Command implementations remain disabled until the Runtime lifecycle
+can safely execute them.
+
 ## Quick Start
 
 ```powershell

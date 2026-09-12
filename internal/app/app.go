@@ -11,6 +11,7 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/logging"
+	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	"github.com/soleapi/forgebot/internal/platform/onebot"
@@ -26,6 +27,7 @@ type App struct {
 	runtime  *runtimecfg.Manager
 	server   *server.Server
 	adapters []platform.Adapter
+	handler  platform.Handler
 }
 
 func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Controller) (*App, error) {
@@ -107,10 +109,25 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
+	operatorPolicies := make([]operations.GroupPolicy, 0, len(cfg.Runtime.Operations.Groups))
+	for _, group := range cfg.Runtime.Operations.Groups {
+		commands := make([]operations.Command, 0, len(group.Commands))
+		for _, command := range group.Commands {
+			commands = append(commands, operations.Command(strings.ToLower(strings.TrimSpace(command))))
+		}
+		operatorPolicies = append(operatorPolicies, operations.GroupPolicy{
+			ConversationID: group.ConversationID, Notifications: group.Notifications, Commands: commands,
+		})
+	}
+	operatorRouter, err := operations.NewRouter(runtimeManager, nil, operatorPolicies)
+	if err != nil {
+		return nil, err
+	}
 
 	return &App{
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		adapters: adapters,
+		handler:  operatorRouter,
 		server:   server.New(cfg, logger, runtimeManager, adminService),
 	}, nil
 }
@@ -139,7 +156,7 @@ func (a *App) Run(ctx context.Context) error {
 	for _, adapter := range a.adapters {
 		adapter := adapter
 		go func() {
-			if err := adapter.Start(ctx, a.runtime); err != nil {
+			if err := adapter.Start(ctx, a.handler); err != nil {
 				errs <- err
 			}
 		}()

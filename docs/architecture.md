@@ -20,6 +20,11 @@ candidate Engine and LLM client are built before persistence; only a successful
 configuration commit is atomically published. Existing requests finish on the
 previous generation while new requests use the replacement.
 
+Operator groups are configured by logical `ConversationID`, never by protocol
+or external account identifiers. Their commands pass through a dedicated,
+allow-listed operations boundary before ordinary Bot handling. This boundary
+must not depend on or expose the complete Web administration service.
+
 ## Packages
 
 - `cmd/forgebot`: process entrypoint.
@@ -36,6 +41,8 @@ previous generation while new requests use the replacement.
 - `internal/platform/memory`: in-memory/logging sender for local development.
 - `internal/platform/onebot`: OneBot 11 HTTP webhook adapter and `send_msg`
   sender, independently constructed behind the platform interfaces.
+- `internal/operations`: protocol-neutral operator-group command policy and
+  routing contract; command implementations are introduced separately.
 - `internal/bot`: orchestration layer.
 - `internal/gate`: group message buffering and deduplication.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for

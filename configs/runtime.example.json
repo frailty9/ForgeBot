@@ -52,5 +52,14 @@
     "groups": [
       {"id": "local", "connector_id": "echo-local", "target": "local"}
     ]
+  },
+  "operations": {
+    "groups": [
+      {
+        "conversation_id": "local",
+        "notifications": true,
+        "commands": ["status", "restart", "pause", "resume", "gate", "reload_docs"]
+      }
+    ]
   }
 }

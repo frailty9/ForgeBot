@@ -44,6 +44,8 @@ tool-call assembly remain follow-up work.
 
 ## Phase 5: Tools and Operations
 
+- [x] Operator-group configuration, command allow-list, and routing contract.
+- [ ] Runtime-backed operator command implementations and notifications.
 - MCP registry.
 - Tool execution sandbox policy.
 - Metrics and tracing.

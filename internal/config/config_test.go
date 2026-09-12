@@ -245,3 +245,27 @@ func TestPlatformConfigRejectsOneBotWithoutGroups(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestOperationsConfigRequiresBoundConversationAndKnownCommands(t *testing.T) {
+	platforms := PlatformConfig{
+		Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
+		Groups:     []GroupBindingConfig{{ID: "ops", ConnectorID: "echo", Target: "local"}},
+	}
+	valid := OperationsConfig{Groups: []OperatorGroupConfig{{
+		ConversationID: "ops", Notifications: true,
+		Commands: []string{"status", "restart", "pause", "resume", "gate", "reload_docs"},
+	}}}
+	if err := valid.Validate(platforms); err != nil {
+		t.Fatal(err)
+	}
+	invalid := OperationsConfig{Groups: []OperatorGroupConfig{
+		{ConversationID: "missing", Commands: []string{"status"}},
+		{ConversationID: "ops", Commands: []string{"shell"}},
+		{ConversationID: "ops", Commands: []string{"status"}},
+	}}
+	err := invalid.Validate(platforms)
+	if err == nil || !strings.Contains(err.Error(), "must reference a bound conversation") ||
+		!strings.Contains(err.Error(), "must be one of") || !strings.Contains(err.Error(), "is duplicated") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}

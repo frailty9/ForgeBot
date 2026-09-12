@@ -53,11 +53,12 @@ type StaticConfig struct {
 }
 
 type RuntimeConfig struct {
-	Log       LogConfig      `json:"log"`
-	Bot       BotConfig      `json:"bot"`
-	Gate      GateConfig     `json:"gate"`
-	LLM       LLMConfig      `json:"llm"`
-	Platforms PlatformConfig `json:"platforms"`
+	Log        LogConfig        `json:"log"`
+	Bot        BotConfig        `json:"bot"`
+	Gate       GateConfig       `json:"gate"`
+	LLM        LLMConfig        `json:"llm"`
+	Platforms  PlatformConfig   `json:"platforms"`
+	Operations OperationsConfig `json:"operations"`
 }
 
 type RuntimeDocument struct {
@@ -140,6 +141,18 @@ type GroupBindingConfig struct {
 	Target      string `json:"target" yaml:"target"`
 }
 
+type OperationsConfig struct {
+	Groups []OperatorGroupConfig `json:"groups" yaml:"groups"`
+}
+
+// OperatorGroupConfig grants a logical conversation a deliberately small
+// operations surface, separate from the complete Web administration API.
+type OperatorGroupConfig struct {
+	ConversationID string   `json:"conversation_id" yaml:"conversation_id"`
+	Notifications  bool     `json:"notifications" yaml:"notifications"`
+	Commands       []string `json:"commands" yaml:"commands"`
+}
+
 // OneBotConnectorConfig contains application-level connection settings. The
 // protocol credentials are runtime-configurable so a management service
 // can replace an adapter generation without changing startup configuration.
@@ -174,6 +187,7 @@ func DefaultRuntime() RuntimeConfig {
 			Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
 			Groups:     []GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}},
 		},
+		Operations: OperationsConfig{},
 	}
 }
 
@@ -447,10 +461,60 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Platforms.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := c.Operations.Validate(c.Platforms); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func (c OperationsConfig) Validate(platforms PlatformConfig) error {
+	conversations := make(map[string]struct{}, len(platforms.Groups))
+	for _, binding := range platforms.Groups {
+		conversations[strings.TrimSpace(binding.ID)] = struct{}{}
+	}
+	configured := make(map[string]struct{}, len(c.Groups))
+	var problems []string
+	for index, group := range c.Groups {
+		conversationID := strings.TrimSpace(group.ConversationID)
+		prefix := fmt.Sprintf("operations.groups[%d]", index)
+		if conversationID == "" {
+			problems = append(problems, prefix+".conversation_id is required")
+		} else if _, exists := conversations[conversationID]; !exists {
+			problems = append(problems, prefix+".conversation_id must reference a bound conversation")
+		} else if _, exists := configured[conversationID]; exists {
+			problems = append(problems, prefix+".conversation_id is duplicated")
+		} else {
+			configured[conversationID] = struct{}{}
+		}
+		commands := make(map[string]struct{}, len(group.Commands))
+		for commandIndex, command := range group.Commands {
+			command = strings.ToLower(strings.TrimSpace(command))
+			commandPrefix := fmt.Sprintf("%s.commands[%d]", prefix, commandIndex)
+			if !isOperatorCommand(command) {
+				problems = append(problems, commandPrefix+" must be one of status, restart, pause, resume, gate, reload_docs")
+			} else if _, exists := commands[command]; exists {
+				problems = append(problems, commandPrefix+" is duplicated")
+			} else {
+				commands[command] = struct{}{}
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func isOperatorCommand(command string) bool {
+	switch command {
+	case "status", "restart", "pause", "resume", "gate", "reload_docs":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c PlatformConfig) Validate() error {
@@ -630,7 +694,8 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"dedup_max": c.Runtime.Gate.DedupMax, "max_buffered": c.Runtime.Gate.MaxBuffered,
 				"max_text_len": c.Runtime.Gate.MaxTextLen, "max_concurrent": c.Runtime.Gate.MaxConcurrent,
 			},
-			"platforms": c.Runtime.Platforms.Public(),
+			"platforms":  c.Runtime.Platforms.Public(),
+			"operations": c.Runtime.Operations,
 		},
 	}
 }
