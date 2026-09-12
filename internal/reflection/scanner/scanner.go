@@ -32,6 +32,7 @@ type Stats struct {
 	LastStarted  time.Time
 	LastFinished time.Time
 	LastError    string
+	Ready        int
 }
 
 type Scanner struct {
@@ -88,6 +89,19 @@ func (s *Scanner) Stop() {
 	}
 }
 
+// Cancel requests shutdown without waiting for an in-flight batch. The batch
+// still uses its context and must finish independently before its session is
+// completed or retried.
+func (s *Scanner) Cancel() {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.cancel, s.done = nil, nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // ScanOnce runs at most one batch. If a previous batch is still running, it
 // returns immediately with skipped=true.
 func (s *Scanner) ScanOnce(ctx context.Context) (processed, retried int, skipped bool) {
@@ -116,6 +130,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) (processed, retried int, skipped
 		ctx = context.Background()
 	}
 	ready := s.buf.Ready(now)
+	s.mu.Lock()
+	s.stats.Ready = len(ready)
+	s.mu.Unlock()
 	if len(ready) > s.maxSessions {
 		ready = ready[:s.maxSessions]
 	}

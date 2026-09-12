@@ -69,3 +69,24 @@ func TestProcessBatchKeepsPublishedSessionsRetryableOnReloadFailure(t *testing.T
 		t.Fatalf("err=%v", errs[0])
 	}
 }
+
+func TestProcessBatchRetriesPendingReloadBeforeNewCandidates(t *testing.T) {
+	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Question: "question", Answer: "answer", Confidence: .95}}
+	publisher := &fakePublisher{}
+	reloads := 0
+	processor, _ := New(Config{Reflector: r, Publisher: publisher, MinConfidence: .9, Reload: func(context.Context) error {
+		reloads++
+		if reloads == 1 {
+			return errors.New("offline")
+		}
+		return nil
+	}})
+	first := processor.ProcessBatch(context.Background(), []buffer.AnswerSession{session("s1")})
+	if first[0] == nil {
+		t.Fatal("first reload failure was lost")
+	}
+	second := processor.ProcessBatch(context.Background(), nil)
+	if len(second) != 0 || reloads != 2 {
+		t.Fatalf("second=%v reloads=%d", second, reloads)
+	}
+}

@@ -14,12 +14,16 @@ import (
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/gate"
+	"github.com/soleapi/forgebot/internal/knowledge/markdown"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	reflectionbuffer "github.com/soleapi/forgebot/internal/reflection/buffer"
+	reflectionpipeline "github.com/soleapi/forgebot/internal/reflection/pipeline"
+	reflectionreflector "github.com/soleapi/forgebot/internal/reflection/reflector"
+	reflectionscanner "github.com/soleapi/forgebot/internal/reflection/scanner"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -74,13 +78,14 @@ type SearchFactory func(context.Context, config.SearchConfig) (searchcontract.Re
 type Persist func() (config.Snapshot, error)
 
 type Builder struct {
-	Sender           platform.Sender
-	Secrets          secret.Store
-	ClientFactory    ClientFactory
-	ConnectorFactory ConnectorFactory
-	SearchFactory    SearchFactory
-	ApplyLog         func(config.LogConfig)
-	Notifications    notification.Publisher
+	Sender            platform.Sender
+	Secrets           secret.Store
+	ClientFactory     ClientFactory
+	ConnectorFactory  ConnectorFactory
+	SearchFactory     SearchFactory
+	ApplyLog          func(config.LogConfig)
+	Notifications     notification.Publisher
+	ReflectionFactory func(context.Context, config.Snapshot, llm.Client, searchcontract.Retriever) (*reflectionscanner.Scanner, error)
 }
 
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
@@ -213,20 +218,21 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 }
 
 type Manager struct {
-	applyMu         sync.Mutex
-	routeMu         sync.RWMutex
-	statusMu        sync.RWMutex
-	current         atomic.Pointer[generation]
-	snapshot        atomic.Pointer[config.Snapshot]
-	builder         Builder
-	status          Status
-	started         bool
-	runCtx          context.Context
-	errors          chan error
-	operator        operations.Service
-	paused          atomic.Bool
-	reloadingSearch atomic.Bool
-	reflection      *reflectionbuffer.Buffer
+	applyMu           sync.Mutex
+	routeMu           sync.RWMutex
+	statusMu          sync.RWMutex
+	current           atomic.Pointer[generation]
+	snapshot          atomic.Pointer[config.Snapshot]
+	builder           Builder
+	status            Status
+	started           bool
+	runCtx            context.Context
+	errors            chan error
+	operator          operations.Service
+	paused            atomic.Bool
+	reloadingSearch   atomic.Bool
+	reflection        *reflectionbuffer.Buffer
+	reflectionScanner *reflectionscanner.Scanner
 }
 
 type generation struct {
@@ -238,6 +244,7 @@ type generation struct {
 	admins            administration.Resolver
 	reflection        *reflectionbuffer.Buffer
 	reflectionEnabled bool
+	reflectionScanner *reflectionscanner.Scanner
 	watchCancel       context.CancelFunc
 	mu                sync.RWMutex
 }
@@ -300,11 +307,71 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 		return nil, fmt.Errorf("build reflection buffer: %w", err)
 	}
+	var reflectionScanner *reflectionscanner.Scanner
+	if snapshot.Runtime.Reflection.Enabled && reflection != nil {
+		client, clientErr := m.buildReflectionClient(ctx, snapshot, "", "")
+		if clientErr != nil {
+			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
+			return nil, clientErr
+		}
+		if client != nil {
+			reflectionScanner, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, retriever)
+		}
+		if err != nil {
+			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
+			return nil, err
+		}
+	}
 	return &generation{
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
 		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
 		reflectionEnabled: snapshot.Runtime.Reflection.Enabled,
+		reflectionScanner: reflectionScanner,
 	}, nil
+}
+
+func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, retriever searchcontract.Retriever) (*reflectionscanner.Scanner, error) {
+	if m.builder.ReflectionFactory != nil {
+		return m.builder.ReflectionFactory(ctx, snapshot, client, retriever)
+	}
+	if retriever == nil || strings.TrimSpace(snapshot.Runtime.Search.DocumentRoot) == "" {
+		return nil, errors.New("reflection requires an active search retriever")
+	}
+	r, err := reflectionreflector.New(client, snapshot.Runtime.LLM.Model)
+	if err != nil {
+		return nil, err
+	}
+	publisher, err := markdown.New(markdown.Config{Root: snapshot.Runtime.Search.DocumentRoot, ExtraDirectory: snapshot.Runtime.Reflection.ExtraDirectory, MaxBytes: snapshot.Runtime.Search.MaxFileBytes})
+	if err != nil {
+		return nil, err
+	}
+	processor, err := reflectionpipeline.New(reflectionpipeline.Config{Reflector: r, Publisher: publisher, MinConfidence: snapshot.Runtime.Reflection.MinConfidence, Reload: func(reloadCtx context.Context) error { _, reloadErr := m.ReloadSearch(reloadCtx, ""); return reloadErr }})
+	if err != nil {
+		return nil, err
+	}
+	return reflectionscanner.New(reflectionscanner.Config{Interval: snapshot.Runtime.Reflection.ScanInterval, MaxSessions: snapshot.Runtime.Reflection.MaxPairsPerScan, Buffer: b, ProcessBatch: processor.ProcessBatch})
+}
+
+func (m *Manager) buildReflectionClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
+	if strings.TrimSpace(snapshot.Runtime.LLM.Model) == "" {
+		return nil, nil
+	}
+	apiKey := secretValue
+	var err error
+	if secretRef != snapshot.Runtime.LLM.APIKeyRef && m.builder.Secrets != nil {
+		apiKey, err = m.builder.Secrets.Get(ctx, snapshot.Runtime.LLM.APIKeyRef)
+	}
+	if err != nil && !errors.Is(err, secret.ErrNotFound) {
+		return nil, err
+	}
+	if apiKey == "" {
+		return nil, nil
+	}
+	factory := m.builder.ClientFactory
+	if factory == nil {
+		factory = func(cfg llm.ClientConfig) (llm.Client, error) { return llm.NewClient(cfg) }
+	}
+	return factory(snapshot.Runtime.LLM.ClientConfig(apiKey))
 }
 
 func (m *Manager) ensureReflectionBuffer(cfg config.ReflectionConfig) (*reflectionbuffer.Buffer, error) {
@@ -391,6 +458,14 @@ func (m *Manager) Start(ctx context.Context) error {
 			return err
 		}
 		m.watchConnectorErrors(current)
+	}
+	if current.reflectionScanner != nil {
+		if err := current.reflectionScanner.Start(ctx); err != nil {
+			if current.connectors != nil {
+				_ = current.connectors.Stop(ctx)
+			}
+			return err
+		}
 	}
 	m.started = true
 	m.setStatus(StateReady, ActionNone, current.snapshot.Version, "")
@@ -613,6 +688,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			return err
 		}
 	}
+	if old.reflectionScanner != nil {
+		old.reflectionScanner.Cancel()
+	}
 	m.current.Store(nil)
 	if old.watchCancel != nil {
 		old.watchCancel()
@@ -763,6 +841,14 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {
+		if old.reflectionScanner != nil {
+			old.reflectionScanner.Cancel()
+		}
+		if next.reflectionScanner != nil {
+			if err := next.reflectionScanner.Start(m.runCtx); err != nil {
+				m.notify(notification.Event{Level: notification.LevelError, Component: "reflection", Code: "scanner_start_failed", Message: err.Error()})
+			}
+		}
 		if connectorsChanged {
 			if old.watchCancel != nil {
 				old.watchCancel()
