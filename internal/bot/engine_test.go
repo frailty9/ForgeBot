@@ -185,6 +185,20 @@ func TestEngineDisabledSearchDoesNotExposeTool(t *testing.T) {
 	}
 }
 
+func TestEngineExplicitSearchReportsRetrieverFailure(t *testing.T) {
+	engine, fake, retriever, sender := searchEngineFixture(t, nil)
+	retriever.err = context.DeadlineExceeded
+	if _, err := engine.HandleInbound(context.Background(), testInbound("/search authentication")); err != nil {
+		t.Fatal(err)
+	}
+	if retriever.calls != 1 || len(fake.requests) != 0 {
+		t.Fatalf("retriever calls=%d llm requests=%d", retriever.calls, len(fake.requests))
+	}
+	if sent := sender.Sent(); len(sent) != 1 || sent[0].Text != "文档检索失败，请稍后重试。" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
 type fakeLLM struct {
 	request   llm.Request
 	requests  []llm.Request

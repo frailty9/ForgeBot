@@ -223,7 +223,8 @@ func (e *Engine) explicitSearch(ctx context.Context, query string) (string, erro
 	}
 	response, err := e.deps.Retriever.Search(ctx, searchcontract.Query{Text: query, Limit: e.deps.Policy.Search.DefaultResults})
 	if err != nil {
-		return "", fmt.Errorf("search documents: %w", err)
+		e.logger.WarnContext(ctx, "explicit document search failed", "err", err)
+		return "文档检索失败，请稍后重试。", nil
 	}
 	contextText, selected := searchcontract.BuildContext(response, e.deps.Policy.Search.MaxContextChars)
 	if contextText == "" {

@@ -19,6 +19,27 @@ type runtimeSearch struct {
 	err     error
 }
 
+type blockingRuntimeSearch struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (*blockingRuntimeSearch) Search(context.Context, searchcontract.Query) (searchcontract.Response, error) {
+	return searchcontract.Response{}, nil
+}
+func (s *blockingRuntimeSearch) Reload(ctx context.Context) (searchcontract.ReloadResult, error) {
+	close(s.entered)
+	select {
+	case <-s.release:
+		return searchcontract.ReloadResult{}, nil
+	case <-ctx.Done():
+		return searchcontract.ReloadResult{}, ctx.Err()
+	}
+}
+func (*blockingRuntimeSearch) Status() searchcontract.Status {
+	return searchcontract.Status{Enabled: true, State: searchcontract.StateReady}
+}
+
 func (s *runtimeSearch) Search(context.Context, searchcontract.Query) (searchcontract.Response, error) {
 	return searchcontract.Response{}, nil
 }
@@ -126,6 +147,31 @@ func TestManagerReloadSearchPublishesSourceAwareEvent(t *testing.T) {
 	_, status := manager.Snapshot()
 	if status.Search.State != searchcontract.StateReady {
 		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestManagerRejectsConcurrentSearchReload(t *testing.T) {
+	snapshot := searchSnapshot(t, "working")
+	search := &blockingRuntimeSearch{entered: make(chan struct{}), release: make(chan struct{})}
+	manager, err := NewManager(context.Background(), snapshot, Builder{
+		Sender:        registeredSender(t).registry,
+		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) { return search, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, reloadErr := manager.ReloadSearch(context.Background(), "")
+		done <- reloadErr
+	}()
+	<-search.entered
+	if _, err := manager.ReloadSearch(context.Background(), ""); !errors.Is(err, searchcontract.ErrReloadInProgress) {
+		t.Fatalf("concurrent reload error = %v", err)
+	}
+	close(search.release)
+	if err := <-done; err != nil {
+		t.Fatalf("first reload error = %v", err)
 	}
 }
 

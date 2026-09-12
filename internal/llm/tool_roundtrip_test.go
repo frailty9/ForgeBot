@@ -48,6 +48,27 @@ func TestClientsSerializeToolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAnthropicCombinesConsecutiveToolResults(t *testing.T) {
+	client := &anthropicMessagesClient{cfg: ClientConfig{Model: "model"}}
+	payload := client.payload(Request{Messages: []Message{
+		TextMessage(RoleUser, "question"),
+		AssistantToolCallMessage(Message{ToolCalls: []ToolCall{
+			{ID: "call-1", Name: "first", Arguments: `{}`},
+			{ID: "call-2", Name: "second", Arguments: `{}`},
+		}}),
+		ToolResultMessage("call-1", "first", `{"ok":true}`),
+		ToolResultMessage("call-2", "second", `{"ok":true}`),
+	}}, false)
+	messages := payload["messages"].([]map[string]any)
+	if len(messages) != 3 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	blocks := messages[2]["content"].([]map[string]any)
+	if len(blocks) != 2 || blocks[0]["tool_use_id"] != "call-1" || blocks[1]["tool_use_id"] != "call-2" {
+		t.Fatalf("tool result blocks = %#v", blocks)
+	}
+}
+
 func assertCompletionsToolRoundTrip(t *testing.T, body map[string]any) {
 	t.Helper()
 	messages := body["messages"].([]any)

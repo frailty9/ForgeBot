@@ -211,18 +211,19 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 }
 
 type Manager struct {
-	applyMu  sync.Mutex
-	routeMu  sync.RWMutex
-	statusMu sync.RWMutex
-	current  atomic.Pointer[generation]
-	snapshot atomic.Pointer[config.Snapshot]
-	builder  Builder
-	status   Status
-	started  bool
-	runCtx   context.Context
-	errors   chan error
-	operator operations.Service
-	paused   atomic.Bool
+	applyMu         sync.Mutex
+	routeMu         sync.RWMutex
+	statusMu        sync.RWMutex
+	current         atomic.Pointer[generation]
+	snapshot        atomic.Pointer[config.Snapshot]
+	builder         Builder
+	status          Status
+	started         bool
+	runCtx          context.Context
+	errors          chan error
+	operator        operations.Service
+	paused          atomic.Bool
+	reloadingSearch atomic.Bool
 }
 
 type generation struct {
@@ -573,6 +574,10 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 }
 
 func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontract.ReloadResult, error) {
+	if !m.reloadingSearch.CompareAndSwap(false, true) {
+		return searchcontract.ReloadResult{}, searchcontract.ErrReloadInProgress
+	}
+	defer m.reloadingSearch.Store(false)
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	current := m.current.Load()

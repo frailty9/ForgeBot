@@ -325,6 +325,7 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		if err := decodeStrictJSON(data, &runtime); err != nil {
 			return RuntimeDocument{}, err
 		}
+		normalizeSearchDefaults(&runtime)
 		if err := runtime.Validate(); err != nil {
 			return RuntimeDocument{}, err
 		}
@@ -334,6 +335,7 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 	if err := decodeStrictJSON(data, &document); err != nil {
 		return RuntimeDocument{}, err
 	}
+	normalizeSearchDefaults(&document.Runtime)
 	if document.Version == 0 {
 		return RuntimeDocument{}, errors.New("runtime document version must be positive")
 	}
@@ -343,7 +345,9 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 	if err := document.Runtime.Validate(); err != nil {
 		return RuntimeDocument{}, err
 	}
-	for _, revision := range document.History {
+	for index := range document.History {
+		revision := &document.History[index]
+		normalizeSearchDefaults(&revision.Runtime)
 		if revision.Version == 0 || revision.UpdatedAt.IsZero() {
 			return RuntimeDocument{}, errors.New("runtime history metadata is invalid")
 		}
@@ -352,6 +356,16 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		}
 	}
 	return document, nil
+}
+
+func normalizeSearchDefaults(runtime *RuntimeConfig) {
+	if runtime == nil {
+		return
+	}
+	search := runtime.Search
+	if !search.Enabled && search.Policy == "" && search.Backend == "" && len(search.Extensions) == 0 {
+		runtime.Search = DefaultRuntime().Search
+	}
 }
 
 func loadStaticYAML(path string, target *StaticConfig) error {

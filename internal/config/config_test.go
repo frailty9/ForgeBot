@@ -86,6 +86,42 @@ func TestSearchConfigRejectsUnknownJSONField(t *testing.T) {
 	}
 }
 
+func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
+	legacy := `{
+		"log":{"level":"info","format":"text"},
+		"bot":{"name":"ForgeBot"},
+		"gate":{"enabled":false,"require_mention":true,"silence":"4s","max_count":8,"max_window":"25s","dedup_ttl":"60s","dedup_max":10000,"max_buffered":50,"max_text_len":500,"max_concurrent":4},
+		"llm":{"protocol":"openai_responses","api_key_ref":"llm/default","model":"","timeout":"60s"},
+		"platforms":{"connectors":[{"id":"echo","type":"echo","enabled":true}],"groups":[{"id":"local","connector_id":"echo","target":"local"}]},
+		"operations":{"groups":[]}
+	}`
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _, err := Load(LoadOptions{RuntimePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Runtime.Search.Policy != "on_demand" || snapshot.Runtime.Search.Backend != "structured" {
+		t.Fatalf("search defaults = %+v", snapshot.Runtime.Search)
+	}
+	encoded, err := json.Marshal(snapshot.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _, err := Load(LoadOptions{RuntimePath: path})
+	if err != nil {
+		t.Fatalf("reload rewritten legacy runtime: %v", err)
+	}
+	if err := reloaded.Runtime.Validate(); err != nil {
+		t.Fatalf("rewritten legacy runtime is invalid: %v", err)
+	}
+}
+
 func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	dir := t.TempDir()
 	staticPath := filepath.Join(dir, "forgebot.yaml")

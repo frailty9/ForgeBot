@@ -139,13 +139,17 @@ func (c *anthropicMessagesClient) payload(req Request, stream bool) map[string]a
 			continue
 		}
 		if message.Role == RoleTool {
-			messages = append(messages, map[string]any{
-				"role": "user",
-				"content": []map[string]any{{
-					"type": "tool_result", "tool_use_id": message.ToolCallID,
-					"content": message.Text(),
-				}},
-			})
+			block := map[string]any{
+				"type": "tool_result", "tool_use_id": message.ToolCallID,
+				"content": message.Text(),
+			}
+			if len(messages) > 0 && messages[len(messages)-1]["role"] == "user" {
+				if content, ok := messages[len(messages)-1]["content"].([]map[string]any); ok && len(content) > 0 && content[len(content)-1]["type"] == "tool_result" {
+					messages[len(messages)-1]["content"] = append(content, block)
+					continue
+				}
+			}
+			messages = append(messages, map[string]any{"role": "user", "content": []map[string]any{block}})
 			continue
 		}
 		if message.Role == RoleAssistant && len(message.ToolCalls) > 0 {
