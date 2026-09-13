@@ -33,13 +33,19 @@ type Config struct {
 	APIURL        string
 	SendToken     string
 	ReceiveSecret string
+	PromptSuffix  string
 	WebhookAddr   string
 	WebhookPath   string
 	RequestLimit  int64
 	Timeout       time.Duration
 	ReplayTTL     time.Duration
 	ReplayMax     int
-	Groups        map[string]string
+	Groups        map[string]Group
+}
+
+type Group struct {
+	ConversationID string
+	PromptSuffix   string
 }
 
 type Adapter struct {
@@ -61,6 +67,12 @@ func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	groups := make(map[string]Group, len(cfg.Groups))
+	for target, group := range cfg.Groups {
+		group.PromptSuffix = promptSuffix(cfg.PromptSuffix, group.PromptSuffix)
+		groups[target] = group
+	}
+	cfg.Groups = groups
 	a := &Adapter{
 		cfg: cfg, logger: logger, errors: make(chan error, 1),
 		replay: newReplayCache(cfg.ReplayTTL, cfg.ReplayMax),
@@ -296,13 +308,13 @@ func (e rawEvent) identity() string {
 	return scalar(e.SelfID) + "\x00" + scalar(e.GroupID) + "\x00" + scalar(e.UserID) + "\x00" + scalar(e.MessageID)
 }
 
-func (e rawEvent) message(groups map[string]string) (messaging.InboundMessage, error) {
+func (e rawEvent) message(groups map[string]Group) (messaging.InboundMessage, error) {
 	if e.PostType != "message" || e.MessageType != "group" {
 		return messaging.InboundMessage{}, ErrNotMessageEvent
 	}
 	externalGroupID := scalar(e.GroupID)
-	groupID := groups[externalGroupID]
-	if groupID == "" {
+	group, ok := groups[externalGroupID]
+	if !ok || group.ConversationID == "" {
 		return messaging.InboundMessage{}, ErrNotMessageEvent
 	}
 	if externalGroupID == "" || scalar(e.UserID) == "" || scalar(e.MessageID) == "" {
@@ -313,11 +325,24 @@ func (e rawEvent) message(groups map[string]string) (messaging.InboundMessage, e
 		text = stripCQ(strings.TrimSpace(e.RawMessage))
 	}
 	return messaging.InboundMessage{
-		ConversationID: groupID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname,
+		PromptSuffix:   group.PromptSuffix,
+		ConversationID: group.ConversationID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname,
 		MessageID: scalar(e.MessageID), ReplyToMessageID: replyToMessageID(e.Message, e.RawMessage),
 		Text: text, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)),
 		Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0),
 	}, nil
+}
+
+func promptSuffix(connector, group string) string {
+	connector = strings.TrimSpace(connector)
+	group = strings.TrimSpace(group)
+	if connector == "" {
+		return group
+	}
+	if group == "" {
+		return connector
+	}
+	return connector + "\n\n" + group
 }
 
 func scalar(raw json.RawMessage) string {

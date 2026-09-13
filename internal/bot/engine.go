@@ -159,8 +159,9 @@ func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text st
 
 func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
 	text := strings.TrimSpace(in.Text)
+	instructions := e.instructions(in.PromptSuffix)
 	if query, explicit := explicitSearchQuery(text); explicit {
-		return e.explicitSearch(ctx, query)
+		return e.explicitSearch(ctx, query, instructions)
 	}
 	if e.deps.LLM == nil {
 		name := strings.TrimSpace(e.deps.Policy.Name)
@@ -175,7 +176,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	startedAt := time.Now()
 	response, err := e.deps.LLM.Complete(ctx, llm.Request{
 		Model:        e.deps.Policy.Model,
-		Instructions: e.deps.Policy.SystemPrompt,
+		Instructions: instructions,
 		Messages:     messages,
 		Tools:        tools,
 	})
@@ -214,7 +215,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	startedAt = time.Now()
 	final, err := e.deps.LLM.Complete(ctx, llm.Request{
-		Model: e.deps.Policy.Model, Instructions: e.deps.Policy.SystemPrompt, Messages: messages,
+		Model: e.deps.Policy.Model, Instructions: instructions, Messages: messages,
 	})
 	if err != nil {
 		e.logger.DebugContext(ctx, "llm tool follow-up failed", "model", e.deps.Policy.Model, "duration", time.Since(startedAt), "err", err)
@@ -222,6 +223,18 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	e.logger.DebugContext(ctx, "llm tool follow-up finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(final.Text)), "total_tokens", final.Usage.TotalTokens)
 	return final.Text, nil
+}
+
+func (e *Engine) instructions(suffix string) string {
+	base := strings.TrimSpace(e.deps.Policy.SystemPrompt)
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		return base
+	}
+	if base == "" {
+		return suffix
+	}
+	return base + "\n\n" + suffix
 }
 
 func (e *Engine) toolDefinitions() []llm.ToolDefinition {
@@ -236,7 +249,7 @@ func (e *Engine) toolDefinitions() []llm.ToolDefinition {
 	return result
 }
 
-func (e *Engine) explicitSearch(ctx context.Context, query string) (string, error) {
+func (e *Engine) explicitSearch(ctx context.Context, query, instructions string) (string, error) {
 	if !e.deps.Policy.Search.Enabled || e.deps.Retriever == nil {
 		return "文档检索尚未启用。", nil
 	}
@@ -256,7 +269,7 @@ func (e *Engine) explicitSearch(ctx context.Context, query string) (string, erro
 		return formatSearchResults(selected), nil
 	}
 	result, err := e.deps.LLM.Complete(ctx, llm.Request{
-		Model: e.deps.Policy.Model, Instructions: e.deps.Policy.SystemPrompt,
+		Model: e.deps.Policy.Model, Instructions: instructions,
 		Messages: []llm.Message{
 			llm.TextMessage(llm.RoleUser, query),
 			llm.TextMessage(llm.RoleUser, contextText+"\n\n请根据以上资料回答原问题，并引用 source 路径。"),

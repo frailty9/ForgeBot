@@ -56,6 +56,7 @@
         "id": "qq-main",
         "type": "onebot",
         "enabled": false,
+        "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
         "onebot": {
           "api_url": "http://127.0.0.1:5700",
           "send_token": "",
@@ -70,7 +71,8 @@
       }
     ],
     "groups": [
-      {"id": "local", "connector_id": "echo-local", "target": "local"}
+      {"id": "local", "connector_id": "echo-local", "target": "local"},
+      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
     ]
   },
   "operations": {

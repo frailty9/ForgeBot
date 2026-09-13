@@ -29,13 +29,15 @@ func testConfig(apiURL string) Config {
 	return Config{
 		ID: "qq-main", APIURL: apiURL, WebhookAddr: "127.0.0.1:0", WebhookPath: "/onebot",
 		RequestLimit: 1 << 20, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100,
-		Groups: map[string]string{"8": "support"},
+		Groups: map[string]Group{"8": {ConversationID: "support"}},
 	}
 }
 
 func TestWebhookMapsGroupMessageAndAuth(t *testing.T) {
 	cfg := testConfig("http://127.0.0.1:5700")
 	cfg.ReceiveSecret = "secret"
+	cfg.PromptSuffix = "连接器约束"
+	cfg.Groups = map[string]Group{"8": {ConversationID: "support", PromptSuffix: "群组约束"}}
 	a, err := New(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +61,22 @@ func TestWebhookMapsGroupMessageAndAuth(t *testing.T) {
 	}
 	if got.ConversationID != "support" || got.UserID != "7" || got.MessageID != "42" || !got.Mentioned || got.UserName != "alice" {
 		t.Fatalf("unexpected message: %+v", got)
+	}
+	if got.PromptSuffix != "连接器约束\n\n群组约束" {
+		t.Fatalf("prompt suffix = %q", got.PromptSuffix)
+	}
+}
+
+func TestNewPrecomputesPromptSuffixes(t *testing.T) {
+	cfg := testConfig("http://127.0.0.1:5700")
+	cfg.PromptSuffix = "connector"
+	cfg.Groups = map[string]Group{"8": {ConversationID: "support", PromptSuffix: "group"}}
+	adapter, err := New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := adapter.cfg.Groups["8"].PromptSuffix; got != "connector\n\ngroup" {
+		t.Fatalf("precomputed suffix = %q", got)
 	}
 }
 
@@ -184,7 +202,7 @@ func TestMessageSegmentsProduceCleanText(t *testing.T) {
 		RawMessage: "[CQ:at,qq=99] /status",
 		Message:    json.RawMessage(`[{"type":"at","data":{"qq":"99"}},{"type":"text","data":{"text":" /status"}}]`),
 	}
-	message, err := event.message(map[string]string{"8": "ops"})
+	message, err := event.message(map[string]Group{"8": {ConversationID: "ops"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +259,7 @@ func TestMessageSegmentsProduceCleanTextAndMention(t *testing.T) {
 			{"type": "image", "data": map[string]string{"file": "x"}},
 		}),
 	}
-	message, err := event.message(map[string]string{"8": "support"})
+	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +278,7 @@ func TestMessageExtractsReplyRelationship(t *testing.T) {
 			{"type": "text", "data": map[string]string{"text": " answer"}},
 		}),
 	}
-	message, err := event.message(map[string]string{"8": "support"})
+	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +293,7 @@ func TestMessageExtractsReplyRelationshipFromCQFallback(t *testing.T) {
 		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"),
 		RawMessage: "[CQ:reply,id=123] answer", Message: json.RawMessage(`"answer"`),
 	}
-	message, err := event.message(map[string]string{"8": "support"})
+	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
 	if err != nil {
 		t.Fatal(err)
 	}

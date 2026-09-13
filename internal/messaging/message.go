@@ -20,6 +20,9 @@ type Media struct {
 }
 
 type InboundMessage struct {
+	// PromptSuffix is adapter-provided system-instruction context. It is kept
+	// out of the public message JSON surface so callers cannot override it.
+	PromptSuffix     string    `json:"-"`
 	ConversationID   string    `json:"conversation_id"`
 	UserID           string    `json:"user_id"`
 	UserName         string    `json:"user_name,omitempty"`

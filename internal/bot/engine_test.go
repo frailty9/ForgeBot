@@ -114,6 +114,31 @@ func TestEngineUsesInjectedLLM(t *testing.T) {
 	}
 }
 
+func TestEngineAppendsPromptSuffix(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "plain", Message: llm.TextMessage(llm.RoleAssistant, "plain")}}
+	policy := testPolicy()
+	policy.SystemPrompt = "base"
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{PromptSuffix: "仅使用纯文本，不要使用 Markdown。", ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.request.Instructions != "base\n\n仅使用纯文本，不要使用 Markdown。" {
+		t.Fatalf("instructions = %q", fake.request.Instructions)
+	}
+}
+
 func TestEngineRequiresSender(t *testing.T) {
 	if _, err := NewEngine(context.Background(), Dependencies{Policy: testPolicy()}, slog.Default()); err == nil {
 		t.Fatal("missing sender accepted")

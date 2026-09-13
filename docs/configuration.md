@@ -218,6 +218,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
       "id": "qq-main",
       "type": "onebot",
       "enabled": true,
+      "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
       "onebot": {
         "api_url": "http://127.0.0.1:5700",
         "send_token": "",
@@ -233,7 +234,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
   ],
   "groups": [
     {"id": "local", "connector_id": "echo-local", "target": "local"},
-    {"id": "support", "connector_id": "qq-main", "target": "10001"}
+    {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
   ]
 }
 ```
@@ -241,6 +242,8 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 `connectors` 支持同时启用多个连接器，当前类型为 `echo` 和 `onebot`。ID 必须唯一。启用的 OneBot 连接器必须至少绑定一个群组。
 
 `groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。
+
+`connectors[].prompt_suffix` 和 `groups[].prompt_suffix` 都是可选的系统提示词追加内容。连接器级内容用于渠道通用约束（例如 QQ 使用纯文本），群组级内容用于该群组的语气、主题或行为约束。两者都存在时按“连接器后群组”的顺序拼接；都为空时不追加。它们属于运行时配置，可通过管理 API 热更新。
 
 OneBot 字段：
 

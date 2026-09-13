@@ -151,16 +151,18 @@ type PlatformConfig struct {
 }
 
 type ConnectorConfig struct {
-	ID      string                 `json:"id" yaml:"id"`
-	Type    string                 `json:"type" yaml:"type"`
-	Enabled bool                   `json:"enabled" yaml:"enabled"`
-	OneBot  *OneBotConnectorConfig `json:"onebot,omitempty" yaml:"onebot,omitempty"`
+	ID           string                 `json:"id" yaml:"id"`
+	Type         string                 `json:"type" yaml:"type"`
+	Enabled      bool                   `json:"enabled" yaml:"enabled"`
+	PromptSuffix string                 `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	OneBot       *OneBotConnectorConfig `json:"onebot,omitempty" yaml:"onebot,omitempty"`
 }
 
 type GroupBindingConfig struct {
-	ID          string `json:"id" yaml:"id"`
-	ConnectorID string `json:"connector_id" yaml:"connector_id"`
-	Target      string `json:"target" yaml:"target"`
+	ID           string `json:"id" yaml:"id"`
+	ConnectorID  string `json:"connector_id" yaml:"connector_id"`
+	Target       string `json:"target" yaml:"target"`
+	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
 }
 
 type OperationsConfig struct {
@@ -991,7 +993,8 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 func (c PlatformConfig) Public() map[string]any {
 	connectors := make([]any, 0, len(c.Connectors))
 	for _, connector := range c.Connectors {
-		item := map[string]any{"id": connector.ID, "type": connector.Type, "enabled": connector.Enabled}
+		item := map[string]any{"id": connector.ID, "type": connector.Type, "enabled": connector.Enabled,
+			"prompt_suffix": connector.PromptSuffix}
 		if connector.OneBot != nil {
 			item["onebot"] = map[string]any{
 				"api_url": connector.OneBot.APIURL, "webhook_addr": connector.OneBot.WebhookAddr,

@@ -108,16 +108,17 @@ func connectorFactory(logger *slog.Logger) runtimecfg.ConnectorFactory {
 			case "echo":
 				adapters = append(adapters, memory.NewAdapter(connector.ID, logger))
 			case "onebot":
-				groups := make(map[string]string)
+				groups := make(map[string]onebot.Group)
 				for _, binding := range cfg.Groups {
 					if binding.ConnectorID == connector.ID {
-						groups[binding.Target] = binding.ID
+						groups[binding.Target] = onebot.Group{ConversationID: binding.ID, PromptSuffix: binding.PromptSuffix}
 					}
 				}
 				onebotConfig := connector.OneBot
 				adapter, err := onebot.New(onebot.Config{
 					ID: connector.ID, APIURL: onebotConfig.APIURL, SendToken: onebotConfig.SendToken,
 					ReceiveSecret: onebotConfig.ReceiveSecret,
+					PromptSuffix:  connector.PromptSuffix,
 					WebhookAddr:   onebotConfig.WebhookAddr, WebhookPath: onebotConfig.WebhookPath,
 					RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout,
 					ReplayTTL: onebotConfig.ReplayTTL, ReplayMax: onebotConfig.ReplayMax, Groups: groups,
