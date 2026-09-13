@@ -149,7 +149,8 @@ func TestEngineExecutesOneSearchToolAndStopsLoop(t *testing.T) {
 	if len(messages) != 3 || messages[1].ToolCalls[0].ID != "call-1" || messages[2].Role != llm.RoleTool || !strings.Contains(messages[2].Text(), "untrusted") && !strings.Contains(messages[2].Text(), "不可信") {
 		t.Fatalf("tool messages = %+v", messages)
 	}
-	if sender.Sent()[0].Text != "document answer" {
+	sent := sender.Sent()
+	if len(sent) != 2 || sent[0].Text != searchPreReply || sent[1].Text != "document answer" {
 		t.Fatalf("sent = %+v", sender.Sent())
 	}
 }

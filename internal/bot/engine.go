@@ -59,6 +59,8 @@ type Engine struct {
 	gate   *gate.Pool
 }
 
+const searchPreReply = "正在检索相关文档，请稍候。"
+
 func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -97,7 +99,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 			return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
 		}
 	}
-	reply, err := e.replyText(ctx, msg.Text)
+	reply, err := e.replyText(ctx, msg)
 	if err != nil {
 		e.logger.DebugContext(ctx, "bot reply generation failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, err
@@ -155,8 +157,8 @@ func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text st
 	return e.deps.Sender.Send(ctx, message)
 }
 
-func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
-	text = strings.TrimSpace(text)
+func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
+	text := strings.TrimSpace(in.Text)
 	if query, explicit := explicitSearchQuery(text); explicit {
 		return e.explicitSearch(ctx, query)
 	}
@@ -190,9 +192,18 @@ func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
 	if budget <= 0 {
 		budget = 1
 	}
+	preReplySent := false
 	for index, call := range response.Message.ToolCalls {
 		result := tooling.Result{Code: "budget_exhausted"}
 		if index < budget && e.deps.Tools != nil {
+			if !preReplySent && call.Name == "search_docs" {
+				preReplySent = true
+				if err := e.reply(ctx, in, searchPreReply); err != nil {
+					e.logger.WarnContext(ctx, "send search pre-reply failed", "conversation_id", in.ConversationID, "message_id", in.MessageID, "err", err)
+				} else {
+					e.logger.DebugContext(ctx, "search pre-reply sent", "conversation_id", in.ConversationID, "message_id", in.MessageID)
+				}
+			}
 			result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
 		}
 		payload, marshalErr := json.Marshal(result)
