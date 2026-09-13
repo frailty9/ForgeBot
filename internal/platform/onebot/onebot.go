@@ -148,6 +148,11 @@ func (a *Adapter) Stop(ctx context.Context) error {
 
 func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
+		defer func() {
+			a.logger.DebugContext(context.WithoutCancel(r.Context()), "onebot webhook completed", "path", r.URL.Path, "duration", time.Since(startedAt))
+		}()
+		a.logger.DebugContext(r.Context(), "onebot webhook received", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -158,31 +163,42 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			return
 		}
 		if !a.authorized(r, body) {
+			a.logger.WarnContext(r.Context(), "onebot webhook unauthorized", "path", r.URL.Path)
 			writeResponse(w, http.StatusUnauthorized, map[string]string{"status": "failed", "retcode": "1403"})
 			return
 		}
 		var event rawEvent
 		decoder := json.NewDecoder(bytes.NewReader(body))
 		if err := decoder.Decode(&event); err != nil {
+			a.logger.WarnContext(r.Context(), "onebot webhook invalid JSON", "err", err)
 			writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1001"})
 			return
 		}
 		msg, err := event.message(a.cfg.Groups)
 		if err != nil {
 			if errors.Is(err, ErrNotMessageEvent) {
+				a.logger.DebugContext(r.Context(), "onebot event ignored", "post_type", event.PostType, "message_type", event.MessageType)
 				writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
 				return
 			}
 			writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1002"})
 			return
 		}
+		a.logger.DebugContext(r.Context(), "onebot message mapped", "conversation_id", msg.ConversationID,
+			"message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 		if a.replay.seenOrAdd(event.identity(), time.Now()) {
+			a.logger.DebugContext(r.Context(), "onebot event replay suppressed", "message_id", msg.MessageID)
 			writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
 			return
 		}
-		result, err := handler.HandleInbound(r.Context(), msg)
+		// Reverse HTTP clients may cancel their request after a short ACK timeout.
+		// Keep bot/LLM processing alive independently of that transport lifetime.
+		processingCtx := context.WithoutCancel(r.Context())
+		result, err := handler.HandleInbound(processingCtx, msg)
 		if err != nil {
-			a.logger.ErrorContext(r.Context(), "onebot inbound message failed", "err", err, "message_id", msg.MessageID)
+			a.logger.ErrorContext(processingCtx, "onebot inbound message failed", "err", err, "message_id", msg.MessageID, "conversation_id", msg.ConversationID, "verdict", result.Verdict)
+		} else {
+			a.logger.DebugContext(processingCtx, "onebot inbound message handled", "message_id", msg.MessageID, "conversation_id", msg.ConversationID, "accepted", result.Accepted, "verdict", result.Verdict)
 		}
 		writeResponse(w, http.StatusOK, map[string]any{"status": "ok", "retcode": "0", "data": result})
 	}
@@ -226,6 +242,7 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	if err != nil {
 		return fmt.Errorf("onebot API URL: %w", err)
 	}
+	s.logger.DebugContext(ctx, "onebot outbound request", "endpoint", endpoint, "target", target, "conversation_id", msg.ConversationID, "reply_to", msg.ReplyToMessageID, "text_len", len([]rune(msg.Text)))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -236,11 +253,13 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		s.logger.DebugContext(ctx, "onebot outbound request failed", "endpoint", endpoint, "err", err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		s.logger.DebugContext(ctx, "onebot outbound response failed", "endpoint", endpoint, "status", resp.StatusCode)
 		return fmt.Errorf("onebot API status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var result struct {
@@ -251,8 +270,10 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 		return fmt.Errorf("decode onebot API response: %w", err)
 	}
 	if result.Retcode != 0 || result.Status == "failed" {
+		s.logger.DebugContext(ctx, "onebot outbound response rejected", "endpoint", endpoint, "retcode", result.Retcode, "status", result.Status)
 		return fmt.Errorf("onebot API failed: retcode=%d status=%s", result.Retcode, result.Status)
 	}
+	s.logger.DebugContext(ctx, "onebot outbound response accepted", "endpoint", endpoint, "status", result.Status)
 	return nil
 }
 

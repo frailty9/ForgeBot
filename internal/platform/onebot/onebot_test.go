@@ -79,6 +79,32 @@ func TestWebhookRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestWebhookProcessingContextSurvivesRequestCancellation(t *testing.T) {
+	adapter, err := New(testConfig("http://127.0.0.1:5700"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 43,
+		"user_id": 7, "group_id": 8, "self_id": 99, "raw_message": "hello",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)).WithContext(ctx)
+	cancel()
+	called := false
+	response := httptest.NewRecorder()
+	adapter.webhook(handlerFunc(func(ctx context.Context, _ messaging.InboundMessage) (platform.HandleResult, error) {
+		called = true
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("processing context was canceled: %v", err)
+		}
+		return platform.HandleResult{Accepted: true, Verdict: "pass"}, nil
+	}))(response, req)
+	if !called {
+		t.Fatal("handler was not called")
+	}
+}
+
 func TestSenderUsesSendMsgAndReplySegments(t *testing.T) {
 	var got map[string]any
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

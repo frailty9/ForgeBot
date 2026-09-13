@@ -77,6 +77,7 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 }
 
 func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
 	}
@@ -98,9 +99,12 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	}
 	reply, err := e.replyText(ctx, msg.Text)
 	if err != nil {
+		e.logger.DebugContext(ctx, "bot reply generation failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, err
 	}
+	e.logger.DebugContext(ctx, "bot reply generated", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "reply_len", len([]rune(reply)))
 	if err := e.reply(ctx, msg, reply); err != nil {
+		e.logger.DebugContext(ctx, "bot reply delivery failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
 	return platform.HandleResult{Accepted: true, Verdict: verdict.String()}, nil
@@ -163,8 +167,10 @@ func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
 		}
 		return name + " received: " + strings.TrimSpace(text), nil
 	}
+	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "tools", len(e.toolDefinitions()))
 	messages := []llm.Message{llm.TextMessage(llm.RoleUser, text)}
 	tools := e.toolDefinitions()
+	startedAt := time.Now()
 	response, err := e.deps.LLM.Complete(ctx, llm.Request{
 		Model:        e.deps.Policy.Model,
 		Instructions: e.deps.Policy.SystemPrompt,
@@ -172,8 +178,10 @@ func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
 		Tools:        tools,
 	})
 	if err != nil {
+		e.logger.DebugContext(ctx, "llm completion failed", "model", e.deps.Policy.Model, "duration", time.Since(startedAt), "err", err)
 		return "", err
 	}
+	e.logger.DebugContext(ctx, "llm completion finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(response.Text)), "tool_calls", len(response.Message.ToolCalls), "total_tokens", response.Usage.TotalTokens)
 	if len(response.Message.ToolCalls) == 0 {
 		return response.Text, nil
 	}
@@ -193,12 +201,15 @@ func (e *Engine) replyText(ctx context.Context, text string) (string, error) {
 		}
 		messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
 	}
+	startedAt = time.Now()
 	final, err := e.deps.LLM.Complete(ctx, llm.Request{
 		Model: e.deps.Policy.Model, Instructions: e.deps.Policy.SystemPrompt, Messages: messages,
 	})
 	if err != nil {
+		e.logger.DebugContext(ctx, "llm tool follow-up failed", "model", e.deps.Policy.Model, "duration", time.Since(startedAt), "err", err)
 		return "", err
 	}
+	e.logger.DebugContext(ctx, "llm tool follow-up finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(final.Text)), "total_tokens", final.Usage.TotalTokens)
 	return final.Text, nil
 }
 
