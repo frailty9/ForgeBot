@@ -106,10 +106,11 @@ operational event.
 hybrid retrieval may implement the same contract later, but their dependencies,
 configuration values, and index files are deliberately absent today.
 
-`<document_root>/extra` is an optional convention for future Bot-promoted
-knowledge. That workflow may write managed `.md` files only under this subtree;
-the search service itself remains read-only and indexes the directory through
-its normal recursive scan.
+The reflection publisher writes Bot-promoted knowledge to the configured
+`reflection.extra_directory`. Relative paths are resolved from
+`search.document_root`; absolute paths are used as-is. The default remains
+`extra`. The search service itself remains read-only and indexes the directory
+through its normal recursive scan.
 
 ## LLM Client Contract
 

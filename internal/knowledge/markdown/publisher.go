@@ -1,5 +1,5 @@
-// Package markdown publishes ForgeBot-managed knowledge into one controlled
-// subdirectory of the configured search root.
+// Package markdown publishes ForgeBot-managed knowledge into a configured
+// directory, relative to the search root unless an absolute path is supplied.
 package markdown
 
 import (
@@ -38,17 +38,27 @@ type Publisher struct {
 
 func New(cfg Config) (*Publisher, error) {
 	rawRoot := strings.TrimSpace(cfg.Root)
-	if rawRoot == "" || strings.TrimSpace(cfg.ExtraDirectory) != "extra" || cfg.MaxBytes <= 0 {
+	rawExtra := strings.TrimSpace(cfg.ExtraDirectory)
+	if rawRoot == "" || rawExtra == "" || cfg.MaxBytes <= 0 {
 		return nil, ErrInvalidConfig
 	}
 	root, err := filepath.Abs(rawRoot)
-	if err != nil || root == "" || strings.TrimSpace(cfg.ExtraDirectory) != "extra" || cfg.MaxBytes <= 0 {
+	if err != nil || root == "" || cfg.MaxBytes <= 0 {
 		return nil, ErrInvalidConfig
 	}
+	root = filepath.Clean(root)
 	if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
 		return nil, ErrInvalidConfig
 	}
-	extra := filepath.Join(root, "extra")
+	extra := rawExtra
+	if !filepath.IsAbs(extra) {
+		extra = filepath.Join(root, extra)
+	}
+	extra, err = filepath.Abs(extra)
+	if err != nil || extra == "" {
+		return nil, ErrInvalidConfig
+	}
+	extra = filepath.Clean(extra)
 	if info, statErr := os.Lstat(extra); statErr == nil && !info.IsDir() {
 		return nil, ErrInvalidConfig
 	}
@@ -90,7 +100,7 @@ func (p *Publisher) Publish(entry knowledge.Entry) (knowledge.PublishResult, err
 	if err := atomicWrite(path, body, p.maxBytes); err != nil {
 		return knowledge.PublishResult{}, err
 	}
-	return knowledge.PublishResult{Status: knowledge.Published, Path: filepath.ToSlash(filepath.Join("extra", filepath.Base(path))), ContentHash: hash}, nil
+	return knowledge.PublishResult{Status: knowledge.Published, Path: p.resultPath(path), ContentHash: hash}, nil
 }
 
 func (p *Publisher) findDuplicate(entry knowledge.Entry, hash string) (bool, string, error) {
@@ -128,10 +138,18 @@ func (p *Publisher) findDuplicate(entry knowledge.Entry, hash string) (bool, str
 			continue
 		}
 		if meta.ContentHash == hash || (meta.SourceConversation == entry.ConversationID && meta.SourceQuestion == entry.SourceQuestionMessageID && meta.SourceAnswer == entry.SourceAnswerMessageID) {
-			return true, filepath.ToSlash(filepath.Join("extra", item.Name())), nil
+			return true, p.resultPath(path), nil
 		}
 	}
 	return false, "", nil
+}
+
+func (p *Publisher) resultPath(path string) string {
+	rel, err := filepath.Rel(p.root, path)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
 func canonicalEntry(entry knowledge.Entry) (knowledge.Entry, string, error) {

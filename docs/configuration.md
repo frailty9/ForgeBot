@@ -312,14 +312,14 @@ OneBot 字段：
 }
 ```
 
-反思模块定时扫描内存中的群消息，识别管理员对用户问题形成的多消息回答，并让 LLM 判断是否可沉淀为通用知识。接受的内容以托管 Markdown 原子写入 `<document_root>/extra/*.md`，每批写入后统一重载索引；不保存完整聊天历史。
+反思模块定时扫描内存中的群消息，识别管理员对用户问题形成的多消息回答，并让 LLM 判断是否可沉淀为通用知识。接受的内容以托管 Markdown 原子写入 `extra_directory/*.md`，每批写入后统一重载索引；不保存完整聊天历史。
 
 启用条件：
 
 - `enabled: true` 且 `mode: auto`；停用时使用 `mode: off`。
 - 搜索已启用，`extensions` 包含 `.md`。
 - `conversation_ids` 非空、无重复并引用已绑定群组。
-- `extra_directory` 固定为 `extra`。
+- `extra_directory` 可省略（默认 `extra`）。相对路径相对于 `search.document_root`，例如 `generated-knowledge` 会写入 `<document_root>/generated-knowledge/`；绝对路径直接作为输出目录。
 - LLM 模型及其 API Key 可用。
 - 所有 duration 和容量为正数，`min_confidence` 范围为 `(0, 1]`。
 

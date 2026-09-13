@@ -574,8 +574,8 @@ func (c ReflectionConfig) Validate(search SearchConfig, platforms PlatformConfig
 	if c.Enabled && !search.Enabled {
 		problems = append(problems, "reflection requires search to be enabled")
 	}
-	if c.Enabled && strings.TrimSpace(c.ExtraDirectory) != "extra" {
-		problems = append(problems, "reflection.extra_directory must be extra")
+	if c.Enabled && strings.TrimSpace(c.ExtraDirectory) == "" {
+		problems = append(problems, "reflection.extra_directory is required when reflection is enabled")
 	}
 	if c.Enabled {
 		hasMarkdown := false

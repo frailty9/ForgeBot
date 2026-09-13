@@ -62,8 +62,37 @@ func TestPublisherDoesNotOverwriteUnmanagedCollision(t *testing.T) {
 
 func TestPublisherRejectsInvalidEntriesAndOversizedOutput(t *testing.T) {
 	root := t.TempDir()
-	if _, err := New(Config{Root: root, ExtraDirectory: "other", MaxBytes: 100}); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("config err=%v", err)
+	if _, err := New(Config{Root: root, ExtraDirectory: "", MaxBytes: 100}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("empty directory config err=%v", err)
+	}
+	pOther, err := New(Config{Root: root, ExtraDirectory: "generated", MaxBytes: 100000})
+	if err != nil {
+		t.Fatalf("relative config err=%v", err)
+	}
+	if _, err := pOther.Publish(testEntry()); err != nil {
+		t.Fatalf("relative publish err=%v", err)
+	}
+	absolute := filepath.Join(t.TempDir(), "generated-knowledge")
+	pAbsolute, err := New(Config{Root: root, ExtraDirectory: absolute, MaxBytes: 100000})
+	if err != nil {
+		t.Fatalf("absolute config err=%v", err)
+	}
+	result, err := pAbsolute.Publish(testEntry())
+	if err != nil {
+		t.Fatalf("absolute publish err=%v", err)
+	}
+	if !filepath.IsAbs(filepath.FromSlash(result.Path)) {
+		t.Fatalf("absolute result path=%q", result.Path)
+	}
+	if _, err := os.Stat(filepath.FromSlash(result.Path)); err != nil {
+		t.Fatalf("absolute output missing: %v", err)
+	}
+	fileTarget := filepath.Join(t.TempDir(), "output-file")
+	if err := os.WriteFile(fileTarget, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(Config{Root: root, ExtraDirectory: fileTarget, MaxBytes: 100000}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("file target config err=%v", err)
 	}
 	p, _ := New(Config{Root: root, ExtraDirectory: "extra", MaxBytes: 20})
 	if _, err := p.Publish(knowledge.Entry{Title: "missing"}); !errors.Is(err, ErrInvalidEntry) {
