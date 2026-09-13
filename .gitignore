@@ -11,6 +11,9 @@
 
 # Local configuration
 /configs/*.local.json
+/configs/*-local.json
+/configs/*.local.yaml
+/configs/*-local.yaml
 /configs/secrets.json
 .env
 .env.*
