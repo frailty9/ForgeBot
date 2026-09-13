@@ -31,28 +31,36 @@ func (r ReflectionConfig) MarshalJSON() ([]byte, error) {
 
 func (c MCPServerConfig) MarshalJSON() ([]byte, error) {
 	type encoded struct {
-		ID               string   `json:"id"`
-		Enabled          bool     `json:"enabled"`
-		Transport        string   `json:"transport"`
-		Endpoint         string   `json:"endpoint"`
-		APIKeyRef        string   `json:"api_key_ref,omitempty"`
-		AllowedTools     []string `json:"allowed_tools"`
-		Timeout          string   `json:"timeout"`
-		MaxResponseBytes int64    `json:"max_response_bytes"`
+		ID               string            `json:"id"`
+		Enabled          bool              `json:"enabled"`
+		Transport        string            `json:"transport"`
+		Endpoint         string            `json:"endpoint"`
+		Command          string            `json:"command,omitempty"`
+		Args             []string          `json:"args,omitempty"`
+		WorkingDirectory string            `json:"working_directory,omitempty"`
+		Environment      map[string]string `json:"environment,omitempty"`
+		APIKeyRef        string            `json:"api_key_ref,omitempty"`
+		AllowedTools     []string          `json:"allowed_tools"`
+		Timeout          string            `json:"timeout"`
+		MaxResponseBytes int64             `json:"max_response_bytes"`
 	}
-	return json.Marshal(encoded{c.ID, c.Enabled, c.Transport, c.Endpoint, c.APIKeyRef, c.AllowedTools, c.Timeout.String(), c.MaxResponseBytes})
+	return json.Marshal(encoded{c.ID, c.Enabled, c.Transport, c.Endpoint, c.Command, c.Args, c.WorkingDirectory, c.Environment, c.APIKeyRef, c.AllowedTools, c.Timeout.String(), c.MaxResponseBytes})
 }
 
 func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
 	type raw struct {
-		ID               string          `json:"id"`
-		Enabled          bool            `json:"enabled"`
-		Transport        string          `json:"transport"`
-		Endpoint         string          `json:"endpoint"`
-		APIKeyRef        string          `json:"api_key_ref"`
-		AllowedTools     []string        `json:"allowed_tools"`
-		Timeout          json.RawMessage `json:"timeout"`
-		MaxResponseBytes int64           `json:"max_response_bytes"`
+		ID               string            `json:"id"`
+		Enabled          bool              `json:"enabled"`
+		Transport        string            `json:"transport"`
+		Endpoint         string            `json:"endpoint"`
+		Command          string            `json:"command"`
+		Args             []string          `json:"args"`
+		WorkingDirectory string            `json:"working_directory"`
+		Environment      map[string]string `json:"environment"`
+		APIKeyRef        string            `json:"api_key_ref"`
+		AllowedTools     []string          `json:"allowed_tools"`
+		Timeout          json.RawMessage   `json:"timeout"`
+		MaxResponseBytes int64             `json:"max_response_bytes"`
 	}
 	var value raw
 	if err := decodeStrictJSON(data, &value); err != nil {
@@ -63,7 +71,7 @@ func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("timeout: %w", err)
 	}
-	*c = MCPServerConfig{ID: value.ID, Enabled: value.Enabled, Transport: value.Transport, Endpoint: value.Endpoint, APIKeyRef: value.APIKeyRef, AllowedTools: value.AllowedTools, Timeout: timeout, MaxResponseBytes: value.MaxResponseBytes}
+	*c = MCPServerConfig{ID: value.ID, Enabled: value.Enabled, Transport: value.Transport, Endpoint: value.Endpoint, Command: value.Command, Args: value.Args, WorkingDirectory: value.WorkingDirectory, Environment: value.Environment, APIKeyRef: value.APIKeyRef, AllowedTools: value.AllowedTools, Timeout: timeout, MaxResponseBytes: value.MaxResponseBytes}
 	if c.Transport == "" {
 		c.Transport = "streamable_http"
 	}

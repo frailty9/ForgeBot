@@ -173,7 +173,17 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 			}
 			apiKey = value
 		}
-		mcpClient, clientErr := toolingmcp.New(ctx, toolingmcp.Config{ID: mcpConfig.ID, Endpoint: mcpConfig.Endpoint, APIKey: apiKey, AllowedTools: mcpConfig.AllowedTools, Timeout: mcpConfig.Timeout, MaxResponseBytes: mcpConfig.MaxResponseBytes})
+		mcpConfigValue := toolingmcp.Config{ID: mcpConfig.ID, Endpoint: mcpConfig.Endpoint, APIKey: apiKey, AllowedTools: mcpConfig.AllowedTools, Timeout: mcpConfig.Timeout, MaxResponseBytes: mcpConfig.MaxResponseBytes}
+		var mcpClient *toolingmcp.Client
+		var clientErr error
+		switch mcpConfig.Transport {
+		case "streamable_http":
+			mcpClient, clientErr = toolingmcp.New(ctx, mcpConfigValue)
+		case "stdio":
+			mcpClient, clientErr = toolingmcp.NewWithStdio(ctx, mcpConfigValue, toolingmcp.StdioConfig{Command: mcpConfig.Command, Args: mcpConfig.Args, WorkingDirectory: mcpConfig.WorkingDirectory, Environment: mcpConfig.Environment, Timeout: mcpConfig.Timeout, MaxResponseBytes: mcpConfig.MaxResponseBytes})
+		default:
+			clientErr = fmt.Errorf("unsupported MCP transport %q", mcpConfig.Transport)
+		}
 		if clientErr != nil {
 			return nil, fmt.Errorf("connect MCP server %q: %w", mcpConfig.ID, clientErr)
 		}

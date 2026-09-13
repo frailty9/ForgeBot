@@ -377,11 +377,16 @@ Invoke-RestMethod `
 ## 6.5 外部扩展（MCP 与 Skill）
 
 应用层扩展位于运行时 JSON 的 `extensions` 字段，因此可以通过管理 API
-热更新。MCP 只支持显式配置的 Streamable HTTP 端点；ForgeBot 启动候选
-runtime 时执行 `initialize` 和 `tools/list`，随后仅暴露 `allowed_tools` 中
+热更新。MCP 支持显式配置的 Streamable HTTP 端点和 stdio 子进程；ForgeBot
+启动候选 runtime 时执行 `initialize` 和 `tools/list`，随后仅暴露 `allowed_tools` 中
 的工具。工具名统一为 `mcp.<server_id>.<tool_name>`，LLM 无法指定服务地址、
 认证方式或未授权工具。MCP 凭据使用 `api_key_ref` 指向 SecretStore，永远不
 进入配置脱敏响应和模型上下文。
+
+stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
+命令通过操作系统进程 API 直接启动，不经过 shell；子进程 stdout 必须只输出
+逐行 JSON-RPC，普通日志应写入 stderr。请求超时会终止子进程，候选 runtime
+构建失败并保留旧 generation。
 
 `extensions.skills.directories` 是本地 `SKILL.md` 目录列表。加载器按路径
 稳定排序并限制单文件、总字节数和文件数量，将正文作为外部 instruction 快照

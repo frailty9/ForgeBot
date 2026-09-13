@@ -66,6 +66,14 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return c, nil
 }
 
+func NewWithStdio(ctx context.Context, cfg Config, stdio StdioConfig) (*Client, error) {
+	transport, err := NewStdioTransport(stdio)
+	if err != nil {
+		return nil, err
+	}
+	return NewWithTransport(ctx, cfg, transport)
+}
+
 func NewWithTransport(ctx context.Context, cfg Config, transport Transport) (*Client, error) {
 	if strings.TrimSpace(cfg.ID) == "" {
 		return nil, errors.New("MCP id is required")

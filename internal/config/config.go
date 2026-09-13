@@ -71,14 +71,18 @@ type ExtensionsConfig struct {
 }
 
 type MCPServerConfig struct {
-	ID               string        `json:"id"`
-	Enabled          bool          `json:"enabled"`
-	Transport        string        `json:"transport"`
-	Endpoint         string        `json:"endpoint"`
-	APIKeyRef        string        `json:"api_key_ref,omitempty"`
-	AllowedTools     []string      `json:"allowed_tools"`
-	Timeout          time.Duration `json:"timeout"`
-	MaxResponseBytes int64         `json:"max_response_bytes"`
+	ID               string            `json:"id"`
+	Enabled          bool              `json:"enabled"`
+	Transport        string            `json:"transport"`
+	Endpoint         string            `json:"endpoint"`
+	Command          string            `json:"command,omitempty"`
+	Args             []string          `json:"args,omitempty"`
+	WorkingDirectory string            `json:"working_directory,omitempty"`
+	Environment      map[string]string `json:"environment,omitempty"`
+	APIKeyRef        string            `json:"api_key_ref,omitempty"`
+	AllowedTools     []string          `json:"allowed_tools"`
+	Timeout          time.Duration     `json:"timeout"`
+	MaxResponseBytes int64             `json:"max_response_bytes"`
 }
 
 type SkillsConfig struct {
@@ -614,14 +618,20 @@ func (c ExtensionsConfig) Validate() error {
 		if !server.Enabled {
 			continue
 		}
-		if server.Transport != "streamable_http" {
-			problems = append(problems, prefix+".transport must be streamable_http")
-		}
-		endpoint := strings.TrimSpace(server.Endpoint)
-		if endpoint == "" {
-			problems = append(problems, prefix+".endpoint is required")
-		} else if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-			problems = append(problems, prefix+".endpoint must use http or https")
+		switch server.Transport {
+		case "streamable_http":
+			endpoint := strings.TrimSpace(server.Endpoint)
+			if endpoint == "" {
+				problems = append(problems, prefix+".endpoint is required")
+			} else if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+				problems = append(problems, prefix+".endpoint must use http or https")
+			}
+		case "stdio":
+			if strings.TrimSpace(server.Command) == "" {
+				problems = append(problems, prefix+".command is required")
+			}
+		default:
+			problems = append(problems, prefix+".transport must be streamable_http or stdio")
 		}
 		if server.Timeout <= 0 {
 			problems = append(problems, prefix+".timeout must be positive")
@@ -1095,7 +1105,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"mcp": func() []map[string]any {
 					result := make([]map[string]any, 0, len(c.Runtime.Extensions.MCP))
 					for _, server := range c.Runtime.Extensions.MCP {
-						result = append(result, map[string]any{"id": server.ID, "enabled": server.Enabled, "transport": server.Transport, "endpoint": server.Endpoint, "allowed_tools": server.AllowedTools, "timeout": server.Timeout.String(), "max_response_bytes": server.MaxResponseBytes, "api_key_configured": server.APIKeyRef != ""})
+						result = append(result, map[string]any{"id": server.ID, "enabled": server.Enabled, "transport": server.Transport, "endpoint": server.Endpoint, "command": server.Command, "args": server.Args, "working_directory": server.WorkingDirectory, "allowed_tools": server.AllowedTools, "timeout": server.Timeout.String(), "max_response_bytes": server.MaxResponseBytes, "api_key_configured": server.APIKeyRef != ""})
 					}
 					return result
 				}(),

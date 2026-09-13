@@ -57,7 +57,7 @@ text deltas. Retry policy and streamed tool-call assembly remain follow-up work.
 - [x] Runtime-backed status, restart, pause/resume, and Gate commands.
 - [x] Non-blocking runtime, Connector, and LLM failure notifications.
 - [x] Structured-search reload command, status, and domain notifications.
-- [x] MCP registry and allow-listed Streamable HTTP tool client.
+- [x] MCP registry and allow-listed Streamable HTTP/stdio tool client.
 - [ ] Tool execution sandbox policy (external MCP remains network-allowlisted;
   arbitrary shell/filesystem tools are intentionally unsupported).
 - [x] Bounded local `SKILL.md` instruction loader.

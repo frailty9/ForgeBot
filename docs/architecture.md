@@ -65,8 +65,9 @@ must not depend on or expose the complete Web administration service.
 - `internal/tooling`: explicit tool allow-list and normalized execution result.
 - `internal/tooling/searchdocs`: read-only adapter from the tool boundary to a
   configured Retriever.
-- `internal/tooling/mcp`: configured Streamable HTTP MCP client. It discovers
-  only allow-listed tools and exposes them under the `mcp.<server>.<tool>` namespace.
+- `internal/tooling/mcp`: configured MCP client with transport abstraction.
+  Streamable HTTP and stdio subprocess transports discover only allow-listed
+  tools and expose them under the `mcp.<server>.<tool>` namespace.
 - `internal/skills`: bounded local `SKILL.md` loader. Skill files contribute
   instructions only; they cannot execute code or select MCP endpoints.
 
@@ -116,6 +117,16 @@ The reflection publisher writes Bot-promoted knowledge to the configured
 `search.document_root`; absolute paths are used as-is. The default remains
 `extra`. The search service itself remains read-only and indexes the directory
 through its normal recursive scan.
+
+## MCP Transport Rules
+
+- `streamable_http` uses an explicitly configured HTTP(S) endpoint.
+- `stdio` starts the configured executable directly with `exec.Command`; no
+  shell interpolation is performed. stdout is reserved for newline-delimited
+  JSON-RPC, while stderr is isolated from the protocol stream.
+- A stdio timeout terminates the child process and invalidates the candidate
+  runtime generation. The previous generation remains active during a failed
+  replacement.
 
 ## LLM Client Contract
 
