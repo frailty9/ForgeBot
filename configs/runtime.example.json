@@ -59,9 +59,9 @@
         "onebot": {
           "api_url": "http://127.0.0.1:5700",
           "send_token": "",
-          "receive_secret": "",
           "webhook_addr": "127.0.0.1:8090",
           "webhook_path": "/onebot/qq-main",
+          "receive_secret": "",
           "request_limit": 1048576,
           "timeout": "15s",
           "replay_ttl": "5m",
