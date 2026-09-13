@@ -10,24 +10,29 @@ import (
 )
 
 type Input struct {
-	ConversationID string
-	MsgID          string
-	UserID         string
-	UserName       string
-	Text           string
-	Addressed      bool
-	HasMedia       bool
-	At             time.Time
+	ConversationID   string
+	MsgID            string
+	ReplyToMessageID string
+	UserID           string
+	UserName         string
+	Text             string
+	PromptSuffix     string
+	Administrator    bool
+	Addressed        bool
+	HasMedia         bool
+	At               time.Time
 }
 
 func (i Input) SessionKey() string { return i.ConversationID }
 
 type Message struct {
-	MsgID    string
-	UserID   string
-	UserName string
-	Text     string
-	At       time.Time
+	MsgID            string
+	ReplyToMessageID string
+	UserID           string
+	UserName         string
+	Text             string
+	PromptSuffix     string
+	At               time.Time
 }
 
 type FlushReason uint8
@@ -78,12 +83,12 @@ func (b Batch) Trigger(asker string) Message {
 }
 
 type Policy struct {
-	Silence        time.Duration
-	MaxCount       int
-	MaxWindow      time.Duration
-	MaxBuffered    int
-	MaxTextLen     int
-	RequireMention bool
+	Silence              time.Duration
+	MaxCount             int
+	MaxWindow            time.Duration
+	MaxBuffered          int
+	MaxTextLen           int
+	AutoReplyUnmentioned bool
 }
 
 type Verdict uint8
@@ -202,10 +207,19 @@ func (p *Pool) Absorb(in Input) Verdict {
 		return VerdictDuplicate
 	}
 	pol := p.policy(in.ConversationID)
+	if in.Administrator {
+		if strings.TrimSpace(in.ReplyToMessageID) != "" && p.dismissAdministratorReply(in, now) {
+			return VerdictIgnored
+		}
+		if in.Addressed {
+			return VerdictPass
+		}
+		return VerdictIgnored
+	}
 	if in.Addressed {
 		return VerdictPass
 	}
-	if pol.RequireMention {
+	if !pol.AutoReplyUnmentioned {
 		p.ignored.Add(1)
 		return VerdictIgnored
 	}
@@ -217,15 +231,13 @@ func (p *Pool) Absorb(in Input) Verdict {
 	if len(b.msgs) == 0 {
 		b.openedAt = now
 	}
-	b.msgs = append(b.msgs, Message{MsgID: in.MsgID, UserID: in.UserID, UserName: in.UserName, Text: in.Text, At: messageTime})
+	b.msgs = append(b.msgs, Message{MsgID: in.MsgID, ReplyToMessageID: in.ReplyToMessageID, UserID: in.UserID, UserName: in.UserName, Text: in.Text, PromptSuffix: in.PromptSuffix, At: messageTime})
 	if pol.MaxBuffered > 0 && len(b.msgs) > pol.MaxBuffered {
 		b.msgs = b.msgs[len(b.msgs)-pol.MaxBuffered:]
 	}
 	b.lastAt, b.lastTouch = now, now
 	var batch *Batch
-	if !b.flushing && pol.MaxCount > 0 && len(b.msgs) >= pol.MaxCount {
-		batch = b.detachLocked(ReasonCount)
-	} else if !b.flushing {
+	if !b.flushing {
 		p.armLocked(b, pol, now)
 	}
 	b.mu.Unlock()
@@ -247,6 +259,30 @@ func (p *Pool) getOrCreate(in Input) *bucket {
 	p.mu.Unlock()
 	b.mu.Lock()
 	return b
+}
+
+func (p *Pool) dismissAdministratorReply(in Input, now time.Time) bool {
+	replyTo := strings.TrimSpace(in.ReplyToMessageID)
+	if replyTo == "" {
+		return false
+	}
+	b := p.getOrCreate(in)
+	defer b.mu.Unlock()
+	for index, message := range b.msgs {
+		if message.MsgID != replyTo {
+			continue
+		}
+		b.msgs = append(b.msgs[:index], b.msgs[index+1:]...)
+		b.lastAt, b.lastTouch = now, now
+		if len(b.msgs) == 0 {
+			if b.timer != nil {
+				b.timer.Stop()
+			}
+			b.generation++
+		}
+		return true
+	}
+	return false
 }
 
 func (p *Pool) armLocked(b *bucket, pol Policy, now time.Time) {

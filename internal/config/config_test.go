@@ -94,7 +94,7 @@ func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
 	legacy := `{
 		"log":{"level":"info","format":"text"},
 		"bot":{"name":"ForgeBot"},
-		"gate":{"enabled":false,"require_mention":true,"silence":"4s","max_count":8,"max_window":"25s","dedup_ttl":"60s","dedup_max":10000,"max_buffered":50,"max_text_len":500,"max_concurrent":4},
+		"gate":{"enabled":false,"silence":"4s","max_count":8,"max_window":"25s","dedup_ttl":"60s","dedup_max":10000,"max_buffered":50,"max_text_len":500,"max_concurrent":4},
 		"llm":{"protocol":"openai_responses","api_key_ref":"llm/default","model":"","timeout":"60s"},
 		"platforms":{"connectors":[{"id":"echo","type":"echo","enabled":true}],"groups":[{"id":"local","connector_id":"echo","target":"local"}]},
 		"operations":{"groups":[]}
@@ -134,7 +134,7 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	runtimeBody := []byte(`{
 		"log": {"level": "info", "format": "json"},
 		"bot": {"name": "TestBot"},
-		"gate": {"enabled": true, "require_mention": false, "silence": "500ms", "max_count": 2, "max_window": "3s", "dedup_ttl": "5s", "dedup_max": 7, "max_buffered": 8, "max_text_len": 9, "max_concurrent": 2},
+		"gate": {"enabled": true, "silence": "500ms", "max_count": 2, "max_window": "3s", "dedup_ttl": "5s", "dedup_max": 7, "max_buffered": 8, "max_text_len": 9, "max_concurrent": 2},
 		"llm": {"protocol": "anthropic_messages", "base_url": "https://api.example.test", "api_key_ref": "llm/test", "model": "claude", "timeout": "9s"},
 		"platforms": {
 			"connectors": [{"id": "echo", "type": "echo", "enabled": true}],

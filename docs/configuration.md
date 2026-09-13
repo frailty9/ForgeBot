@@ -155,7 +155,6 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 ```json
 {
   "enabled": true,
-  "require_mention": true,
   "silence": "4s",
   "max_count": 8,
   "max_window": "25s",
@@ -168,8 +167,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 ```
 
 - `enabled`：启用消息门控。
-- `require_mention`：群消息是否必须提及 Bot。
-- `silence`、`max_count`、`max_window`：消息聚合的静默期、数量和时间窗口。
+- `silence`、`max_count`、`max_window`：消息聚合的静默期、数量和时间窗口。对开启 `auto_reply_unmentioned` 的群组，主动介入只在静默窗口到期后触发，`max_count` 不会提前触发。
 - `dedup_ttl`、`dedup_max`：消息去重有效期和容量，必须为正数。
 - `max_buffered`：单次缓冲消息上限。
 - `max_text_len`：单条输入保留的最大字符数。
@@ -241,7 +239,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 `connectors` 支持同时启用多个连接器，当前类型为 `echo` 和 `onebot`。ID 必须唯一。启用的 OneBot 连接器必须至少绑定一个群组。
 
-`groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。
+`groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。`auto_reply_unmentioned` 可选，开启后未提及 Bot 的文本问题会先等待 `gate.silence`；若期间没有可信管理员直接回复该问题，Bot 才会谨慎主动介入，默认关闭。
 
 `connectors[].prompt_suffix` 和 `groups[].prompt_suffix` 都是可选的系统提示词追加内容。连接器级内容用于渠道通用约束（例如 QQ 使用纯文本），群组级内容用于该群组的语气、主题或行为约束。两者都存在时按“连接器后群组”的顺序拼接；都为空时不追加。它们属于运行时配置，可通过管理 API 热更新。
 

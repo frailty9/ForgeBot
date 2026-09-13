@@ -986,11 +986,15 @@ func classify(current, next config.RuntimeConfig) Action {
 func policyFrom(runtime config.RuntimeConfig) bot.Policy {
 	g := runtime.Gate
 	s := runtime.Search
-	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Search: bot.SearchPolicy{
+	groupGates := make(map[string]bot.GatePolicy, len(runtime.Platforms.Groups))
+	for _, group := range runtime.Platforms.Groups {
+		groupGates[group.ID] = bot.GatePolicy{AutoReplyUnmentioned: group.AutoReplyUnmentioned}
+	}
+	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, GroupGates: groupGates, Search: bot.SearchPolicy{
 		Enabled: s.Enabled, DefaultResults: s.DefaultResults, MaxResults: s.MaxResults,
 		MaxQueriesPerTurn: s.MaxQueriesPerTurn, MaxContextChars: s.MaxContextChars,
 	}, Gate: bot.GatePolicy{
-		Enabled: g.Enabled, RequireMention: g.RequireMention, Silence: g.Silence,
+		Enabled: g.Enabled, Silence: g.Silence,
 		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow, DedupTTL: g.DedupTTL,
 		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,
 		MaxConcurrent: g.MaxConcurrent,

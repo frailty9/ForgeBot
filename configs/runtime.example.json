@@ -17,7 +17,6 @@
   },
   "gate": {
     "enabled": true,
-    "require_mention": true,
     "silence": "4s",
     "max_count": 8,
     "max_window": "25s",
@@ -71,8 +70,8 @@
       }
     ],
     "groups": [
-      {"id": "local", "connector_id": "echo-local", "target": "local"},
-      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
+      {"id": "local", "connector_id": "echo-local", "target": "local", "auto_reply_unmentioned": false},
+      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。", "auto_reply_unmentioned": false}
     ]
   },
   "operations": {

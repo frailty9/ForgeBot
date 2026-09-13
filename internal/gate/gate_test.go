@@ -80,21 +80,65 @@ func TestTranscriptAndTrigger(t *testing.T) {
 	}
 }
 
-func TestRequireMentionPolicy(t *testing.T) {
+func TestAutoReplyUnmentionedPolicy(t *testing.T) {
 	clock := newFakeClock()
-	p := New(context.Background(), func(string) Policy { return Policy{RequireMention: true} }, nil, Options{clock: clock})
+	p := New(context.Background(), func(string) Policy { return Policy{} }, nil, Options{clock: clock})
 	if got := p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictIgnored {
 		t.Fatalf("got %v, want ignored", got)
 	}
-	p = New(context.Background(), func(string) Policy { return Policy{RequireMention: false, Silence: time.Hour} }, nil, Options{clock: clock})
+	p = New(context.Background(), func(string) Policy { return Policy{AutoReplyUnmentioned: true, Silence: time.Hour} }, nil, Options{clock: clock})
 	if got := p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello"}); got != VerdictAbsorbed {
 		t.Fatalf("got %v, want absorbed", got)
 	}
 	p.Close(time.Second)
 }
 
+func TestAutoReplyUnmentionedWaitsForSilence(t *testing.T) {
+	clock := newFakeClock()
+	flushed := make(chan Batch, 1)
+	p := New(context.Background(), func(string) Policy {
+		return Policy{Silence: 4 * time.Second, MaxCount: 1, AutoReplyUnmentioned: true}
+	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
+	if got := p.Absorb(Input{ConversationID: "c", UserID: "u", MsgID: "q", Text: "question"}); got != VerdictAbsorbed {
+		t.Fatalf("got %v, want absorbed", got)
+	}
+	clock.Advance(3 * time.Second)
+	select {
+	case <-flushed:
+		t.Fatal("flushed before silence window")
+	default:
+	}
+	clock.Advance(1 * time.Second)
+	select {
+	case batch := <-flushed:
+		if len(batch.Msgs) != 1 || batch.Msgs[0].MsgID != "q" {
+			t.Fatalf("unexpected batch: %#v", batch)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("flush timeout")
+	}
+	p.Close(time.Second)
+}
+
+func TestAdministratorReplyCancelsPendingQuestion(t *testing.T) {
+	clock := newFakeClock()
+	flushed := make(chan Batch, 1)
+	p := New(context.Background(), func(string) Policy { return Policy{Silence: time.Second, AutoReplyUnmentioned: true} }, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
+	p.Absorb(Input{ConversationID: "c", UserID: "u", MsgID: "q", Text: "question"})
+	if got := p.Absorb(Input{ConversationID: "c", UserID: "admin", MsgID: "a", ReplyToMessageID: "q", Text: "answer", Administrator: true}); got != VerdictIgnored {
+		t.Fatalf("admin reply got %v, want ignored", got)
+	}
+	clock.Advance(time.Second)
+	select {
+	case batch := <-flushed:
+		t.Fatalf("question was flushed after administrator reply: %#v", batch)
+	case <-time.After(100 * time.Millisecond):
+	}
+	p.Close(time.Second)
+}
+
 func TestDedupFastLane(t *testing.T) {
-	p := New(context.Background(), func(string) Policy { return Policy{RequireMention: true} }, nil, Options{})
+	p := New(context.Background(), func(string) Policy { return Policy{} }, nil, Options{})
 	in := Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "/help", Addressed: true}
 	if got := p.Absorb(in); got != VerdictPass {
 		t.Fatalf("first addressed message got %v", got)
@@ -109,7 +153,7 @@ func TestSilenceFlushesBatch(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)
 	p := New(context.Background(), func(string) Policy {
-		return Policy{Silence: 4 * time.Second, MaxWindow: 30 * time.Second}
+		return Policy{Silence: 4 * time.Second, MaxWindow: 30 * time.Second, AutoReplyUnmentioned: true}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
 	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "one"})
 	clock.Advance(3 * time.Second)
@@ -126,17 +170,18 @@ func TestSilenceFlushesBatch(t *testing.T) {
 	p.Close(time.Second)
 }
 
-func TestCountFlushesBatch(t *testing.T) {
+func TestAutoReplyIgnoresCountFlush(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)
 	p := New(context.Background(), func(string) Policy {
-		return Policy{Silence: time.Hour, MaxCount: 2}
+		return Policy{Silence: time.Second, MaxCount: 2, AutoReplyUnmentioned: true}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
 	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "one"})
 	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "2", Text: "two"})
+	clock.Advance(time.Second)
 	select {
 	case batch := <-flushed:
-		if len(batch.Msgs) != 2 || batch.Reason != ReasonCount {
+		if len(batch.Msgs) != 2 || batch.Reason != ReasonSilence {
 			t.Fatalf("unexpected batch: %#v", batch)
 		}
 	case <-time.After(time.Second):

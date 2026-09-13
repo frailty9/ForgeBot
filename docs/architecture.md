@@ -54,7 +54,8 @@ must not depend on or expose the complete Web administration service.
 - `internal/notification`: bounded, non-blocking operational event dispatch to
   the currently configured notification-enabled operator groups.
 - `internal/bot`: orchestration layer.
-- `internal/gate`: group message buffering and deduplication.
+- `internal/gate`: group message buffering, deduplication, and delayed
+  unmentioned-message intervention with trusted-administrator cancellation.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for
   Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions.
 - `internal/search`: protocol-neutral retrieval contract and bounded,

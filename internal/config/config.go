@@ -114,16 +114,15 @@ func (c LLMConfig) ClientConfig(apiKey string) llm.ClientConfig {
 }
 
 type GateConfig struct {
-	Enabled        bool          `json:"enabled" yaml:"enabled"`
-	RequireMention bool          `json:"require_mention" yaml:"require_mention"`
-	Silence        time.Duration `json:"silence" yaml:"silence"`
-	MaxCount       int           `json:"max_count" yaml:"max_count"`
-	MaxWindow      time.Duration `json:"max_window" yaml:"max_window"`
-	DedupTTL       time.Duration `json:"dedup_ttl" yaml:"dedup_ttl"`
-	DedupMax       int           `json:"dedup_max" yaml:"dedup_max"`
-	MaxBuffered    int           `json:"max_buffered" yaml:"max_buffered"`
-	MaxTextLen     int           `json:"max_text_len" yaml:"max_text_len"`
-	MaxConcurrent  int           `json:"max_concurrent" yaml:"max_concurrent"`
+	Enabled       bool          `json:"enabled" yaml:"enabled"`
+	Silence       time.Duration `json:"silence" yaml:"silence"`
+	MaxCount      int           `json:"max_count" yaml:"max_count"`
+	MaxWindow     time.Duration `json:"max_window" yaml:"max_window"`
+	DedupTTL      time.Duration `json:"dedup_ttl" yaml:"dedup_ttl"`
+	DedupMax      int           `json:"dedup_max" yaml:"dedup_max"`
+	MaxBuffered   int           `json:"max_buffered" yaml:"max_buffered"`
+	MaxTextLen    int           `json:"max_text_len" yaml:"max_text_len"`
+	MaxConcurrent int           `json:"max_concurrent" yaml:"max_concurrent"`
 }
 
 type SearchConfig struct {
@@ -159,10 +158,11 @@ type ConnectorConfig struct {
 }
 
 type GroupBindingConfig struct {
-	ID           string `json:"id" yaml:"id"`
-	ConnectorID  string `json:"connector_id" yaml:"connector_id"`
-	Target       string `json:"target" yaml:"target"`
-	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	ID                   string `json:"id" yaml:"id"`
+	ConnectorID          string `json:"connector_id" yaml:"connector_id"`
+	Target               string `json:"target" yaml:"target"`
+	PromptSuffix         string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	AutoReplyUnmentioned bool   `json:"auto_reply_unmentioned,omitempty" yaml:"auto_reply_unmentioned,omitempty"`
 }
 
 type OperationsConfig struct {
@@ -232,7 +232,7 @@ func DefaultRuntime() RuntimeConfig {
 		Bot: BotConfig{Name: "ForgeBot"},
 		LLM: LLMConfig{Protocol: llm.OpenAIResponses, APIKeyRef: defaultAPIKeyRef, Timeout: 60 * time.Second},
 		Gate: GateConfig{
-			Enabled: false, RequireMention: true, Silence: 4 * time.Second, MaxCount: 8,
+			Enabled: false, Silence: 4 * time.Second, MaxCount: 8,
 			MaxWindow: 25 * time.Second, DedupTTL: 60 * time.Second, DedupMax: 10000,
 			MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4,
 		},
@@ -975,7 +975,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"timeout": c.Runtime.LLM.Timeout.String(), "api_key_configured": apiKeyConfigured,
 			},
 			"gate": map[string]any{
-				"enabled": c.Runtime.Gate.Enabled, "require_mention": c.Runtime.Gate.RequireMention,
+				"enabled": c.Runtime.Gate.Enabled,
 				"silence": c.Runtime.Gate.Silence.String(), "max_count": c.Runtime.Gate.MaxCount,
 				"max_window": c.Runtime.Gate.MaxWindow.String(), "dedup_ttl": c.Runtime.Gate.DedupTTL.String(),
 				"dedup_max": c.Runtime.Gate.DedupMax, "max_buffered": c.Runtime.Gate.MaxBuffered,

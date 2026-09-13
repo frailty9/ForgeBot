@@ -21,6 +21,7 @@ type Policy struct {
 	SystemPrompt string
 	Model        string
 	Gate         GatePolicy
+	GroupGates   map[string]GatePolicy
 	Search       SearchPolicy
 }
 
@@ -33,16 +34,16 @@ type SearchPolicy struct {
 }
 
 type GatePolicy struct {
-	Enabled        bool
-	RequireMention bool
-	Silence        time.Duration
-	MaxCount       int
-	MaxWindow      time.Duration
-	DedupTTL       time.Duration
-	DedupMax       int
-	MaxBuffered    int
-	MaxTextLen     int
-	MaxConcurrent  int
+	Enabled              bool
+	AutoReplyUnmentioned bool
+	Silence              time.Duration
+	MaxCount             int
+	MaxWindow            time.Duration
+	DedupTTL             time.Duration
+	DedupMax             int
+	MaxBuffered          int
+	MaxTextLen           int
+	MaxConcurrent        int
 }
 
 type Dependencies struct {
@@ -86,14 +87,17 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	verdict := VerdictPass
 	if e.deps.Policy.Gate.Enabled {
 		verdict = Verdict(e.gate.Absorb(gate.Input{
-			ConversationID: msg.ConversationID,
-			MsgID:          msg.MessageID,
-			UserID:         msg.UserID,
-			UserName:       msg.UserName,
-			Text:           msg.Text,
-			Addressed:      msg.Addressed(),
-			HasMedia:       msg.HasMedia(),
-			At:             msg.At,
+			ConversationID:   msg.ConversationID,
+			MsgID:            msg.MessageID,
+			UserID:           msg.UserID,
+			UserName:         msg.UserName,
+			Text:             msg.Text,
+			ReplyToMessageID: msg.ReplyToMessageID,
+			PromptSuffix:     msg.PromptSuffix,
+			Administrator:    msg.Administrator,
+			Addressed:        msg.Addressed(),
+			HasMedia:         msg.HasMedia(),
+			At:               msg.At,
 		}))
 		if verdict != VerdictPass {
 			return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
@@ -120,14 +124,18 @@ func (e *Engine) GateStats() gate.Stats {
 	return e.gate.Stats()
 }
 
-func (e *Engine) gatePolicy(platform string) gate.Policy {
+func (e *Engine) gatePolicy(conversationID string) gate.Policy {
+	policy := e.deps.Policy.Gate
+	if groupPolicy, ok := e.deps.Policy.GroupGates[conversationID]; ok {
+		policy.AutoReplyUnmentioned = groupPolicy.AutoReplyUnmentioned
+	}
 	return gate.Policy{
-		Silence:        e.deps.Policy.Gate.Silence,
-		MaxCount:       e.deps.Policy.Gate.MaxCount,
-		MaxWindow:      e.deps.Policy.Gate.MaxWindow,
-		MaxBuffered:    e.deps.Policy.Gate.MaxBuffered,
-		MaxTextLen:     e.deps.Policy.Gate.MaxTextLen,
-		RequireMention: e.deps.Policy.Gate.RequireMention,
+		Silence:              policy.Silence,
+		MaxCount:             policy.MaxCount,
+		MaxWindow:            policy.MaxWindow,
+		MaxBuffered:          policy.MaxBuffered,
+		MaxTextLen:           policy.MaxTextLen,
+		AutoReplyUnmentioned: policy.AutoReplyUnmentioned,
 	}
 }
 
@@ -137,14 +145,14 @@ func (e *Engine) onGateFlush(ctx context.Context, batch gate.Batch) {
 	if trigger.MsgID == "" && len(batch.Msgs) > 0 {
 		trigger = batch.Msgs[len(batch.Msgs)-1]
 	}
-	text := "ForgeBot grouped message batch:\n" + transcript
-	msg := messaging.OutboundMessage{
-		ConversationID:   batch.ConversationID,
-		ReplyToMessageID: trigger.MsgID,
-		Text:             text,
+	in := messaging.InboundMessage{ConversationID: batch.ConversationID, UserID: trigger.UserID, MessageID: trigger.MsgID, Text: transcript, PromptSuffix: trigger.PromptSuffix}
+	reply, err := e.replyText(ctx, in)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "generate proactive gate reply", "err", err, "conversation_id", batch.ConversationID)
+		return
 	}
-	if err := e.deps.Sender.Send(ctx, msg); err != nil {
-		e.logger.ErrorContext(ctx, "send gate batch reply", "err", err, "conversation_id", batch.ConversationID)
+	if err := e.reply(ctx, in, reply); err != nil {
+		e.logger.ErrorContext(ctx, "send proactive gate reply", "err", err, "conversation_id", batch.ConversationID)
 	}
 }
 

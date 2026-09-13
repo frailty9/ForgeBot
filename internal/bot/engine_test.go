@@ -52,7 +52,7 @@ func TestEngineRepliesToAddressedMessage(t *testing.T) {
 func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	policy := testPolicy()
 	policy.Gate.Enabled = true
-	policy.Gate.RequireMention = false
+	policy.Gate.AutoReplyUnmentioned = true
 	policy.Gate.Silence = time.Hour
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
@@ -300,7 +300,7 @@ func (f *fakeLLM) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, 
 
 func testPolicy() Policy {
 	return Policy{Name: "ForgeBot", Gate: GatePolicy{
-		RequireMention: true, Silence: 4 * time.Second, MaxCount: 8, MaxWindow: 25 * time.Second,
+		Silence: 4 * time.Second, MaxCount: 8, MaxWindow: 25 * time.Second,
 		DedupTTL: time.Minute, DedupMax: 10000, MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4,
 	}}
 }

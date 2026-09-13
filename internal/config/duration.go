@@ -96,19 +96,18 @@ func (r *ReflectionConfig) UnmarshalJSON(data []byte) error {
 
 func (g GateConfig) MarshalJSON() ([]byte, error) {
 	type encodedGateConfig struct {
-		Enabled        bool   `json:"enabled"`
-		RequireMention bool   `json:"require_mention"`
-		Silence        string `json:"silence"`
-		MaxCount       int    `json:"max_count"`
-		MaxWindow      string `json:"max_window"`
-		DedupTTL       string `json:"dedup_ttl"`
-		DedupMax       int    `json:"dedup_max"`
-		MaxBuffered    int    `json:"max_buffered"`
-		MaxTextLen     int    `json:"max_text_len"`
-		MaxConcurrent  int    `json:"max_concurrent"`
+		Enabled       bool   `json:"enabled"`
+		Silence       string `json:"silence"`
+		MaxCount      int    `json:"max_count"`
+		MaxWindow     string `json:"max_window"`
+		DedupTTL      string `json:"dedup_ttl"`
+		DedupMax      int    `json:"dedup_max"`
+		MaxBuffered   int    `json:"max_buffered"`
+		MaxTextLen    int    `json:"max_text_len"`
+		MaxConcurrent int    `json:"max_concurrent"`
 	}
 	return json.Marshal(encodedGateConfig{
-		Enabled: g.Enabled, RequireMention: g.RequireMention, Silence: g.Silence.String(),
+		Enabled: g.Enabled, Silence: g.Silence.String(),
 		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow.String(), DedupTTL: g.DedupTTL.String(),
 		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,
 		MaxConcurrent: g.MaxConcurrent,
@@ -301,16 +300,15 @@ func (d *ServerConfig) UnmarshalJSON(data []byte) error {
 
 func (g *GateConfig) UnmarshalJSON(data []byte) error {
 	type rawGateConfig struct {
-		Enabled        *bool           `json:"enabled"`
-		RequireMention *bool           `json:"require_mention"`
-		Silence        json.RawMessage `json:"silence"`
-		MaxCount       *int            `json:"max_count"`
-		MaxWindow      json.RawMessage `json:"max_window"`
-		DedupTTL       json.RawMessage `json:"dedup_ttl"`
-		DedupMax       *int            `json:"dedup_max"`
-		MaxBuffered    *int            `json:"max_buffered"`
-		MaxTextLen     *int            `json:"max_text_len"`
-		MaxConcurrent  *int            `json:"max_concurrent"`
+		Enabled       *bool           `json:"enabled"`
+		Silence       json.RawMessage `json:"silence"`
+		MaxCount      *int            `json:"max_count"`
+		MaxWindow     json.RawMessage `json:"max_window"`
+		DedupTTL      json.RawMessage `json:"dedup_ttl"`
+		DedupMax      *int            `json:"dedup_max"`
+		MaxBuffered   *int            `json:"max_buffered"`
+		MaxTextLen    *int            `json:"max_text_len"`
+		MaxConcurrent *int            `json:"max_concurrent"`
 	}
 	defaults := DefaultRuntime().Gate
 	var raw rawGateConfig
@@ -320,9 +318,6 @@ func (g *GateConfig) UnmarshalJSON(data []byte) error {
 	*g = defaults
 	if raw.Enabled != nil {
 		g.Enabled = *raw.Enabled
-	}
-	if raw.RequireMention != nil {
-		g.RequireMention = *raw.RequireMention
 	}
 	if raw.MaxCount != nil {
 		g.MaxCount = *raw.MaxCount
