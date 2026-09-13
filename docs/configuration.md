@@ -45,6 +45,7 @@ go run ./cmd/forgebot `
 | `FORGEBOT_SECRET_STORE` | SecretStore 文件路径 | 覆盖 YAML 中的同类路径 |
 | `FORGEBOT_ADMIN_TOKEN` | 管理 API Bearer Token | 生产环境推荐；覆盖 YAML |
 | `FORGEBOT_SECRET_KEY` | SecretStore 主密钥 | Base64 编码的 32 字节随机值 |
+| `FORGEBOT_LLM_API_KEY` | 首次初始化时的一次性 API Key | 仅被 `-init-api-key` 读取，不会写入配置文件 |
 
 ## 4. 启动 YAML
 
@@ -334,7 +335,30 @@ $env:FORGEBOT_ADMIN_TOKEN = "replace-with-a-strong-token"
 
 必须妥善保管 `FORGEBOT_SECRET_KEY`。丢失后无法解密原 SecretStore；更换该值前应先规划密钥迁移。
 
-启动 ForgeBot 后，通过单用途接口写入 API Key：
+### 6.1 进程启动前初始化
+
+不能提供一个可提交的 `secrets.json` 示例：该文件必须使用你自己的
+`FORGEBOT_SECRET_KEY` 加密，手写明文或复制他人的密文都不可用。首次启动
+前，使用一次性 CLI 引导命令创建并写入 SecretStore：
+
+```powershell
+$env:FORGEBOT_SECRET_KEY = "base64-encoded-32-byte-master-key"
+$env:FORGEBOT_LLM_API_KEY = "replace-with-provider-key"
+
+go run ./cmd/forgebot `
+  -config configs/forgebot.local.yaml `
+  -init-api-key
+
+Remove-Item Env:FORGEBOT_LLM_API_KEY
+```
+
+命令会读取 YAML/环境变量中的 `secret_store_path` 和运行时 JSON 中的
+`llm.api_key_ref`，加密写入对应引用后立即退出。若该引用已经存在，命令
+会拒绝覆盖，避免误操作；替换已有 Key 请使用下面的认证管理 API。
+
+### 6.2 运行中替换
+
+启动 ForgeBot 后，通过单用途接口写入或替换 API Key：
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:FORGEBOT_ADMIN_TOKEN" }

@@ -97,8 +97,8 @@ Invoke-RestMethod http://127.0.0.1:8080/healthz
 ```
 
 To exercise a complete LLM turn, copy the example runtime configuration,
-configure the provider, create a SecretStore, and write the key through the
-management API. The complete procedure and every field are documented in
+configure the provider, initialize the encrypted SecretStore with
+`-init-api-key`, and start ForgeBot. The complete procedure and every field are documented in
 [docs/configuration.md](docs/configuration.md).
 
 Send a test message after an LLM key is configured:
