@@ -374,6 +374,21 @@ Invoke-RestMethod `
 
 `GET /v1/admin/llm/api-key` 只返回是否配置及更新时间，永远不会返回密钥值。`DELETE` 可删除当前 `llm.api_key_ref` 对应的密钥。切换 `api_key_ref` 后需为新引用单独写入密钥。
 
+## 6.5 外部扩展（MCP 与 Skill）
+
+应用层扩展位于运行时 JSON 的 `extensions` 字段，因此可以通过管理 API
+热更新。MCP 只支持显式配置的 Streamable HTTP 端点；ForgeBot 启动候选
+runtime 时执行 `initialize` 和 `tools/list`，随后仅暴露 `allowed_tools` 中
+的工具。工具名统一为 `mcp.<server_id>.<tool_name>`，LLM 无法指定服务地址、
+认证方式或未授权工具。MCP 凭据使用 `api_key_ref` 指向 SecretStore，永远不
+进入配置脱敏响应和模型上下文。
+
+`extensions.skills.directories` 是本地 `SKILL.md` 目录列表。加载器按路径
+稳定排序并限制单文件、总字节数和文件数量，将正文作为外部 instruction 快照
+注入 LLM；Skill 不执行脚本、不拥有网络或文件写权限。目录变化可通过保存一
+次运行时配置或 `/v1/admin/runtime/restart` 生效。扩展连接或 Skill 解析失败
+时，候选 generation 不会发布，旧运行时继续服务。
+
 ## 7. 管理 API 与热更新
 
 所有 `/v1/admin/*` 请求都必须携带：

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -17,12 +18,13 @@ import (
 )
 
 type Policy struct {
-	Name         string
-	SystemPrompt string
-	Model        string
-	Gate         GatePolicy
-	GroupGates   map[string]GatePolicy
-	Search       SearchPolicy
+	Name                  string
+	SystemPrompt          string
+	Model                 string
+	Gate                  GatePolicy
+	GroupGates            map[string]GatePolicy
+	Search                SearchPolicy
+	ExtensionInstructions string
 }
 
 type SearchPolicy struct {
@@ -118,6 +120,11 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 
 func (e *Engine) Shutdown(grace time.Duration) {
 	e.gate.Close(grace)
+	if closer, ok := e.deps.Tools.(io.Closer); ok {
+		if err := closer.Close(); err != nil {
+			e.logger.Warn("close tool executor failed", "err", err)
+		}
+	}
 }
 
 func (e *Engine) GateStats() gate.Stats {
@@ -205,6 +212,15 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	for index, call := range response.Message.ToolCalls {
 		result := tooling.Result{Code: "budget_exhausted"}
 		if index < budget && e.deps.Tools != nil {
+			if call.Name == "search_docs" && !e.deps.Policy.Search.Enabled {
+				result = tooling.Result{Code: "tool_not_allowed"}
+				payload, marshalErr := json.Marshal(result)
+				if marshalErr != nil {
+					payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
+				}
+				messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
+				continue
+			}
 			if !preReplySent && call.Name == "search_docs" {
 				preReplySent = true
 				if err := e.reply(ctx, in, searchPreReply); err != nil {
@@ -235,6 +251,13 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 
 func (e *Engine) instructions(suffix string) string {
 	base := strings.TrimSpace(e.deps.Policy.SystemPrompt)
+	if extension := strings.TrimSpace(e.deps.Policy.ExtensionInstructions); extension != "" {
+		if base == "" {
+			base = extension
+		} else {
+			base += "\n\n" + extension
+		}
+	}
 	suffix = strings.TrimSpace(suffix)
 	if suffix == "" {
 		return base
@@ -246,12 +269,15 @@ func (e *Engine) instructions(suffix string) string {
 }
 
 func (e *Engine) toolDefinitions() []llm.ToolDefinition {
-	if !e.deps.Policy.Search.Enabled || e.deps.Tools == nil {
+	if e.deps.Tools == nil {
 		return nil
 	}
 	definitions := e.deps.Tools.Definitions()
 	result := make([]llm.ToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
+		if definition.Name == "search_docs" && !e.deps.Policy.Search.Enabled {
+			continue
+		}
 		result = append(result, llm.ToolDefinition{Name: definition.Name, Description: definition.Description, InputSchema: definition.InputSchema})
 	}
 	return result

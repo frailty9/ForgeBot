@@ -1,6 +1,73 @@
 package tooling
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+type MultiExecutor struct{ executors []Executor }
+
+func NewMultiExecutor(executors ...Executor) Executor {
+	filtered := make([]Executor, 0, len(executors))
+	for _, executor := range executors {
+		if executor != nil {
+			filtered = append(filtered, executor)
+		}
+	}
+	return &multiExecutor{executors: filtered}
+}
+
+type multiExecutor struct{ executors []Executor }
+
+func (m *multiExecutor) Definitions() []Definition {
+	if m == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	result := make([]Definition, 0)
+	for _, executor := range m.executors {
+		for _, definition := range executor.Definitions() {
+			if definition.Name == "" {
+				continue
+			}
+			if _, ok := seen[definition.Name]; ok {
+				continue
+			}
+			seen[definition.Name] = struct{}{}
+			result = append(result, definition)
+		}
+	}
+	return result
+}
+
+func (m *multiExecutor) Execute(ctx context.Context, call Call) Result {
+	if m == nil {
+		return Result{Code: "tool_not_allowed"}
+	}
+	for _, executor := range m.executors {
+		for _, definition := range executor.Definitions() {
+			if definition.Name == call.Name {
+				return executor.Execute(ctx, call)
+			}
+		}
+	}
+	return Result{Code: "tool_not_allowed"}
+}
+
+func (m *multiExecutor) Close() error {
+	if m == nil {
+		return nil
+	}
+	var errs []error
+	for _, executor := range m.executors {
+		if closer, ok := executor.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
 
 type Registry struct {
 	tools       map[string]Tool

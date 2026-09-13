@@ -26,7 +26,9 @@ import (
 	reflectionscanner "github.com/soleapi/forgebot/internal/reflection/scanner"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
+	"github.com/soleapi/forgebot/internal/skills"
 	"github.com/soleapi/forgebot/internal/tooling"
+	toolingmcp "github.com/soleapi/forgebot/internal/tooling/mcp"
 	"github.com/soleapi/forgebot/internal/tooling/searchdocs"
 )
 
@@ -143,12 +145,47 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 			}
 		}
 	}
-	var executor tooling.Executor
+	var executors []tooling.Executor
 	if snapshot.Runtime.Search.Enabled && retriever != nil {
 		searchConfig := snapshot.Runtime.Search
-		executor = tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars))
+		executors = append(executors, tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars)))
 	}
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policyFrom(snapshot.Runtime)}, nil)
+	var extensionInstructions string
+	if snapshot.Runtime.Extensions.Skills.MaxFiles > 0 {
+		loader, loadErr := skills.New(skills.Config{Directories: snapshot.Runtime.Extensions.Skills.Directories, MaxFileBytes: snapshot.Runtime.Extensions.Skills.MaxFileBytes, MaxTotalBytes: snapshot.Runtime.Extensions.Skills.MaxTotalBytes, MaxFiles: snapshot.Runtime.Extensions.Skills.MaxFiles})
+		if loadErr != nil {
+			return nil, fmt.Errorf("create skill loader: %w", loadErr)
+		}
+		extensionInstructions, loadErr = loader.Load(ctx)
+		if loadErr != nil {
+			return nil, fmt.Errorf("load skills: %w", loadErr)
+		}
+	}
+	for _, mcpConfig := range snapshot.Runtime.Extensions.MCP {
+		if !mcpConfig.Enabled {
+			continue
+		}
+		apiKey := ""
+		if ref := strings.TrimSpace(mcpConfig.APIKeyRef); ref != "" && b.Secrets != nil {
+			value, secretErr := b.Secrets.Get(ctx, ref)
+			if secretErr != nil && !errors.Is(secretErr, secret.ErrNotFound) {
+				return nil, fmt.Errorf("resolve MCP API key %q: %w", mcpConfig.ID, secretErr)
+			}
+			apiKey = value
+		}
+		mcpClient, clientErr := toolingmcp.New(ctx, toolingmcp.Config{ID: mcpConfig.ID, Endpoint: mcpConfig.Endpoint, APIKey: apiKey, AllowedTools: mcpConfig.AllowedTools, Timeout: mcpConfig.Timeout, MaxResponseBytes: mcpConfig.MaxResponseBytes})
+		if clientErr != nil {
+			return nil, fmt.Errorf("connect MCP server %q: %w", mcpConfig.ID, clientErr)
+		}
+		executors = append(executors, mcpClient)
+	}
+	var executor tooling.Executor
+	if len(executors) > 0 {
+		executor = tooling.NewMultiExecutor(executors...)
+	}
+	policy := policyFrom(snapshot.Runtime)
+	policy.ExtensionInstructions = extensionInstructions
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy}, nil)
 }
 
 func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {

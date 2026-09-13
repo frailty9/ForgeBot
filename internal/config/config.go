@@ -62,6 +62,30 @@ type RuntimeConfig struct {
 	Administration AdministrationConfig `json:"administration"`
 	Reflection     ReflectionConfig     `json:"reflection"`
 	Operations     OperationsConfig     `json:"operations"`
+	Extensions     ExtensionsConfig     `json:"extensions"`
+}
+
+type ExtensionsConfig struct {
+	MCP    []MCPServerConfig `json:"mcp"`
+	Skills SkillsConfig      `json:"skills"`
+}
+
+type MCPServerConfig struct {
+	ID               string        `json:"id"`
+	Enabled          bool          `json:"enabled"`
+	Transport        string        `json:"transport"`
+	Endpoint         string        `json:"endpoint"`
+	APIKeyRef        string        `json:"api_key_ref,omitempty"`
+	AllowedTools     []string      `json:"allowed_tools"`
+	Timeout          time.Duration `json:"timeout"`
+	MaxResponseBytes int64         `json:"max_response_bytes"`
+}
+
+type SkillsConfig struct {
+	Directories   []string `json:"directories"`
+	MaxFileBytes  int64    `json:"max_file_bytes"`
+	MaxTotalBytes int64    `json:"max_total_bytes"`
+	MaxFiles      int      `json:"max_files"`
 }
 
 type RuntimeDocument struct {
@@ -255,6 +279,7 @@ func DefaultRuntime() RuntimeConfig {
 			MinConfidence: 0.9, ExtraDirectory: "extra",
 		},
 		Operations: OperationsConfig{},
+		Extensions: ExtensionsConfig{Skills: SkillsConfig{MaxFileBytes: 128 << 10, MaxTotalBytes: 1 << 20, MaxFiles: 64}},
 	}
 }
 
@@ -317,6 +342,7 @@ func Load(opts LoadOptions) (Snapshot, LoadReport, error) {
 			return Snapshot{}, report, fmt.Errorf("load runtime config: %w", err)
 		}
 		runtime, version, updatedAt = document.Runtime, document.Version, document.UpdatedAt
+		normalizeExtensionsDefaults(&runtime)
 		report.RuntimeSource, report.RuntimePath = "json", runtimePath
 		if recovered {
 			report.RuntimeSource = "json_backup"
@@ -364,6 +390,7 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 			return RuntimeDocument{}, err
 		}
 		normalizeSearchDefaults(&runtime)
+		normalizeExtensionsDefaults(&runtime)
 		if err := runtime.Validate(); err != nil {
 			return RuntimeDocument{}, err
 		}
@@ -374,6 +401,7 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		return RuntimeDocument{}, err
 	}
 	normalizeSearchDefaults(&document.Runtime)
+	normalizeExtensionsDefaults(&document.Runtime)
 	if document.Version == 0 {
 		return RuntimeDocument{}, errors.New("runtime document version must be positive")
 	}
@@ -386,6 +414,7 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 	for index := range document.History {
 		revision := &document.History[index]
 		normalizeSearchDefaults(&revision.Runtime)
+		normalizeExtensionsDefaults(&revision.Runtime)
 		if revision.Version == 0 || revision.UpdatedAt.IsZero() {
 			return RuntimeDocument{}, errors.New("runtime history metadata is invalid")
 		}
@@ -553,6 +582,83 @@ func (c RuntimeConfig) Validate() error {
 	}
 	if err := c.Operations.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
+	}
+	if err := c.Extensions.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func normalizeExtensionsDefaults(runtime *RuntimeConfig) {
+	if runtime.Extensions.Skills.MaxFileBytes == 0 && runtime.Extensions.Skills.MaxTotalBytes == 0 && runtime.Extensions.Skills.MaxFiles == 0 {
+		runtime.Extensions.Skills = DefaultRuntime().Extensions.Skills
+	}
+}
+
+func (c ExtensionsConfig) Validate() error {
+	var problems []string
+	seen := map[string]struct{}{}
+	for i, server := range c.MCP {
+		prefix := fmt.Sprintf("extensions.mcp[%d]", i)
+		id := strings.TrimSpace(server.ID)
+		if id == "" {
+			problems = append(problems, prefix+".id is required")
+		} else if _, ok := seen[id]; ok {
+			problems = append(problems, prefix+".id is duplicated")
+		} else {
+			seen[id] = struct{}{}
+		}
+		if !server.Enabled {
+			continue
+		}
+		if server.Transport != "streamable_http" {
+			problems = append(problems, prefix+".transport must be streamable_http")
+		}
+		endpoint := strings.TrimSpace(server.Endpoint)
+		if endpoint == "" {
+			problems = append(problems, prefix+".endpoint is required")
+		} else if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+			problems = append(problems, prefix+".endpoint must use http or https")
+		}
+		if server.Timeout <= 0 {
+			problems = append(problems, prefix+".timeout must be positive")
+		}
+		if server.MaxResponseBytes <= 0 {
+			problems = append(problems, prefix+".max_response_bytes must be positive")
+		}
+		if len(server.AllowedTools) == 0 {
+			problems = append(problems, prefix+".allowed_tools must not be empty")
+		}
+		allowed := map[string]struct{}{}
+		for j, name := range server.AllowedTools {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				problems = append(problems, fmt.Sprintf("%s.allowed_tools[%d] is required", prefix, j))
+			} else if _, ok := allowed[name]; ok {
+				problems = append(problems, fmt.Sprintf("%s.allowed_tools[%d] is duplicated", prefix, j))
+			} else {
+				allowed[name] = struct{}{}
+			}
+		}
+	}
+	s := c.Skills
+	if s.MaxFileBytes == 0 && s.MaxTotalBytes == 0 && s.MaxFiles == 0 {
+		return nil
+	}
+	if s.MaxFileBytes <= 0 {
+		problems = append(problems, "extensions.skills.max_file_bytes must be positive")
+	}
+	if s.MaxTotalBytes <= 0 {
+		problems = append(problems, "extensions.skills.max_total_bytes must be positive")
+	}
+	if s.MaxFiles <= 0 {
+		problems = append(problems, "extensions.skills.max_files must be positive")
+	}
+	if s.MaxFileBytes > s.MaxTotalBytes {
+		problems = append(problems, "extensions.skills.max_file_bytes must not exceed max_total_bytes")
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -985,7 +1091,17 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"platforms":      c.Runtime.Platforms.Public(),
 			"administration": c.Runtime.Administration,
 			"reflection":     c.Runtime.Reflection,
-			"operations":     c.Runtime.Operations,
+			"extensions": map[string]any{
+				"mcp": func() []map[string]any {
+					result := make([]map[string]any, 0, len(c.Runtime.Extensions.MCP))
+					for _, server := range c.Runtime.Extensions.MCP {
+						result = append(result, map[string]any{"id": server.ID, "enabled": server.Enabled, "transport": server.Transport, "endpoint": server.Endpoint, "allowed_tools": server.AllowedTools, "timeout": server.Timeout.String(), "max_response_bytes": server.MaxResponseBytes, "api_key_configured": server.APIKeyRef != ""})
+					}
+					return result
+				}(),
+				"skills": c.Runtime.Extensions.Skills,
+			},
+			"operations": c.Runtime.Operations,
 		},
 	}
 }

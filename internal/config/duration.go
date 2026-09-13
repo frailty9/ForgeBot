@@ -29,6 +29,51 @@ func (r ReflectionConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(encoded{r.Enabled, r.Mode, r.ConversationIDs, r.ScanInterval.String(), r.MessageTTL.String(), r.QuietWindow.String(), r.MaxSessionDuration.String(), r.MaxMessagesPerConversation, r.MaxMessagesTotal, r.MaxMessageChars, r.MaxPairsPerScan, r.MinConfidence, r.ExtraDirectory})
 }
 
+func (c MCPServerConfig) MarshalJSON() ([]byte, error) {
+	type encoded struct {
+		ID               string   `json:"id"`
+		Enabled          bool     `json:"enabled"`
+		Transport        string   `json:"transport"`
+		Endpoint         string   `json:"endpoint"`
+		APIKeyRef        string   `json:"api_key_ref,omitempty"`
+		AllowedTools     []string `json:"allowed_tools"`
+		Timeout          string   `json:"timeout"`
+		MaxResponseBytes int64    `json:"max_response_bytes"`
+	}
+	return json.Marshal(encoded{c.ID, c.Enabled, c.Transport, c.Endpoint, c.APIKeyRef, c.AllowedTools, c.Timeout.String(), c.MaxResponseBytes})
+}
+
+func (c *MCPServerConfig) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		ID               string          `json:"id"`
+		Enabled          bool            `json:"enabled"`
+		Transport        string          `json:"transport"`
+		Endpoint         string          `json:"endpoint"`
+		APIKeyRef        string          `json:"api_key_ref"`
+		AllowedTools     []string        `json:"allowed_tools"`
+		Timeout          json.RawMessage `json:"timeout"`
+		MaxResponseBytes int64           `json:"max_response_bytes"`
+	}
+	var value raw
+	if err := decodeStrictJSON(data, &value); err != nil {
+		return err
+	}
+	defaults := DefaultRuntime().Extensions.MCP
+	timeout, err := decodeDuration(value.Timeout, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("timeout: %w", err)
+	}
+	*c = MCPServerConfig{ID: value.ID, Enabled: value.Enabled, Transport: value.Transport, Endpoint: value.Endpoint, APIKeyRef: value.APIKeyRef, AllowedTools: value.AllowedTools, Timeout: timeout, MaxResponseBytes: value.MaxResponseBytes}
+	if c.Transport == "" {
+		c.Transport = "streamable_http"
+	}
+	if c.MaxResponseBytes == 0 {
+		c.MaxResponseBytes = 1 << 20
+	}
+	_ = defaults
+	return nil
+}
+
 func (r *ReflectionConfig) UnmarshalJSON(data []byte) error {
 	type raw struct {
 		Enabled                    *bool           `json:"enabled"`

@@ -65,6 +65,10 @@ must not depend on or expose the complete Web administration service.
 - `internal/tooling`: explicit tool allow-list and normalized execution result.
 - `internal/tooling/searchdocs`: read-only adapter from the tool boundary to a
   configured Retriever.
+- `internal/tooling/mcp`: configured Streamable HTTP MCP client. It discovers
+  only allow-listed tools and exposes them under the `mcp.<server>.<tool>` namespace.
+- `internal/skills`: bounded local `SKILL.md` loader. Skill files contribute
+  instructions only; they cannot execute code or select MCP endpoints.
 
 ## Design Rules
 
