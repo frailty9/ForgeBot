@@ -72,6 +72,7 @@ type Engine struct {
 const (
 	searchPreReply      = "正在检索相关文档，请稍候。"
 	imageOnlyUserPrompt = "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。"
+	emptyMentionPrompt  = "请简单介绍一下你自己。"
 )
 
 // NewEngine validates dependencies and starts the message gate.
@@ -188,6 +189,10 @@ func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text st
 
 func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
 	text := strings.TrimSpace(in.Text)
+	if text == "" && in.Mentioned && len(in.Media) == 0 {
+		text = emptyMentionPrompt
+		in.Text = text
+	}
 	instructions := e.instructions(in.PromptSuffix)
 	if query, explicit := explicitSearchQuery(text); explicit {
 		return e.explicitSearch(ctx, query, instructions)
@@ -401,7 +406,7 @@ func validateInbound(msg messaging.InboundMessage) error {
 	if strings.TrimSpace(msg.MessageID) == "" {
 		return fmt.Errorf("message_id is required")
 	}
-	if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 {
+	if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.Mentioned {
 		return fmt.Errorf("text or media is required")
 	}
 	return nil

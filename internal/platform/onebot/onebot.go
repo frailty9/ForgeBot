@@ -211,6 +211,11 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		if len(msg.Media) == 0 && msg.ReplyToMessageID != "" {
 			msg.Media = a.resolveReplyMedia(r.Context(), msg.ReplyToMessageID)
 		}
+		if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.Mentioned {
+			a.logger.DebugContext(r.Context(), "onebot message ignored", "reason", "no_supported_content", "message_id", msg.MessageID)
+			writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
+			return
+		}
 		a.logger.DebugContext(r.Context(), "onebot message mapped", "conversation_id", msg.ConversationID,
 			"message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned,
 			"text_len", len([]rune(msg.Text)), "media_count", len(msg.Media))

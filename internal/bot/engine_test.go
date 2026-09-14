@@ -114,6 +114,34 @@ func TestEngineUsesInjectedLLM(t *testing.T) {
 	}
 }
 
+func TestEngineRepliesToEmptyMention(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "我是 ForgeBot。"}}
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{
+		ConversationID: "c", UserID: "u", MessageID: "m", Mentioned: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.request.Messages[0].Text() != emptyMentionPrompt {
+		t.Fatalf("empty mention prompt = %q", fake.request.Messages[0].Text())
+	}
+	if sent := sender.Sent(); len(sent) != 1 || sent[0].Text != "我是 ForgeBot。" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
 func TestEnginePassesInboundImageToLLM(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())

@@ -169,6 +169,59 @@ func TestWebhookIgnoresUnboundGroup(t *testing.T) {
 	}
 }
 
+func TestWebhookIgnoresMessagesWithoutSupportedContent(t *testing.T) {
+	adapter, err := New(testConfig("http://127.0.0.1:5700"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 44,
+		"user_id": 7, "group_id": 8, "raw_message": "[CQ:face,id=317]",
+		"message": []map[string]any{{"type": "face", "data": map[string]string{"id": "317"}}},
+	})
+	called := false
+	response := httptest.NewRecorder()
+	adapter.webhook(handlerFunc(func(context.Context, messaging.InboundMessage) (platform.HandleResult, error) {
+		called = true
+		return platform.HandleResult{}, nil
+	}))(response, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if called {
+		t.Fatal("handler called for unsupported empty message")
+	}
+}
+
+func TestWebhookPassesEmptyMentionToHandler(t *testing.T) {
+	adapter, err := New(testConfig("http://127.0.0.1:5700"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 45,
+		"user_id": 7, "group_id": 8, "self_id": 99,
+		"raw_message": "[CQ:at,qq=99]", "message": []map[string]any{{
+			"type": "at", "data": map[string]string{"qq": "99"},
+		}},
+	})
+	called := false
+	response := httptest.NewRecorder()
+	adapter.webhook(handlerFunc(func(_ context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+		called = true
+		if !msg.Mentioned || msg.Text != "" {
+			t.Fatalf("unexpected empty mention: %+v", msg)
+		}
+		return platform.HandleResult{Accepted: true, Verdict: "pass"}, nil
+	}))(response, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !called {
+		t.Fatal("handler was not called for empty mention")
+	}
+}
+
 func TestWebhookRejectsReplayWithoutCallingHandlerAgain(t *testing.T) {
 	adapter, err := New(testConfig("http://127.0.0.1:5700"), nil)
 	if err != nil {
