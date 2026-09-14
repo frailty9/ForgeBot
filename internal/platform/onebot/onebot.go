@@ -1,3 +1,6 @@
+// Package onebot implements the OneBot 11 group-message adapter. It receives
+// webhook events, resolves reply/image references through the OneBot API, and
+// sends text replies to the bound group target.
 package onebot
 
 import (
@@ -29,6 +32,7 @@ var (
 	ErrUnsupported     = errors.New("onebot message content is unsupported")
 )
 
+// Config contains OneBot HTTP endpoints, credentials, and group bindings.
 type Config struct {
 	ID            string
 	APIURL        string
@@ -44,11 +48,13 @@ type Config struct {
 	Groups        map[string]Group
 }
 
+// Group maps an external OneBot group ID to a logical ForgeBot conversation.
 type Group struct {
 	ConversationID string
 	PromptSuffix   string
 }
 
+// Adapter is a OneBot webhook server and outbound sender.
 type Adapter struct {
 	cfg     Config
 	client  *http.Client
@@ -61,6 +67,7 @@ type Adapter struct {
 	replay  *replayCache
 }
 
+// New validates configuration and precomputes connector/group prompt suffixes.
 func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -83,10 +90,13 @@ func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	return a, nil
 }
 
+// ID returns the configured connector identifier.
 func (a *Adapter) ID() string { return a.cfg.ID }
 
+// Sender returns the connector-scoped outbound sender.
 func (a *Adapter) Sender() platform.ConnectorSender { return a.sender }
 
+// Errors reports asynchronous listener failures.
 func (a *Adapter) Errors() <-chan error { return a.errors }
 
 // Start binds the OneBot callback listener and returns once it is ready.
@@ -342,6 +352,7 @@ type Sender struct {
 	logger *slog.Logger
 }
 
+// SendTo sends a text message to one configured external group target.
 func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.OutboundMessage) error {
 	if strings.TrimSpace(target) == "" || strings.TrimSpace(msg.Text) == "" {
 		return errors.New("onebot target and text are required")

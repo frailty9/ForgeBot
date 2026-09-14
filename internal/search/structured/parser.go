@@ -1,3 +1,5 @@
+// The parser converts supported source files into searchable sections while
+// retaining headings, code language, and source path metadata.
 package structured
 
 import (
@@ -15,11 +17,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CodeBlock records a fenced code block encountered in a document section.
 type CodeBlock struct {
 	Language string
 	Content  string
 }
 
+// Section is the smallest searchable unit in a parsed document.
 type Section struct {
 	ID        string
 	Path      string
@@ -34,6 +38,7 @@ type Section struct {
 	EndLine   int
 }
 
+// Document contains parsed sections and source-level metadata.
 type Document struct {
 	Path     string
 	Title    string

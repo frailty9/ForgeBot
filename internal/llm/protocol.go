@@ -48,6 +48,8 @@ func ParseProtocol(value string) (Protocol, error) {
 	}
 }
 
+// ClientConfig selects a protocol endpoint and its transport-level settings.
+// APIKey is supplied by the secret layer and is never persisted in runtime JSON.
 type ClientConfig struct {
 	Protocol         Protocol
 	BaseURL          string
@@ -67,6 +69,9 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ContentPart is a protocol-neutral text or image input component.
+// Image data is represented by MediaURL or base64 Data; clients translate it
+// into their native wire format.
 type ContentPart struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -75,6 +80,7 @@ type ContentPart struct {
 	Data     string `json:"data,omitempty"`
 }
 
+// Message is a role-bearing conversation turn, optionally containing tool calls.
 type Message struct {
 	Role       Role          `json:"role"`
 	Content    []ContentPart `json:"content"`
@@ -114,18 +120,21 @@ func (m Message) Text() string {
 	return builder.String()
 }
 
+// ToolCall is a normalized model request to execute a named tool.
 type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
+// ToolDefinition describes a tool exposed to the model.
 type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema,omitempty"`
 }
 
+// Request is the protocol-independent completion request consumed by Client.
 type Request struct {
 	Model        string            `json:"model"`
 	Messages     []Message         `json:"messages"`
@@ -142,6 +151,7 @@ type Usage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
+// Response is the normalized completion result returned by a Client.
 type Response struct {
 	ID           string  `json:"id"`
 	Model        string  `json:"model"`
@@ -151,6 +161,7 @@ type Response struct {
 	Usage        Usage   `json:"usage"`
 }
 
+// StreamEvent is one normalized event from a streaming completion.
 type StreamEvent struct {
 	ID       string    `json:"id,omitempty"`
 	Delta    string    `json:"delta,omitempty"`

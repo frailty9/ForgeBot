@@ -54,6 +54,7 @@ type Stats struct {
 
 var ErrNoPublishedDocument = errors.New("reflection batch produced no new document")
 
+// New validates the reflection pipeline dependencies and limits.
 func New(cfg Config) (*Processor, error) {
 	if cfg.Reflector == nil || cfg.Publisher == nil || cfg.Reload == nil || cfg.MinConfidence <= 0 || cfg.MinConfidence > 1 {
 		return nil, errors.New("reflection pipeline configuration is invalid")
@@ -64,6 +65,8 @@ func New(cfg Config) (*Processor, error) {
 // ProcessBatch returns one error per input session. A nil error means the
 // scanner may complete that session. Rejected or duplicate candidates are
 // successful terminal outcomes and therefore also return nil.
+// ProcessBatch reflects eligible sessions, publishes accepted entries, and
+// reloads search once after any successful publication.
 func (p *Processor) ProcessBatch(ctx context.Context, sessions []buffer.AnswerSession) []error {
 	errs := make([]error, len(sessions))
 	p.mu.RLock()

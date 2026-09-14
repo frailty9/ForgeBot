@@ -1,3 +1,5 @@
+// Package messaging defines the protocol-neutral message model shared by
+// platform adapters, the bot engine, and outbound senders.
 package messaging
 
 import "time"

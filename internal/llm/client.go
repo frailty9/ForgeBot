@@ -32,6 +32,7 @@ func WithHTTPClient(client *http.Client) ClientOption {
 	}
 }
 
+// NewClient constructs the implementation for cfg.Protocol.
 func NewClient(cfg ClientConfig, options ...ClientOption) (Client, error) {
 	if !cfg.Protocol.Valid() {
 		return nil, fmt.Errorf("unsupported LLM protocol: %s", cfg.Protocol)

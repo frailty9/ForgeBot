@@ -1,3 +1,5 @@
+// Package platform contains connector interfaces and the registry that maps
+// logical conversations to platform-specific delivery targets.
 package platform
 
 import (

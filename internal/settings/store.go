@@ -1,3 +1,5 @@
+// Package settings persists versioned runtime configuration and exposes
+// optimistic-concurrency update operations.
 package settings
 
 import (
@@ -13,6 +15,7 @@ var (
 	ErrVersionNotFound = errors.New("runtime configuration version not found")
 )
 
+// UpdateRequest describes a complete runtime replacement with concurrency guard.
 type UpdateRequest struct {
 	ExpectedVersion uint64
 	Runtime         config.RuntimeConfig
@@ -20,12 +23,14 @@ type UpdateRequest struct {
 	Force           bool
 }
 
+// RevisionMeta is the redacted metadata for one persisted runtime revision.
 type RevisionMeta struct {
 	Version   uint64    `json:"version"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Source    string    `json:"source,omitempty"`
 }
 
+// Store persists versioned runtime documents and supports rollback.
 type Store interface {
 	Current(context.Context) (config.Snapshot, error)
 	RuntimeAt(context.Context, uint64) (config.RuntimeConfig, error)

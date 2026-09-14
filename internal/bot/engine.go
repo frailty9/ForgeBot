@@ -1,3 +1,6 @@
+// Package bot contains the protocol-neutral conversation engine. It applies
+// gating, builds multimodal LLM requests, executes allow-listed tools, and
+// sends normalized replies through the platform boundary.
 package bot
 
 import (
@@ -18,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
+// Policy contains behavior shared by one engine generation.
 type Policy struct {
 	Name                  string
 	SystemPrompt          string
@@ -49,6 +53,7 @@ type GatePolicy struct {
 	MaxConcurrent        int
 }
 
+// Dependencies are the replaceable boundaries required by Engine.
 type Dependencies struct {
 	Sender    platform.Sender
 	LLM       llm.Client
@@ -57,6 +62,7 @@ type Dependencies struct {
 	Policy    Policy
 }
 
+// Engine handles inbound messages for one immutable runtime generation.
 type Engine struct {
 	deps   Dependencies
 	logger *slog.Logger
@@ -68,6 +74,7 @@ const (
 	imageOnlyUserPrompt = "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。"
 )
 
+// NewEngine validates dependencies and starts the message gate.
 func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -85,6 +92,8 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 	return engine, nil
 }
 
+// HandleInbound processes one normalized inbound message and returns a verdict
+// describing whether it was handled, buffered, or rejected.
 func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
 	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
@@ -122,6 +131,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	return platform.HandleResult{Accepted: true, Verdict: verdict.String()}, nil
 }
 
+// Shutdown stops pending gate work and closes external tool executors.
 func (e *Engine) Shutdown(grace time.Duration) {
 	e.gate.Close(grace)
 	if closer, ok := e.deps.Tools.(io.Closer); ok {

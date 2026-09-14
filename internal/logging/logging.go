@@ -1,3 +1,5 @@
+// Package logging provides a dynamically configurable slog handler used by
+// the runtime generation and management API.
 package logging
 
 import (

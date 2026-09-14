@@ -36,6 +36,7 @@ type Reflector struct {
 	model  string
 }
 
+// New creates a reflector backed by the configured LLM client.
 func New(client llm.Client, model string) (*Reflector, error) {
 	if client == nil || strings.TrimSpace(model) == "" {
 		return nil, ErrInvalidConfig
@@ -43,6 +44,8 @@ func New(client llm.Client, model string) (*Reflector, error) {
 	return &Reflector{client: client, model: strings.TrimSpace(model)}, nil
 }
 
+// Reflect asks the model whether a bounded administrator answer is reusable
+// knowledge and returns a validated candidate when accepted.
 func (r *Reflector) Reflect(ctx context.Context, session buffer.AnswerSession) (Result, error) {
 	if strings.TrimSpace(session.Question.Text) == "" || len(session.Answers) == 0 {
 		return Result{}, ErrInvalidResult

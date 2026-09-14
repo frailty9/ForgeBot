@@ -1,3 +1,5 @@
+// Package notification dispatches bounded, best-effort operational events to
+// configured conversation targets.
 package notification
 
 import (

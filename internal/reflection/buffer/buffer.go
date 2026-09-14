@@ -1,3 +1,5 @@
+// Package buffer retains a bounded, in-memory window of group messages and
+// pairs administrator answers with preceding user questions for reflection.
 package buffer
 
 import (
@@ -16,6 +18,7 @@ var (
 	ErrSessionNotFound = errors.New("reflection answer session was not found")
 )
 
+// Config controls retention limits and eligibility rules.
 type Config struct {
 	ConversationIDs            []string
 	MessageTTL                 time.Duration
@@ -26,6 +29,7 @@ type Config struct {
 	MaxMessageChars            int
 }
 
+// AnswerSession is a closed question/answer group ready for LLM reflection.
 type AnswerSession struct {
 	Key       string
 	Question  messaging.InboundMessage
@@ -34,6 +38,7 @@ type AnswerSession struct {
 	LastAt    time.Time
 }
 
+// Stats reports bounded buffer counts without exposing message content.
 type Stats struct {
 	Questions int `json:"questions"`
 	Sessions  int `json:"sessions"`
@@ -51,6 +56,7 @@ type session struct {
 	closed  bool
 }
 
+// Buffer owns in-memory observations and pending reflection sessions.
 type Buffer struct {
 	mu            sync.Mutex
 	conversations map[string]struct{}

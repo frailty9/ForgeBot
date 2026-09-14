@@ -1,3 +1,5 @@
+// Package server exposes health, normalized test ingress, and the bearer-
+// protected management API over one HTTP listener.
 package server
 
 import (
@@ -24,11 +26,13 @@ import (
 
 const maxAdminBodyBytes = 1 << 20
 
+// Engine is the inbound boundary used by HTTP ingress and platform adapters.
 type Engine interface {
 	HandleInbound(context.Context, messaging.InboundMessage) (platform.HandleResult, error)
 	GateStats() gate.Stats
 }
 
+// Server owns HTTP routes and delegates state changes to the admin facade.
 type Server struct {
 	cfg    config.Snapshot
 	logger *slog.Logger
@@ -37,6 +41,7 @@ type Server struct {
 	server *http.Server
 }
 
+// New creates an HTTP server with the supplied runtime and management boundaries.
 func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *admin.Service) *Server {
 	if logger == nil {
 		logger = slog.Default()

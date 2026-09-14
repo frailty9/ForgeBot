@@ -1,3 +1,5 @@
+// Package search defines the retrieval contract and status model. Concrete
+// indexes are responsible for parsing and ranking documents.
 package search
 
 import (

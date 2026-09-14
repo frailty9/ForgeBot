@@ -1,3 +1,5 @@
+// Package tooling defines the allow-listed tool boundary used by the bot
+// engine. Implementations may be local search tools or external MCP clients.
 package tooling
 
 import "context"

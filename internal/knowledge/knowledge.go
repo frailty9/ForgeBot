@@ -1,3 +1,5 @@
+// Package knowledge contains the storage-neutral contract for accepted
+// reflection results.
 package knowledge
 
 import "time"

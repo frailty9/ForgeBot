@@ -1,3 +1,5 @@
+// Package gate buffers unaddressed group messages and applies deduplication,
+// silence windows, and bounded concurrency before handing batches to the bot.
 package gate
 
 import (
@@ -9,6 +11,7 @@ import (
 	"time"
 )
 
+// Input is the gate-facing projection of an inbound message.
 type Input struct {
 	ConversationID   string
 	MsgID            string
@@ -25,6 +28,7 @@ type Input struct {
 
 func (i Input) SessionKey() string { return i.ConversationID }
 
+// Message is the bounded message record retained by the gate.
 type Message struct {
 	MsgID            string
 	ReplyToMessageID string
@@ -43,6 +47,7 @@ const (
 	ReasonWindow
 )
 
+// Batch is a flushed group of messages ready for one bot turn.
 type Batch struct {
 	SessionKey     string
 	ConversationID string
@@ -82,6 +87,7 @@ func (b Batch) Trigger(asker string) Message {
 	return b.Msgs[len(b.Msgs)-1]
 }
 
+// Policy controls when and how an unaddressed conversation is flushed.
 type Policy struct {
 	Silence              time.Duration
 	MaxCount             int
@@ -128,6 +134,7 @@ type bucket struct {
 	flushing       bool
 }
 
+// Pool owns per-conversation buffers and their timers.
 type Pool struct {
 	lifecycle sync.RWMutex
 	clock     clock
@@ -156,6 +163,7 @@ type Options struct {
 	IdleBucketTTL time.Duration
 }
 
+// New creates a gate pool. The policy callback is evaluated per conversation.
 func New(ctx context.Context, policy func(string) Policy, onFlush func(context.Context, Batch), opts Options) *Pool {
 	if ctx == nil {
 		ctx = context.Background()
@@ -183,6 +191,7 @@ func New(ctx context.Context, policy func(string) Policy, onFlush func(context.C
 	return p
 }
 
+// Absorb records an input and returns the immediate handling verdict.
 func (p *Pool) Absorb(in Input) Verdict {
 	if p == nil {
 		return VerdictPass

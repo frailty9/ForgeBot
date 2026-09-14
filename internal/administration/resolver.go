@@ -1,3 +1,5 @@
+// Package administration resolves platform identities into the administrator
+// flag consumed by operations and reflection components.
 package administration
 
 import (

@@ -1,3 +1,5 @@
+// Package skills loads bounded local SKILL.md instruction files. Skills are
+// text-only extensions and do not execute code or gain tool permissions.
 package skills
 
 import (
@@ -11,14 +13,17 @@ import (
 	"strings"
 )
 
+// Config limits the directories and total content accepted by Loader.
 type Config struct {
 	Directories                 []string
 	MaxFileBytes, MaxTotalBytes int64
 	MaxFiles                    int
 }
 
+// Loader reads and combines configured skill files deterministically.
 type Loader struct{ cfg Config }
 
+// New validates limits and creates a skill loader.
 func New(cfg Config) (*Loader, error) {
 	if cfg.MaxFileBytes <= 0 || cfg.MaxTotalBytes <= 0 || cfg.MaxFiles <= 0 {
 		return nil, errors.New("skill limits must be positive")
@@ -29,6 +34,7 @@ func New(cfg Config) (*Loader, error) {
 	return &Loader{cfg: cfg}, nil
 }
 
+// Load returns the instruction snapshot from all configured skill files.
 func (l *Loader) Load(ctx context.Context) (string, error) {
 	if l == nil || len(l.cfg.Directories) == 0 {
 		return "", nil

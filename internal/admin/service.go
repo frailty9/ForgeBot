@@ -1,3 +1,5 @@
+// Package admin adapts runtime, settings, secrets, search, and reflection
+// operations to the HTTP management surface.
 package admin
 
 import (
@@ -14,12 +16,14 @@ import (
 
 var ErrUnavailable = errors.New("management capability is unavailable")
 
+// Service is the management facade used by the HTTP server.
 type Service struct {
 	runtime  *runtimecfg.Manager
 	settings settings.Store
 	secrets  *secret.Manager
 }
 
+// UpdateRequest is a complete runtime replacement guarded by expected_version.
 type UpdateRequest struct {
 	ExpectedVersion uint64               `json:"expected_version"`
 	Runtime         config.RuntimeConfig `json:"runtime"`
@@ -27,12 +31,14 @@ type UpdateRequest struct {
 	Force           bool                 `json:"force,omitempty"`
 }
 
+// RollbackRequest identifies a persisted runtime revision to restore.
 type RollbackRequest struct {
 	TargetVersion   uint64 `json:"target_version"`
 	ExpectedVersion uint64 `json:"expected_version"`
 	Source          string `json:"source"`
 }
 
+// New validates management dependencies and creates the facade.
 func New(runtime *runtimecfg.Manager, store settings.Store, secrets *secret.Manager) (*Service, error) {
 	if runtime == nil {
 		return nil, errors.New("runtime manager is required")

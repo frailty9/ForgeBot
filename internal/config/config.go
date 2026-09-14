@@ -1,3 +1,5 @@
+// Package config loads, normalizes, validates, and redacts ForgeBot startup
+// and runtime configuration.
 package config
 
 import (
@@ -24,6 +26,7 @@ const (
 	defaultAPIKeyRef   = "llm/default"
 )
 
+// LoadOptions controls configuration source selection and environment overrides.
 type LoadOptions struct {
 	Path        string
 	RuntimePath string
@@ -31,6 +34,7 @@ type LoadOptions struct {
 	Now         func() time.Time
 }
 
+// LoadReport describes the effective configuration sources selected at startup.
 type LoadReport struct {
 	StaticSource  string
 	StaticPath    string
@@ -38,6 +42,7 @@ type LoadReport struct {
 	RuntimePath   string
 }
 
+// Snapshot is the immutable configuration pair used to build a runtime generation.
 type Snapshot struct {
 	Version   uint64        `json:"version"`
 	UpdatedAt time.Time     `json:"updated_at"`
@@ -45,6 +50,7 @@ type Snapshot struct {
 	Runtime   RuntimeConfig `json:"runtime"`
 }
 
+// StaticConfig contains process-level settings that require restart to change.
 type StaticConfig struct {
 	Server            ServerConfig `json:"server" yaml:"server"`
 	RuntimeConfigPath string       `json:"runtime_config_path" yaml:"runtime_config_path"`
@@ -52,6 +58,7 @@ type StaticConfig struct {
 	AdminToken        string       `json:"-" yaml:"admin_token"`
 }
 
+// RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
 	Log            LogConfig            `json:"log"`
 	Bot            BotConfig            `json:"bot"`
@@ -65,11 +72,13 @@ type RuntimeConfig struct {
 	Extensions     ExtensionsConfig     `json:"extensions"`
 }
 
+// ExtensionsConfig configures MCP servers and text-only skills.
 type ExtensionsConfig struct {
 	MCP    []MCPServerConfig `json:"mcp"`
 	Skills SkillsConfig      `json:"skills"`
 }
 
+// MCPServerConfig describes one allow-listed MCP server connection.
 type MCPServerConfig struct {
 	ID               string            `json:"id"`
 	Enabled          bool              `json:"enabled"`
@@ -85,6 +94,7 @@ type MCPServerConfig struct {
 	MaxResponseBytes int64             `json:"max_response_bytes"`
 }
 
+// SkillsConfig bounds local SKILL.md loading.
 type SkillsConfig struct {
 	Directories   []string `json:"directories"`
 	MaxFileBytes  int64    `json:"max_file_bytes"`
@@ -92,6 +102,7 @@ type SkillsConfig struct {
 	MaxFiles      int      `json:"max_files"`
 }
 
+// RuntimeDocument is the versioned JSON envelope persisted by the settings store.
 type RuntimeDocument struct {
 	Version   uint64            `json:"version"`
 	UpdatedAt time.Time         `json:"updated_at"`
@@ -107,6 +118,7 @@ type RuntimeRevision struct {
 	Runtime   RuntimeConfig `json:"runtime"`
 }
 
+// ServerConfig controls the management and ingress HTTP listener.
 type ServerConfig struct {
 	Addr            string        `json:"addr" yaml:"addr"`
 	ReadTimeout     time.Duration `json:"read_timeout" yaml:"read_timeout"`
@@ -124,6 +136,7 @@ type BotConfig struct {
 	SystemPrompt string `json:"system_prompt,omitempty" yaml:"system_prompt,omitempty"`
 }
 
+// LLMConfig selects one supported protocol family and model settings.
 type LLMConfig struct {
 	Protocol         llm.Protocol  `json:"protocol" yaml:"protocol"`
 	BaseURL          string        `json:"base_url" yaml:"base_url"`
@@ -141,6 +154,7 @@ func (c LLMConfig) ClientConfig(apiKey string) llm.ClientConfig {
 	}
 }
 
+// GateConfig controls message buffering and proactive group replies.
 type GateConfig struct {
 	Enabled       bool          `json:"enabled" yaml:"enabled"`
 	Silence       time.Duration `json:"silence" yaml:"silence"`
@@ -153,6 +167,7 @@ type GateConfig struct {
 	MaxConcurrent int           `json:"max_concurrent" yaml:"max_concurrent"`
 }
 
+// SearchConfig controls the structured local document index.
 type SearchConfig struct {
 	Enabled           bool          `json:"enabled" yaml:"enabled"`
 	Policy            string        `json:"policy" yaml:"policy"`
@@ -172,11 +187,13 @@ type SearchConfig struct {
 	MaxFiles          int           `json:"max_files" yaml:"max_files"`
 }
 
+// PlatformConfig declares connectors and logical conversation bindings.
 type PlatformConfig struct {
 	Connectors []ConnectorConfig    `json:"connectors" yaml:"connectors"`
 	Groups     []GroupBindingConfig `json:"groups" yaml:"groups"`
 }
 
+// ConnectorConfig selects one platform adapter instance.
 type ConnectorConfig struct {
 	ID           string                 `json:"id" yaml:"id"`
 	Type         string                 `json:"type" yaml:"type"`
@@ -185,6 +202,7 @@ type ConnectorConfig struct {
 	OneBot       *OneBotConnectorConfig `json:"onebot,omitempty" yaml:"onebot,omitempty"`
 }
 
+// GroupBindingConfig maps an external target to a logical conversation.
 type GroupBindingConfig struct {
 	ID                   string `json:"id" yaml:"id"`
 	ConnectorID          string `json:"connector_id" yaml:"connector_id"`
@@ -193,14 +211,17 @@ type GroupBindingConfig struct {
 	AutoReplyUnmentioned bool   `json:"auto_reply_unmentioned,omitempty" yaml:"auto_reply_unmentioned,omitempty"`
 }
 
+// OperationsConfig grants limited command access to conversations.
 type OperationsConfig struct {
 	Groups []OperatorGroupConfig `json:"groups" yaml:"groups"`
 }
 
+// AdministrationConfig lists platform identities treated as administrators.
 type AdministrationConfig struct {
 	Administrators []AdministratorConfig `json:"administrators" yaml:"administrators"`
 }
 
+// ReflectionConfig controls periodic conversion of approved answers into documents.
 type ReflectionConfig struct {
 	Enabled                    bool          `json:"enabled" yaml:"enabled"`
 	Mode                       string        `json:"mode" yaml:"mode"`

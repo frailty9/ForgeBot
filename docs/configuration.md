@@ -394,6 +394,70 @@ stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
 次运行时配置或 `/v1/admin/runtime/restart` 生效。扩展连接或 Skill 解析失败
 时，候选 generation 不会发布，旧运行时继续服务。
 
+### 6.5.1 使用 MCP 工具的完整流程
+
+下面以提供 `list_models` 和 `get_model_pricing` 的 MCP 服务为例。MCP 服务需要
+先独立启动并确认可用；ForgeBot 负责连接、发现和调用工具。
+
+1. **确认服务和工具名**：服务应支持 MCP JSON-RPC 的 `initialize`、
+   `notifications/initialized`、`tools/list` 和 `tools/call`。记录要开放的原始
+   工具名，例如 `list_models`、`get_model_pricing`。
+2. **配置 Streamable HTTP**：在 runtime JSON 的 `extensions.mcp` 中加入：
+
+   ```json
+   {
+     "id": "platform",
+     "enabled": true,
+     "transport": "streamable_http",
+     "endpoint": "https://mcp.example.com/mcp",
+     "api_key_ref": "llm/default",
+     "allowed_tools": ["list_models", "get_model_pricing"],
+     "timeout": "10s",
+     "max_response_bytes": 1048576
+   }
+   ```
+
+   `endpoint` 是 MCP 服务地址，不是 ForgeBot 管理地址。模型可见的工具名会变为
+   `mcp.platform.list_models` 和 `mcp.platform.get_model_pricing`；
+   `allowed_tools` 始终填写 MCP 返回的原始名称。
+3. **配置认证**：`api_key_ref` 是 SecretStore 引用，不是明文 Key。示例复用
+   `llm/default`；不需要认证时可省略。当前管理 API 的写入接口固定更新
+   `llm.api_key_ref`，不能额外提交任意 `ref` 字段。独立 MCP Key 应在初始化阶段
+   预置到加密 SecretStore，禁止写入 runtime JSON 或 Git。
+4. **配置 stdio（本地进程）**：
+
+   ```json
+   {
+     "id": "local-tools",
+     "enabled": true,
+     "transport": "stdio",
+     "command": "node",
+     "args": ["./server.js"],
+     "working_directory": "D:/forgebot/extensions/local-tools",
+     "environment": {"TOOL_MODE": "readonly"},
+     "allowed_tools": ["list_models"],
+     "timeout": "10s",
+     "max_response_bytes": 1048576
+   }
+   ```
+
+   ForgeBot 直接启动 `command`，不经过 shell。stdout 只能输出逐行 JSON-RPC，
+   日志写 stderr；Windows 下确认命令在 `PATH` 中且工作目录存在。
+5. **应用并验证**：MCP 属于 runtime。提交完整 runtime 更新，或保存后调用
+   `POST /v1/admin/runtime/restart`。启动日志应显示 MCP 初始化和工具发现成功。
+   发送“列出当前可用模型及价格”等明确需要工具的问题，debug 日志应出现工具
+   调用和执行结果。普通闲聊不会自动调用 MCP。
+6. **热更新与回滚**：更新是完整 runtime 替换，不是 JSON Merge Patch，并需要
+   正确的 `expected_version`。ForgeBot 会先连接候选 MCP；连接失败时旧 generation
+   保持运行。更新成功后旧连接关闭，新连接生效。
+
+### 6.5.2 MCP 安全与排错
+
+- `allowed_tools` 只列出必要工具，避免暴露写入、管理或任意执行能力。
+- Streamable HTTP 优先使用 HTTPS；stdio 子进程继承 ForgeBot 的操作系统权限。
+- `timeout`、`max_response_bytes` 超限或子进程退出会使调用失败。
+- 模型不调用工具时，依次检查工具发现、原始工具名匹配、模型工具调用能力和系统提示词。
+
 ## 7. 管理 API 与热更新
 
 所有 `/v1/admin/*` 请求都必须携带：

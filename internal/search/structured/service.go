@@ -1,3 +1,5 @@
+// Package structured implements bounded, in-memory BM25F search over local
+// Markdown, MDX, and plain-text documents.
 package structured
 
 import (
@@ -17,6 +19,7 @@ import (
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 )
 
+// Options controls document loading, indexing, ranking, and resource limits.
 type Options struct {
 	Root            string
 	Extensions      []string
@@ -38,6 +41,7 @@ type snapshot struct {
 	took        time.Duration
 }
 
+// Service owns the active index and performs atomic reloads.
 type Service struct {
 	opts     Options
 	current  atomic.Pointer[snapshot]
@@ -46,6 +50,7 @@ type Service struct {
 	status   searchcontract.Status
 }
 
+// New builds the initial index before returning a ready service.
 func New(ctx context.Context, opts Options) (*Service, error) {
 	if err := opts.validate(); err != nil {
 		return nil, err
@@ -90,6 +95,7 @@ func (o Options) validate() error {
 	return nil
 }
 
+// Search ranks sections in the current immutable index.
 func (s *Service) Search(ctx context.Context, query searchcontract.Query) (searchcontract.Response, error) {
 	snap := s.current.Load()
 	if snap == nil || snap.index == nil {
@@ -106,6 +112,7 @@ func (s *Service) Search(ctx context.Context, query searchcontract.Query) (searc
 	return snap.index.Search(queryCtx, query, s.opts.MinMatchRatio)
 }
 
+// Reload builds a candidate index and swaps it in only after a successful build.
 func (s *Service) Reload(ctx context.Context) (searchcontract.ReloadResult, error) {
 	return s.reload(ctx, true)
 }

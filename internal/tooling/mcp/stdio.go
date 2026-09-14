@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// StdioConfig describes the executable and resource limits for a local MCP process.
 type StdioConfig struct {
 	Command          string
 	Args             []string
@@ -36,6 +37,7 @@ type stdioTransport struct {
 	waitErr          error
 }
 
+// NewStdioTransport starts a JSON-RPC-over-stdio MCP subprocess.
 func NewStdioTransport(cfg StdioConfig) (Transport, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, errors.New("MCP stdio command is required")

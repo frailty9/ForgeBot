@@ -166,6 +166,8 @@ document reload, reflection scans, and write-only API key management.
 Read [docs/configuration.md](docs/configuration.md) before deploying. It covers
 environment-variable precedence, path resolution, OneBot setup, search limits,
 SecretStore initialization, hot updates, rollback, and production hardening.
+The same guide includes an MCP tutorial for Streamable HTTP and stdio setup,
+tool allow-listing, credentials, verification, hot updates, and troubleshooting.
 
 ## Management API
 

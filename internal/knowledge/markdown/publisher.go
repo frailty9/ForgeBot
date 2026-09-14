@@ -24,18 +24,21 @@ var (
 	ErrPathCollision = errors.New("managed markdown path collides with an unmanaged file")
 )
 
+// Config controls the managed Markdown output directory and write limits.
 type Config struct {
 	Root           string
 	ExtraDirectory string
 	MaxBytes       int64
 }
 
+// Publisher atomically writes accepted reflection entries as Markdown files.
 type Publisher struct {
 	root     string
 	extra    string
 	maxBytes int64
 }
 
+// New validates the output directory configuration.
 func New(cfg Config) (*Publisher, error) {
 	rawRoot := strings.TrimSpace(cfg.Root)
 	rawExtra := strings.TrimSpace(cfg.ExtraDirectory)
@@ -68,6 +71,7 @@ func New(cfg Config) (*Publisher, error) {
 	return &Publisher{root: root, extra: extra, maxBytes: cfg.MaxBytes}, nil
 }
 
+// Publish writes one entry, returning Duplicate when its content hash already exists.
 func (p *Publisher) Publish(entry knowledge.Entry) (knowledge.PublishResult, error) {
 	canonical, hash, err := canonicalEntry(entry)
 	if err != nil {

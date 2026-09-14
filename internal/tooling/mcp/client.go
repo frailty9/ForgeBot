@@ -1,3 +1,5 @@
+// Package mcp adapts MCP JSON-RPC servers to ForgeBot's allow-listed tool
+// executor. Transport details are hidden behind Transport.
 package mcp
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
+// Config selects an MCP server identity, credentials, and exposed tools.
 type Config struct {
 	ID               string
 	Endpoint         string
@@ -23,6 +26,7 @@ type Config struct {
 	MaxResponseBytes int64
 }
 
+// Client discovers and invokes the configured subset of an MCP server's tools.
 type Client struct {
 	cfg       Config
 	transport Transport
@@ -44,6 +48,7 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// New connects to a Streamable HTTP MCP server and discovers allowed tools.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	if strings.TrimSpace(cfg.ID) == "" || strings.TrimSpace(cfg.Endpoint) == "" {
 		return nil, errors.New("MCP id and endpoint are required")
@@ -66,6 +71,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// NewWithStdio starts a local MCP process and discovers its allowed tools.
 func NewWithStdio(ctx context.Context, cfg Config, stdio StdioConfig) (*Client, error) {
 	transport, err := NewStdioTransport(stdio)
 	if err != nil {
@@ -74,6 +80,7 @@ func NewWithStdio(ctx context.Context, cfg Config, stdio StdioConfig) (*Client, 
 	return NewWithTransport(ctx, cfg, transport)
 }
 
+// NewWithTransport creates a client over an already constructed transport.
 func NewWithTransport(ctx context.Context, cfg Config, transport Transport) (*Client, error) {
 	if strings.TrimSpace(cfg.ID) == "" {
 		return nil, errors.New("MCP id is required")
@@ -136,6 +143,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	return nil
 }
 
+// Definitions returns stable, sorted names for tools exposed to the LLM.
 func (c *Client) Definitions() []tooling.Definition {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -147,6 +155,7 @@ func (c *Client) Definitions() []tooling.Definition {
 	return result
 }
 
+// Execute validates the namespaced tool name and forwards one MCP tools/call.
 func (c *Client) Execute(ctx context.Context, call tooling.Call) tooling.Result {
 	c.mu.Lock()
 	_, ok := c.tools[call.Name]

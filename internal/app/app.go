@@ -1,3 +1,5 @@
+// Package app wires configuration, runtime generation management, connectors,
+// and the HTTP server into the ForgeBot process lifecycle.
 package app
 
 import (
@@ -24,6 +26,7 @@ import (
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
+// App is the top-level process composition and shutdown coordinator.
 type App struct {
 	cfg      config.Snapshot
 	logger   *slog.Logger
@@ -32,6 +35,7 @@ type App struct {
 	notifier *notification.Dispatcher
 }
 
+// New constructs all process-level services from the validated snapshot.
 func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Controller) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -157,6 +161,7 @@ func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
 	return secret.NewFileStore(static.SecretStorePath, key)
 }
 
+// Run starts the HTTP server and runtime generation until ctx is canceled.
 func (a *App) Run(ctx context.Context) error {
 	notificationCtx, stopNotifications := context.WithCancel(ctx)
 	defer stopNotifications()

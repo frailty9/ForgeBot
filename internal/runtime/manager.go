@@ -1,3 +1,6 @@
+// Package runtime builds and swaps complete application generations. A new
+// generation is validated and started before it becomes active, so failed
+// hot updates leave the previous generation serving traffic.
 package runtime
 
 import (
@@ -99,6 +102,7 @@ type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
 type SearchFactory func(context.Context, config.SearchConfig) (searchcontract.Retriever, error)
 type Persist func() (config.Snapshot, error)
 
+// Builder contains factories for all replaceable runtime components.
 type Builder struct {
 	Sender            platform.Sender
 	Secrets           secret.Store
@@ -110,6 +114,7 @@ type Builder struct {
 	ReflectionFactory func(context.Context, config.Snapshot, llm.Client, searchcontract.Retriever) (*reflectionscanner.Scanner, error)
 }
 
+// Build constructs a complete bot engine and its configured dependencies.
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
 	retriever, err := b.buildSearch(ctx, snapshot.Runtime.Search, nil)
 	if err != nil {
@@ -284,6 +289,8 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 	return nil
 }
 
+// Manager owns the active generation and coordinates lifecycle, updates,
+// persistence, notifications, and administrative actions.
 type Manager struct {
 	applyMu         sync.Mutex
 	routeMu         sync.RWMutex
@@ -316,6 +323,7 @@ type generation struct {
 	mu                 sync.RWMutex
 }
 
+// NewManager validates and publishes the initial runtime generation.
 func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) (*Manager, error) {
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
@@ -652,6 +660,7 @@ func (m *Manager) watchConnectorErrors(generation *generation) {
 	}()
 }
 
+// Apply builds a candidate generation and swaps it in atomically after success.
 func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyResult, error) {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
@@ -762,6 +771,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: persisted}, nil
 }
 
+// Restart rebuilds the active generation from its current snapshot.
 func (m *Manager) Restart(ctx context.Context, reason string) error {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
@@ -811,6 +821,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// ReloadSearch rebuilds the active structured index without replacing other components.
 func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontract.ReloadResult, error) {
 	if !m.reloadingSearch.CompareAndSwap(false, true) {
 		return searchcontract.ReloadResult{}, searchcontract.ErrReloadInProgress

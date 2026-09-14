@@ -1,3 +1,5 @@
+// Package operations parses and authorizes the deliberately small command
+// surface exposed to administrators through chat conversations.
 package operations
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/soleapi/forgebot/internal/platform"
 )
 
+// Command is a normalized chat-side administrative command.
 type Command string
 
 const (
@@ -22,6 +25,7 @@ const (
 
 var ErrUnsupportedCommand = errors.New("operator command is not supported")
 
+// Request is a parsed command request.
 type Request struct {
 	Command        Command
 	Arguments      []string
@@ -31,6 +35,7 @@ type Request struct {
 	Administrator  bool
 }
 
+// Result is the user-facing outcome of an operation.
 type Result struct {
 	Reply    string
 	Followup func(context.Context) (string, error)
@@ -47,6 +52,7 @@ type GroupPolicy struct {
 	Commands       []Command
 }
 
+// Router intercepts authorized commands before forwarding ordinary messages.
 type Router struct {
 	next    platform.Handler
 	service Service
@@ -56,6 +62,7 @@ type Router struct {
 
 func (r *Router) SetService(service Service) { r.service = service }
 
+// NewRouter creates a command router for configured group policies.
 func NewRouter(next platform.Handler, service Service, sender platform.Sender, policies []GroupPolicy) (*Router, error) {
 	if next == nil {
 		return nil, errors.New("operator router next handler is required")
@@ -134,6 +141,7 @@ func (r *Router) runFollowup(request Request, followup func(context.Context) (st
 	})
 }
 
+// Parse recognizes a supported slash command from an inbound message.
 func Parse(message messaging.InboundMessage) (Request, bool) {
 	text := strings.TrimSpace(message.Text)
 	if !strings.HasPrefix(text, "/") {

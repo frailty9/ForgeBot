@@ -1,3 +1,5 @@
+// Package secret stores API credentials encrypted at rest and exposes status
+// and write-only lifecycle operations to management layers.
 package secret
 
 import (
@@ -16,18 +18,21 @@ var (
 	ErrCandidateNotFound = errors.New("secret candidate not found")
 )
 
+// Status exposes secret presence and version without revealing plaintext.
 type Status struct {
 	Configured bool      `json:"configured"`
 	Version    uint64    `json:"version"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
 
+// Candidate identifies a staged secret awaiting activation.
 type Candidate struct {
 	Ref       string
 	Version   uint64
 	UpdatedAt time.Time
 }
 
+// Store is the encrypted secret lifecycle boundary.
 type Store interface {
 	Status(context.Context, string) (Status, error)
 	Get(context.Context, string) (string, error)
@@ -37,8 +42,10 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
+// Crypter encrypts and authenticates secret values with AES-256-GCM.
 type Crypter struct{ aead cipher.AEAD }
 
+// NewCrypter creates an AES-256-GCM crypter from a 32-byte key.
 func NewCrypter(key []byte) (*Crypter, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("secret key must contain exactly 32 bytes")
@@ -54,6 +61,7 @@ func NewCrypter(key []byte) (*Crypter, error) {
 	return &Crypter{aead: aead}, nil
 }
 
+// ParseKey decodes the Base64 representation used by FORGEBOT_SECRET_KEY.
 func ParseKey(encoded string) ([]byte, error) {
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
