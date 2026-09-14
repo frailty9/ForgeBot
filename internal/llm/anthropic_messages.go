@@ -168,7 +168,7 @@ func (c *anthropicMessagesClient) payload(req Request, stream bool) map[string]a
 		}
 		messages = append(messages, map[string]any{
 			"role":    string(message.Role),
-			"content": stringOrParts(message.Content),
+			"content": anthropicContent(message.Content),
 		})
 	}
 	if len(messages) == 0 {
@@ -197,6 +197,39 @@ func (c *anthropicMessagesClient) payload(req Request, stream bool) map[string]a
 		payload["metadata"] = req.Metadata
 	}
 	return payload
+}
+
+func anthropicContent(parts []ContentPart) any {
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 && (parts[0].Type == "" || parts[0].Type == "text") {
+		return textParts(parts)
+	}
+	out := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "", "text":
+			out = append(out, map[string]any{"type": "text", "text": part.Text})
+		case "image", "image_url":
+			if part.Data != "" {
+				source := map[string]any{"type": "base64", "data": part.Data}
+				if part.MimeType != "" {
+					source["media_type"] = part.MimeType
+				}
+				out = append(out, map[string]any{"type": "image", "source": source})
+			} else if part.MediaURL != "" {
+				out = append(out, map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": part.MediaURL}})
+			}
+		default:
+			item := map[string]any{"type": part.Type}
+			if part.Text != "" {
+				item["text"] = part.Text
+			}
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func toolArguments(arguments string) any {

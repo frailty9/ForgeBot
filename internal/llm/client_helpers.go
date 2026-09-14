@@ -58,8 +58,12 @@ func stringOrParts(parts []ContentPart) any {
 		switch part.Type {
 		case "", "text":
 			out = append(out, map[string]any{"type": "text", "text": part.Text})
-		case "image_url":
-			out = append(out, map[string]any{"type": "image_url", "image_url": map[string]any{"url": part.MediaURL}})
+		case "image", "image_url":
+			url := part.MediaURL
+			if url == "" && part.Data != "" {
+				url = "data:" + part.MimeType + ";base64," + part.Data
+			}
+			out = append(out, map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}})
 		default:
 			item := map[string]any{"type": part.Type}
 			if part.Text != "" {
@@ -70,6 +74,9 @@ func stringOrParts(parts []ContentPart) any {
 			}
 			if part.MimeType != "" {
 				item["mime_type"] = part.MimeType
+			}
+			if part.Data != "" {
+				item["data"] = part.Data
 			}
 			out = append(out, item)
 		}
@@ -89,8 +96,12 @@ func responsesContent(parts []ContentPart) any {
 		switch part.Type {
 		case "", "text":
 			out = append(out, map[string]any{"type": "input_text", "text": part.Text})
-		case "image_url":
-			out = append(out, map[string]any{"type": "input_image", "image_url": part.MediaURL})
+		case "image", "image_url":
+			url := part.MediaURL
+			if url == "" && part.Data != "" {
+				url = "data:" + part.MimeType + ";base64," + part.Data
+			}
+			out = append(out, map[string]any{"type": "input_image", "image_url": url})
 		case "input_text", "input_image", "input_file":
 			item := map[string]any{"type": part.Type}
 			if part.Text != "" {
@@ -98,6 +109,9 @@ func responsesContent(parts []ContentPart) any {
 			}
 			if part.MediaURL != "" {
 				item["image_url"] = part.MediaURL
+			}
+			if part.Data != "" {
+				item["image_url"] = "data:" + part.MimeType + ";base64," + part.Data
 			}
 			out = append(out, item)
 		default:

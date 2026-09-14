@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -186,7 +187,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		return name + " received: " + strings.TrimSpace(text), nil
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "tools", len(e.toolDefinitions()))
-	messages := []llm.Message{llm.TextMessage(llm.RoleUser, text)}
+	messages := []llm.Message{userMessage(in)}
 	tools := e.toolDefinitions()
 	startedAt := time.Now()
 	response, err := e.deps.LLM.Complete(ctx, llm.Request{
@@ -247,6 +248,32 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	e.logger.DebugContext(ctx, "llm tool follow-up finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(final.Text)), "total_tokens", final.Usage.TotalTokens)
 	return final.Text, nil
+}
+
+func userMessage(in messaging.InboundMessage) llm.Message {
+	parts := make([]llm.ContentPart, 0, len(in.Media)+1)
+	if text := strings.TrimSpace(in.Text); text != "" {
+		parts = append(parts, llm.ContentPart{Type: "text", Text: text})
+	}
+	for _, media := range in.Media {
+		if media.Kind != messaging.MediaImage {
+			continue
+		}
+		part := llm.ContentPart{Type: "image", MediaURL: strings.TrimSpace(media.URL), MimeType: strings.TrimSpace(media.MimeType)}
+		if len(media.Data) > 0 {
+			if part.MimeType == "" {
+				part.MimeType = "image/jpeg"
+			}
+			part.Data = base64.StdEncoding.EncodeToString(media.Data)
+		}
+		if part.MediaURL != "" || part.Data != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, llm.ContentPart{Type: "text", Text: strings.TrimSpace(in.Text)})
+	}
+	return llm.Message{Role: llm.RoleUser, Content: parts}
 }
 
 func (e *Engine) instructions(suffix string) string {

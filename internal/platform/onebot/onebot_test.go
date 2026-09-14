@@ -256,7 +256,7 @@ func TestMessageSegmentsProduceCleanTextAndMention(t *testing.T) {
 		Message: mustJSON(t, []map[string]any{
 			{"type": "at", "data": map[string]string{"qq": "99"}},
 			{"type": "text", "data": map[string]string{"text": " hello "}},
-			{"type": "image", "data": map[string]string{"file": "x"}},
+			{"type": "image", "data": map[string]string{"file": "x", "url": "https://cdn.example/image.jpg"}},
 		}),
 	}
 	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
@@ -264,6 +264,25 @@ func TestMessageSegmentsProduceCleanTextAndMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	if message.Text != "hello" || !message.Mentioned {
+		t.Fatalf("message = %+v", message)
+	}
+	if len(message.Media) != 1 || message.Media[0].Kind != messaging.MediaImage || message.Media[0].URL != "https://cdn.example/image.jpg" {
+		t.Fatalf("media = %+v", message.Media)
+	}
+}
+
+func TestMessageMapsImageOnlySegment(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage("43"),
+		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"), SelfID: json.RawMessage("99"),
+		RawMessage: "[CQ:image,file=x,url=https://cdn.example/only.png]",
+		Message:    mustJSON(t, []map[string]any{{"type": "image", "data": map[string]string{"file": "x", "url": "https://cdn.example/only.png"}}}),
+	}
+	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Text != "" || len(message.Media) != 1 || message.Media[0].URL != "https://cdn.example/only.png" {
 		t.Fatalf("message = %+v", message)
 	}
 }

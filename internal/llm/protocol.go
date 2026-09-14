@@ -72,6 +72,7 @@ type ContentPart struct {
 	Text     string `json:"text,omitempty"`
 	MediaURL string `json:"media_url,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
+	Data     string `json:"data,omitempty"`
 }
 
 type Message struct {

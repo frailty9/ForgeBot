@@ -324,13 +324,64 @@ func (e rawEvent) message(groups map[string]Group) (messaging.InboundMessage, er
 	if text == "" {
 		text = stripCQ(strings.TrimSpace(e.RawMessage))
 	}
+	media := extractMedia(e.Message, e.RawMessage)
 	return messaging.InboundMessage{
 		PromptSuffix:   group.PromptSuffix,
 		ConversationID: group.ConversationID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname,
 		MessageID: scalar(e.MessageID), ReplyToMessageID: replyToMessageID(e.Message, e.RawMessage),
-		Text: text, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)),
+		Text: text, Media: media, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)),
 		Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0),
 	}, nil
+}
+
+func extractMedia(raw json.RawMessage, rawMessage string) []messaging.Media {
+	var segments []struct {
+		Type string                 `json:"type"`
+		Data map[string]interface{} `json:"data"`
+	}
+	var media []messaging.Media
+	if json.Unmarshal(raw, &segments) == nil {
+		for _, segment := range segments {
+			if segment.Type != "image" {
+				continue
+			}
+			item := messaging.Media{Kind: messaging.MediaImage}
+			if value, ok := segment.Data["url"].(string); ok {
+				item.URL = strings.TrimSpace(value)
+			}
+			if item.URL == "" {
+				if value, ok := segment.Data["file"].(string); ok && strings.HasPrefix(strings.TrimSpace(value), "http") {
+					item.URL = strings.TrimSpace(value)
+				}
+			}
+			if value, ok := segment.Data["file"].(string); ok {
+				item.Name = strings.TrimSpace(value)
+			}
+			if item.URL != "" {
+				media = append(media, item)
+			}
+		}
+	}
+	if len(media) == 0 {
+		for offset := 0; ; {
+			start := strings.Index(rawMessage[offset:], "[CQ:image")
+			if start < 0 {
+				break
+			}
+			start += offset
+			end := strings.IndexByte(rawMessage[start:], ']')
+			if end < 0 {
+				break
+			}
+			segment := rawMessage[start : start+end+1]
+			imageURL := cqParameter(segment, "image", "url")
+			if strings.HasPrefix(imageURL, "http") {
+				media = append(media, messaging.Media{Kind: messaging.MediaImage, URL: imageURL})
+			}
+			offset = start + end + 1
+		}
+	}
+	return media
 }
 
 func promptSuffix(connector, group string) string {

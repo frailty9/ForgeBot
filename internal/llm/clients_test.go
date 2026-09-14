@@ -85,6 +85,41 @@ func TestOpenAICompletionsClientCompleteAndStream(t *testing.T) {
 	}
 }
 
+func TestImageContentUsesProtocolSpecificBlocks(t *testing.T) {
+	request := Request{
+		Model: "vision-model",
+		Messages: []Message{{Role: RoleUser, Content: []ContentPart{
+			{Type: "text", Text: "describe this"},
+			{Type: "image", MediaURL: "https://cdn.example/image.jpg", MimeType: "image/jpeg"},
+		}}},
+	}
+
+	completions := (&openAICompletionsClient{}).payload(request, false)
+	completionsMessages := completions["messages"].([]map[string]any)
+	completionsContent := completionsMessages[0]["content"].([]map[string]any)
+	if completionsContent[1]["type"] != "image_url" || completionsContent[1]["image_url"].(map[string]any)["url"] != "https://cdn.example/image.jpg" {
+		t.Fatalf("completions image = %#v", completionsContent[1])
+	}
+
+	responses := (&openAIResponsesClient{}).payload(request, false)
+	responsesInput := responses["input"].([]map[string]any)
+	responsesContentParts := responsesInput[0]["content"].([]map[string]any)
+	if responsesContentParts[1]["type"] != "input_image" || responsesContentParts[1]["image_url"] != "https://cdn.example/image.jpg" {
+		t.Fatalf("responses image = %#v", responsesContentParts[1])
+	}
+
+	anthropic := (&anthropicMessagesClient{}).payload(request, false)
+	anthropicMessages := anthropic["messages"].([]map[string]any)
+	anthropicContentParts := anthropicMessages[0]["content"].([]map[string]any)
+	if anthropicContentParts[1]["type"] != "image" {
+		t.Fatalf("anthropic image = %#v", anthropicContentParts[1])
+	}
+	source := anthropicContentParts[1]["source"].(map[string]any)
+	if source["type"] != "url" || source["url"] != "https://cdn.example/image.jpg" {
+		t.Fatalf("anthropic source = %#v", source)
+	}
+}
+
 func TestClientUsesConfiguredDefaultModel(t *testing.T) {
 	server := newJSONTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any

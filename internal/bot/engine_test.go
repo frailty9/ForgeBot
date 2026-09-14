@@ -114,6 +114,33 @@ func TestEngineUsesInjectedLLM(t *testing.T) {
 	}
 }
 
+func TestEnginePassesInboundImageToLLM(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "看到了"}}
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{
+		ConversationID: "c", UserID: "u", MessageID: "m", Text: "这是什么？",
+		Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/a.jpg", MimeType: "image/jpeg"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := fake.request.Messages[0].Content
+	if len(content) != 2 || content[0].Type != "text" || content[1].Type != "image" || content[1].MediaURL != "https://cdn.example/a.jpg" {
+		t.Fatalf("content = %+v", content)
+	}
+}
+
 func TestEngineAppendsPromptSuffix(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
