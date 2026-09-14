@@ -287,6 +287,99 @@ func TestMessageMapsImageOnlySegment(t *testing.T) {
 	}
 }
 
+func TestMessageMapsCQStringImage(t *testing.T) {
+	event := rawEvent{
+		PostType: "message", MessageType: "group", MessageID: json.RawMessage("44"),
+		UserID: json.RawMessage("7"), GroupID: json.RawMessage("8"), SelfID: json.RawMessage("99"),
+		RawMessage: "[CQ:image,file=https://cdn.example/cq.png]",
+		Message:    json.RawMessage(`"[CQ:image,file=https://cdn.example/cq.png]"`),
+	}
+	message, err := event.message(map[string]Group{"8": {ConversationID: "support"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(message.Media) != 1 || message.Media[0].URL != "https://cdn.example/cq.png" {
+		t.Fatalf("message = %+v", message)
+	}
+}
+
+func TestWebhookResolvesImageFileThroughGetImage(t *testing.T) {
+	var getImage bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/get_image" {
+			getImage = true
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["file"] != "file-id" {
+				t.Errorf("get_image request = %#v, err=%v", request, err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(mustJSON(t, map[string]any{"status": "ok", "retcode": 0, "data": map[string]string{"url": "https://cdn.example/resolved.jpg"}}))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(mustJSON(t, map[string]any{"status": "ok", "retcode": 0}))
+	}))
+	defer api.Close()
+	adapter, err := New(testConfig(api.URL), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got messaging.InboundMessage
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 45,
+		"user_id": 7, "group_id": 8, "self_id": 99,
+		"raw_message": "[CQ:image,file=file-id]",
+		"message":     "[CQ:image,file=file-id]",
+	})
+	rr := httptest.NewRecorder()
+	adapter.webhook(handlerFunc(func(_ context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+		got = msg
+		return platform.HandleResult{Accepted: true, Verdict: "pass"}, nil
+	}))(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK || !getImage || len(got.Media) != 1 || got.Media[0].URL != "https://cdn.example/resolved.jpg" {
+		t.Fatalf("status=%d get_image=%v message=%+v", rr.Code, getImage, got)
+	}
+}
+
+func TestWebhookResolvesImageFromRepliedMessage(t *testing.T) {
+	var gotMsg bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/get_msg" {
+			gotMsg = true
+			_, _ = w.Write(mustJSON(t, map[string]any{"status": "ok", "retcode": 0, "data": map[string]any{
+				"message": []map[string]any{{"type": "image", "data": map[string]string{"url": "https://cdn.example/replied.jpg"}}},
+			}}))
+			return
+		}
+		_, _ = w.Write(mustJSON(t, map[string]any{"status": "ok", "retcode": 0}))
+	}))
+	defer api.Close()
+	adapter, err := New(testConfig(api.URL), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got messaging.InboundMessage
+	body := mustJSON(t, map[string]any{
+		"post_type": "message", "message_type": "group", "message_id": 46,
+		"user_id": 7, "group_id": 8, "self_id": 99,
+		"raw_message": "[CQ:reply,id=460637946][CQ:at,qq=99]",
+		"message": []map[string]any{
+			{"type": "reply", "data": map[string]any{"id": 460637946}},
+			{"type": "at", "data": map[string]string{"qq": "99"}},
+			{"type": "text", "data": map[string]string{"text": " "}},
+		},
+	})
+	rr := httptest.NewRecorder()
+	adapter.webhook(handlerFunc(func(_ context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+		got = msg
+		return platform.HandleResult{Accepted: true, Verdict: "pass"}, nil
+	}))(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK || !gotMsg || len(got.Media) != 1 || got.Media[0].URL != "https://cdn.example/replied.jpg" {
+		t.Fatalf("status=%d get_msg=%v message=%+v", rr.Code, gotMsg, got)
+	}
+}
+
 func TestMessageExtractsReplyRelationship(t *testing.T) {
 	event := rawEvent{
 		PostType: "message", MessageType: "group", MessageID: json.RawMessage("42"),

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,8 +197,18 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1002"})
 			return
 		}
+		msg.Media = a.resolveMedia(r.Context(), msg.Media)
+		if len(msg.Media) == 0 && msg.ReplyToMessageID != "" {
+			msg.Media = a.resolveReplyMedia(r.Context(), msg.ReplyToMessageID)
+		}
 		a.logger.DebugContext(r.Context(), "onebot message mapped", "conversation_id", msg.ConversationID,
-			"message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
+			"message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned,
+			"text_len", len([]rune(msg.Text)), "media_count", len(msg.Media))
+		if len(msg.Media) == 0 {
+			a.logger.DebugContext(r.Context(), "onebot media not detected",
+				"message_bytes", len(event.Message), "message_prefix", truncateForLog(string(event.Message), 320),
+				"raw_message_len", len(event.RawMessage), "raw_message_prefix", truncateForLog(event.RawMessage, 160))
+		}
 		if a.replay.seenOrAdd(event.identity(), time.Now()) {
 			a.logger.DebugContext(r.Context(), "onebot event replay suppressed", "message_id", msg.MessageID)
 			writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
@@ -214,6 +225,104 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		writeResponse(w, http.StatusOK, map[string]any{"status": "ok", "retcode": "0", "data": result})
 	}
+}
+
+// resolveMedia turns OneBot file references into content the LLM can access.
+// OneBot implementations commonly omit url and expose only file/file_id.
+func (a *Adapter) resolveMedia(ctx context.Context, media []messaging.Media) []messaging.Media {
+	for index := range media {
+		item := &media[index]
+		if item.Kind != messaging.MediaImage || item.URL != "" || item.Name == "" {
+			continue
+		}
+		var response struct {
+			Data struct {
+				File string `json:"file"`
+				URL  string `json:"url"`
+			} `json:"data"`
+		}
+		payload := map[string]any{"file": item.Name}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		endpoint, err := url.JoinPath(strings.TrimRight(a.cfg.APIURL, "/"), "/get_image")
+		if err != nil {
+			continue
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+		if err != nil {
+			continue
+		}
+		request.Header.Set("Content-Type", "application/json")
+		if token := strings.TrimSpace(a.cfg.SendToken); token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		responseBody, err := a.client.Do(request)
+		if err != nil {
+			a.logger.DebugContext(ctx, "onebot get_image failed", "file", item.Name, "err", err)
+			continue
+		}
+		_ = json.NewDecoder(responseBody.Body).Decode(&response)
+		_ = responseBody.Body.Close()
+		if isImageURL(response.Data.URL) {
+			item.URL = strings.TrimSpace(response.Data.URL)
+			continue
+		}
+		path := strings.TrimSpace(response.Data.File)
+		if path == "" {
+			path = strings.TrimSpace(item.Name)
+		}
+		if content, readErr := os.ReadFile(path); readErr == nil {
+			item.Data = content
+			if item.MimeType == "" {
+				item.MimeType = "image/jpeg"
+			}
+		}
+	}
+	return media
+}
+
+func (a *Adapter) resolveReplyMedia(ctx context.Context, messageID string) []messaging.Media {
+	payload := map[string]any{"message_id": numericOrString(messageID)}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	endpoint, err := url.JoinPath(strings.TrimRight(a.cfg.APIURL, "/"), "/get_msg")
+	if err != nil {
+		return nil
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(a.cfg.SendToken); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := a.client.Do(request)
+	if err != nil {
+		a.logger.DebugContext(ctx, "onebot get_msg failed", "message_id", messageID, "err", err)
+		return nil
+	}
+	defer response.Body.Close()
+	var envelope struct {
+		Data struct {
+			Message    json.RawMessage `json:"message"`
+			RawMessage string          `json:"raw_message"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		a.logger.DebugContext(ctx, "onebot get_msg decode failed", "message_id", messageID, "err", err)
+		return nil
+	}
+	media := extractMedia(envelope.Data.Message, envelope.Data.RawMessage)
+	media = a.resolveMedia(ctx, media)
+	if len(media) > 0 {
+		a.logger.DebugContext(ctx, "onebot reply media resolved", "message_id", messageID, "media_count", len(media))
+	}
+	return media
 }
 
 func (a *Adapter) authorized(r *http.Request, body []byte) bool {
@@ -335,53 +444,99 @@ func (e rawEvent) message(groups map[string]Group) (messaging.InboundMessage, er
 }
 
 func extractMedia(raw json.RawMessage, rawMessage string) []messaging.Media {
-	var segments []struct {
-		Type string                 `json:"type"`
-		Data map[string]interface{} `json:"data"`
-	}
 	var media []messaging.Media
-	if json.Unmarshal(raw, &segments) == nil {
-		for _, segment := range segments {
-			if segment.Type != "image" {
-				continue
-			}
+	var value any
+	if json.Unmarshal(raw, &value) == nil {
+		media = append(media, mediaFromValue(value)...)
+	}
+	if len(media) == 0 {
+		media = append(media, mediaFromCQ(rawMessage)...)
+	}
+	if len(media) == 0 {
+		// Last-resort compatibility for adapters that embed CQ markup inside
+		// a custom JSON message envelope.
+		media = append(media, mediaFromCQ(string(raw))...)
+	}
+	return media
+}
+
+func mediaFromValue(value any) []messaging.Media {
+	var media []messaging.Media
+	switch current := value.(type) {
+	case []any:
+		for _, item := range current {
+			media = append(media, mediaFromValue(item)...)
+		}
+	case map[string]any:
+		if typeName, _ := current["type"].(string); strings.EqualFold(strings.TrimSpace(typeName), "image") {
 			item := messaging.Media{Kind: messaging.MediaImage}
-			if value, ok := segment.Data["url"].(string); ok {
-				item.URL = strings.TrimSpace(value)
-			}
-			if item.URL == "" {
-				if value, ok := segment.Data["file"].(string); ok && strings.HasPrefix(strings.TrimSpace(value), "http") {
-					item.URL = strings.TrimSpace(value)
+			data, _ := current["data"].(map[string]any)
+			for _, key := range []string{"url", "file", "path", "file_id", "fileId", "id"} {
+				if candidate, ok := data[key].(string); ok {
+					candidate = strings.TrimSpace(candidate)
+					if item.URL == "" && isImageURL(candidate) {
+						item.URL = candidate
+					}
+					if item.Name == "" && candidate != "" {
+						item.Name = candidate
+					}
 				}
 			}
-			if value, ok := segment.Data["file"].(string); ok {
-				item.Name = strings.TrimSpace(value)
-			}
-			if item.URL != "" {
+			if item.URL != "" || item.Name != "" {
 				media = append(media, item)
 			}
 		}
-	}
-	if len(media) == 0 {
-		for offset := 0; ; {
-			start := strings.Index(rawMessage[offset:], "[CQ:image")
-			if start < 0 {
-				break
+		for key, nested := range current {
+			if key != "data" {
+				media = append(media, mediaFromValue(nested)...)
 			}
-			start += offset
-			end := strings.IndexByte(rawMessage[start:], ']')
-			if end < 0 {
-				break
-			}
-			segment := rawMessage[start : start+end+1]
-			imageURL := cqParameter(segment, "image", "url")
-			if strings.HasPrefix(imageURL, "http") {
-				media = append(media, messaging.Media{Kind: messaging.MediaImage, URL: imageURL})
-			}
-			offset = start + end + 1
 		}
 	}
 	return media
+}
+
+func mediaFromCQ(raw string) []messaging.Media {
+	var media []messaging.Media
+	for offset := 0; ; {
+		relative := strings.Index(strings.ToLower(raw[offset:]), "[cq:image")
+		start := relative
+		if start < 0 {
+			break
+		}
+		start += offset
+		end := strings.IndexByte(raw[start:], ']')
+		if end < 0 {
+			break
+		}
+		segment := raw[start : start+end+1]
+		imageURL := cqParameter(segment, "image", "url")
+		if !isImageURL(imageURL) {
+			imageURL = cqParameter(segment, "image", "file")
+		}
+		if decoded, err := url.QueryUnescape(imageURL); err == nil {
+			imageURL = decoded
+		}
+		if isImageURL(imageURL) {
+			media = append(media, messaging.Media{Kind: messaging.MediaImage, URL: imageURL})
+		} else if file := cqParameter(segment, "image", "file"); strings.TrimSpace(file) != "" {
+			media = append(media, messaging.Media{Kind: messaging.MediaImage, Name: strings.TrimSpace(file)})
+		}
+		offset = start + end + 1
+	}
+	return media
+}
+
+func isImageURL(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:image/")
+}
+
+func truncateForLog(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 func promptSuffix(connector, group string) string {
@@ -424,7 +579,11 @@ func extractText(raw json.RawMessage) string {
 			Text string `json:"text"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(raw, &segments) != nil {
+	if err := json.Unmarshal(raw, &segments); err != nil {
+		var encoded string
+		if json.Unmarshal(raw, &encoded) == nil {
+			return stripCQ(strings.TrimSpace(encoded))
+		}
 		return ""
 	}
 	var b strings.Builder

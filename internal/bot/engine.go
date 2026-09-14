@@ -63,7 +63,10 @@ type Engine struct {
 	gate   *gate.Pool
 }
 
-const searchPreReply = "正在检索相关文档，请稍候。"
+const (
+	searchPreReply      = "正在检索相关文档，请稍候。"
+	imageOnlyUserPrompt = "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。"
+)
 
 func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
 	if logger == nil {
@@ -186,7 +189,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		}
 		return name + " received: " + strings.TrimSpace(text), nil
 	}
-	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "tools", len(e.toolDefinitions()))
+	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
 	messages := []llm.Message{userMessage(in)}
 	tools := e.toolDefinitions()
 	startedAt := time.Now()
@@ -252,9 +255,11 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 
 func userMessage(in messaging.InboundMessage) llm.Message {
 	parts := make([]llm.ContentPart, 0, len(in.Media)+1)
-	if text := strings.TrimSpace(in.Text); text != "" {
+	text := strings.TrimSpace(in.Text)
+	if text != "" {
 		parts = append(parts, llm.ContentPart{Type: "text", Text: text})
 	}
+	validImages := 0
 	for _, media := range in.Media {
 		if media.Kind != messaging.MediaImage {
 			continue
@@ -268,7 +273,11 @@ func userMessage(in messaging.InboundMessage) llm.Message {
 		}
 		if part.MediaURL != "" || part.Data != "" {
 			parts = append(parts, part)
+			validImages++
 		}
+	}
+	if text == "" && validImages > 0 {
+		parts = append(parts, llm.ContentPart{Type: "text", Text: imageOnlyUserPrompt})
 	}
 	if len(parts) == 0 {
 		parts = append(parts, llm.ContentPart{Type: "text", Text: strings.TrimSpace(in.Text)})
