@@ -64,6 +64,18 @@ export class ApiClient {
   getHealth(signal?: AbortSignal): Promise<HealthResponse> {
     return this.request<HealthResponse>('/healthz', signal === undefined ? {} : { signal })
   }
+
+  restart(token: string, reason: string): Promise<RuntimeStatus> {
+    return this.request<RuntimeStatus>('/v1/admin/runtime/restart', { method: 'POST', body: { reason } }, token)
+  }
+
+  reloadSearch(token: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/v1/admin/search/reload', { method: 'POST' }, token)
+  }
+
+  scanReflection(token: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/v1/admin/reflection/scan', { method: 'POST' }, token)
+  }
 }
 
 export const apiClient = new ApiClient()
