@@ -64,3 +64,7 @@ text deltas. Retry policy and streamed tool-call assembly remain follow-up work.
 - Metrics and tracing.
 - [x] Minimal admin API surface.
 - [ ] Web management frontend.
+  - [x] Define first-release scope, information architecture, and acceptance criteria.
+  - [ ] Confirm visual and technical design.
+  - [ ] Implement the embedded management console.
+  - [ ] Add browser-level integration tests and deployment documentation.
