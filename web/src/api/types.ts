@@ -85,6 +85,25 @@ export interface ConfigResponse {
   llm_api_key: SecretStatus
 }
 
+export interface ApplyResponse {
+  action: string
+  config: ConfigResponse
+}
+
+export interface RevisionMeta {
+  version: number
+  updated_at: string
+  source?: string
+}
+
+export interface ReloadResult {
+  documents: number
+  sections: number
+  warnings: number
+  took: string
+  completed_at: string
+}
+
 export interface HealthResponse {
   status: string
 }

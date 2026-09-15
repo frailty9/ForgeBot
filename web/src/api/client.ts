@@ -1,4 +1,4 @@
-import { ApiError, type ConfigResponse, type HealthResponse, type RuntimeStatus } from '@/api/types'
+import { ApiError, type ApplyResponse, type ConfigResponse, type HealthResponse, type RevisionMeta, type RuntimeStatus, type RuntimeConfig } from '@/api/types'
 
 export { ApiError }
 
@@ -75,6 +75,30 @@ export class ApiClient {
 
   scanReflection(token: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>('/v1/admin/reflection/scan', { method: 'POST' }, token)
+  }
+
+  validateConfig(token: string, runtime: RuntimeConfig): Promise<{ valid: boolean }> {
+    return this.request<{ valid: boolean }>('/v1/admin/config/validate', { method: 'POST', body: { runtime } }, token)
+  }
+
+  updateConfig(token: string, expectedVersion: number, runtime: RuntimeConfig, source: string): Promise<ApplyResponse> {
+    return this.request<ApplyResponse>('/v1/admin/config', { method: 'PUT', body: { expected_version: expectedVersion, runtime, source } }, token)
+  }
+
+  history(token: string): Promise<RevisionMeta[]> {
+    return this.request<RevisionMeta[]>('/v1/admin/config/history', {}, token)
+  }
+
+  rollback(token: string, targetVersion: number, expectedVersion: number): Promise<ApplyResponse> {
+    return this.request<ApplyResponse>('/v1/admin/config/rollback', { method: 'POST', body: { target_version: targetVersion, expected_version: expectedVersion, source: 'admin:web-rollback' } }, token)
+  }
+
+  replaceAPIKey(token: string, apiKey: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/v1/admin/llm/api-key', { method: 'PUT', body: { api_key: apiKey } }, token)
+  }
+
+  deleteAPIKey(token: string): Promise<void> {
+    return this.request<void>('/v1/admin/llm/api-key', { method: 'DELETE' }, token)
   }
 }
 

@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import AppRail from '@/app/AppRail.vue'
 import { ApiError, apiClient } from '@/api/client'
 import type { ConfigResponse } from '@/api/types'
+import ConfigView from '@/features/config/ConfigView.vue'
 import LoginPanel from '@/features/auth/LoginPanel.vue'
 import OperationsView from '@/features/operations/OperationsView.vue'
 import { useSessionStore } from '@/stores/session'
@@ -15,7 +16,6 @@ const route = shallowRef(normalizeRoute(window.location.pathname))
 const config = shallowRef<ConfigResponse | null>(null)
 const loading = shallowRef(false)
 const loadError = shallowRef('')
-const operationsView = shallowRef(false)
 
 function normalizeRoute(path: string): string {
   const value = path.replace(/^\/admin/, '') || '/'
@@ -26,7 +26,6 @@ function navigate(path: string): void {
   const next = normalizeRoute(path)
   window.history.pushState({}, '', `/admin${next === '/' ? '/' : next}`)
   route.value = next
-  operationsView.value = next === '/operations'
 }
 
 function onPopState(): void { route.value = normalizeRoute(window.location.pathname) }
@@ -63,7 +62,6 @@ function logout(): void { session.clear(); config.value = null; navigate('/') }
 onMounted(() => {
   window.addEventListener('popstate', onPopState)
   if (authenticated.value) void loadConfig()
-  operationsView.value = route.value === '/operations'
 })
 watch(token, (value, previous) => { if (value && value !== previous) void loadConfig() })
 </script>
@@ -136,10 +134,16 @@ watch(token, (value, previous) => { if (value && value !== previous) void loadCo
         </section>
       </template>
       <OperationsView
-        v-else-if="operationsView && config"
+        v-else-if="route === '/operations' && config"
         :token="token"
         :reflection-enabled="Boolean(config.runtime.reflection.enabled)"
         :search-enabled="Boolean(config.runtime.search.enabled)"
+      />
+      <ConfigView
+        v-else-if="route === '/config' && config"
+        :token="token"
+        :initial="config"
+        @updated="config = $event"
       />
       <section
         v-else

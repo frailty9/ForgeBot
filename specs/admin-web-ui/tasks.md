@@ -27,7 +27,7 @@
   - 展示操作结果、禁用原因和服务端错误。
   - _Requirement: 4, 11, 14_
 
-- [ ] 5. 实现结构化配置编辑与密钥维护
+- [x] 5. 实现结构化配置编辑与密钥维护
   - 建立基准快照、配置草稿、dirty paths 和服务端校验状态。
   - 按领域实现 Bot、LLM、Gate、Search、Platforms、Administration、Reflection、Operations、MCP 和 Skills 表单。
   - 实现动态列表引用提示、静态配置只读区和预计应用影响。
