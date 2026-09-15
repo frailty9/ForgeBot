@@ -1,5 +1,5 @@
 <script setup lang="ts" vapor>
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { apiClient, ApiError } from '@/api/client'
@@ -15,6 +15,7 @@ const secretBusy = shallowRef(false)
 const secretMessage = shallowRef('')
 
 if (!store.snapshot) store.load(props.initial)
+watch(() => props.initial, (value) => store.load(value))
 
 const jsonPreview = computed(() => draft.value ? JSON.stringify(draft.value, null, 2) : '')
 
@@ -23,6 +24,10 @@ function setField(path: 'name' | 'system_prompt' | 'model' | 'base_url' | 'anthr
     if (path === 'name' || path === 'system_prompt') next.bot[path] = value
     else next.llm[path] = value
   })
+}
+
+function setProtocol(value: string): void {
+  store.updateDraft((next) => { next.llm.protocol = value })
 }
 
 function setGateEnabled(value: boolean): void { store.updateDraft((next) => { next.gate.enabled = value }) }
@@ -100,7 +105,10 @@ async function deleteKey(): Promise<void> {
         /></label>
       </section>
       <section class="config-section">
-        <span class="section-index">02 / LLM</span><h2>模型与供应商</h2><label>协议<select :value="draft?.llm.protocol"><option value="openai_responses">OpenAI Responses</option><option value="openai_completions">OpenAI Completions</option><option value="anthropic_messages">Anthropic Messages</option></select></label><label>Base URL<input
+        <span class="section-index">02 / LLM</span><h2>模型与供应商</h2><label>协议<select
+          :value="draft?.llm.protocol"
+          @change="setProtocol(($event.target as HTMLSelectElement).value)"
+        ><option value="openai_responses">OpenAI Responses</option><option value="openai_completions">OpenAI Completions</option><option value="anthropic_messages">Anthropic Messages</option></select></label><label>Base URL<input
           :value="draft?.llm.base_url"
           @input="setField('base_url', ($event.target as HTMLInputElement).value)"
         ></label><label>模型<input

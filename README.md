@@ -65,9 +65,8 @@ additional platform adapters can implement the same interfaces. The structured
 retriever currently supports local `.md`, `.mdx`, and `.txt` files only. Vector
 and hybrid retrieval are intentionally not included yet.
 
-The public HTTP surface includes health checks, test message ingress, and a
-Bearer-protected management API. A web administration frontend is not bundled
-in this repository.
+The public HTTP surface includes health checks, test message ingress, a
+Bearer-protected management API, and the embedded Admin Web UI at `/admin/`.
 
 ## Quick Start
 
@@ -88,6 +87,11 @@ Start the local example:
 ```powershell
 go run ./cmd/forgebot -config configs/forgebot.example.yaml
 ```
+
+To build the production binary with the Admin Web UI embedded, install Node.js
+22.12+ and pnpm 12.4+, then run `make build`. The resulting binary serves the
+console at `http://127.0.0.1:8080/admin/`; authenticate with
+`FORGEBOT_ADMIN_TOKEN`.
 
 The example starts the local echo connector and listens on `127.0.0.1:8080`.
 Check the process without an LLM key:
@@ -196,7 +200,8 @@ DELETE /v1/admin/llm/api-key
 
 Configuration responses are intentionally redacted. In particular, the LLM
 API key is never returned, and OneBot credentials are represented only by
-configured/not-configured status.
+configured/not-configured status. The web console uses the same API and keeps
+the management token in the current tab's `sessionStorage` only.
 
 ## Contributing
 

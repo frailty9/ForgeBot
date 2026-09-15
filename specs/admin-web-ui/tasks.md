@@ -47,7 +47,7 @@
   - 提供开发代理和发布构建命令，正式运行不依赖 Node.js。
   - _Requirement: 15_
 
-- [ ] 8. 完成自动化验证与使用文档
+- [x] 8. 完成自动化验证与使用文档
   - 补齐前端单元测试和 Playwright 关键路径测试。
   - 运行 typecheck、lint、unit、build、bundle-size、`go test ./...` 和 `go vet ./...`。
   - 在浏览器验证登录、概览、配置保存、冲突、密钥、运维与回滚流程。
