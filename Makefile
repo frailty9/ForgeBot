@@ -1,4 +1,4 @@
-.PHONY: fmt test build run check
+.PHONY: fmt test build build-web run check
 
 APP := forgebot
 
@@ -8,7 +8,12 @@ fmt:
 test:
 	go test ./...
 
-build:
+build-web:
+	cd web && pnpm install --frozen-lockfile && pnpm build
+	if not exist internal\server\adminui\dist mkdir internal\server\adminui\dist
+	powershell -NoProfile -Command "Copy-Item -Recurse -Force web\dist\* internal\server\adminui\dist\"
+
+build: build-web
 	go build -o bin/$(APP) ./cmd/forgebot
 
 run:

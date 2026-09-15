@@ -21,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/platform"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
+	"github.com/soleapi/forgebot/internal/server/adminui"
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
@@ -63,6 +64,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.HandleFunc("GET /v1/runtime", s.runtime)
 	mux.HandleFunc("GET /v1/gate/stats", s.gateStats)
 	mux.HandleFunc("POST /v1/messages", s.messages)
+	mux.Handle("GET /admin/", http.StripPrefix("/admin/", adminui.Handler()))
 	mux.Handle("GET /v1/admin/config", s.authorize(http.HandlerFunc(s.adminConfig)))
 	mux.Handle("GET /v1/admin/config/history", s.authorize(http.HandlerFunc(s.adminHistory)))
 	mux.Handle("POST /v1/admin/config/validate", s.authorize(http.HandlerFunc(s.adminValidate)))

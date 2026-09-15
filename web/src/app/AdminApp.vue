@@ -8,6 +8,7 @@ import type { ConfigResponse } from '@/api/types'
 import ConfigView from '@/features/config/ConfigView.vue'
 import LoginPanel from '@/features/auth/LoginPanel.vue'
 import OperationsView from '@/features/operations/OperationsView.vue'
+import HistoryView from '@/features/history/HistoryView.vue'
 import { useSessionStore } from '@/stores/session'
 
 const session = useSessionStore()
@@ -143,6 +144,12 @@ watch(token, (value, previous) => { if (value && value !== previous) void loadCo
         v-else-if="route === '/config' && config"
         :token="token"
         :initial="config"
+        @updated="config = $event"
+      />
+      <HistoryView
+        v-else-if="route === '/history' && config"
+        :token="token"
+        :current="config"
         @updated="config = $event"
       />
       <section
