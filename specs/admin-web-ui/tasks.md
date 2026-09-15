@@ -1,6 +1,6 @@
 # Admin Web UI 实施计划
 
-- [ ] 1. 建立 Vapor 工程基线与兼容性门禁
+- [x] 1. 建立 Vapor 工程基线与兼容性门禁
   - 创建 `web/` 下的 Vue 3.6 Vapor、TypeScript、Vite、Pinia、SCSS 和 UnoCSS 工程。
   - 锁定 RC 依赖版本，验证纯 Vapor 入口、Pinia、SFC、SCSS 与生产构建。
   - 增加 typecheck、lint、unit、build 和 bundle-size 脚本。

@@ -27,10 +27,10 @@ Admin Web UI 是 ForgeBot 单实例的本地管理控制台。它应让管理员
 
 ### 2.4 Typography
 
-- 中文与正文：`Noto Sans SC`；
+- 中文与正文：优先使用系统的中文无衬线字体栈；
 - 版本号、状态码、时间、路径和配置值：`IBM Plex Mono`；
-- 字体文件随前端资源本地打包，控制台运行时不依赖第三方字体 CDN；
-- 无法加载 Web Font 时使用面向各平台的中文无衬线与等宽回退列表。
+- 仅将 `IBM Plex Mono` 的 Latin 子集随前端资源打包，控制台运行时不依赖第三方字体 CDN；
+- 完整中文 Web Font 会产生大量分片与 CSS，不在首期打包；系统字体栈覆盖 Windows、macOS、Linux 与 Android 的常用中文字体。
 
 ### 2.5 Layout Strategy
 
@@ -53,6 +53,7 @@ Admin Web UI 是 ForgeBot 单实例的本地管理控制台。它应让管理员
 
 - Vue `3.6.0-rc.8` Vapor Mode，实施时锁定精确版本；
 - TypeScript 严格模式，API 边界使用 `unknown` 后显式收窄，禁止以 `any` 绕过类型检查；
+- Vue 3.6 RC 的上游声明暂不兼容 `exactOptionalPropertyTypes`，因此仅跳过第三方声明检查；应用源码继续启用 `strict`、`exactOptionalPropertyTypes` 和 ESLint 的 `no-explicit-any`，稳定版升级时重新验证并移除此例外；
 - Vite；
 - Pinia，仅保存认证会话、服务端快照、配置草稿和操作状态；
 - 原生 History API 的轻量路由层；四个一级页面不值得为未知的 Vapor 兼容性引入传统 `RouterView`；

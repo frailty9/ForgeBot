@@ -1,0 +1,4 @@
+allowBuilds:
+  '@parcel/watcher': true
+minimumReleaseAgeExclude:
+  - '@vitejs/plugin-vue@6.0.9'
