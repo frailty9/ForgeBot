@@ -27,7 +27,9 @@
   - 展示操作结果、禁用原因和服务端错误。
   - _Requirement: 4, 11, 14_
 
-- [x] 5. 实现结构化配置编辑与密钥维护
+- [ ] 5. 完成结构化配置编辑与密钥维护
+  - [x] 已完成 Bot、LLM、Gate 首版编辑、API Key 只写操作和安全 JSON 预览。
+  - [ ] 仍需补齐 Search、Platforms、Administration、Reflection、Operations、MCP 和 Skills 的领域表单。
   - 建立基准快照、配置草稿、dirty paths 和服务端校验状态。
   - 按领域实现 Bot、LLM、Gate、Search、Platforms、Administration、Reflection、Operations、MCP 和 Skills 表单。
   - 实现动态列表引用提示、静态配置只读区和预计应用影响。
@@ -47,7 +49,9 @@
   - 提供开发代理和发布构建命令，正式运行不依赖 Node.js。
   - _Requirement: 15_
 
-- [x] 8. 完成自动化验证与使用文档
+- [ ] 8. 完成自动化验证与使用文档
+  - [x] 已完成 API client、配置草稿、会话、应用壳和 embed 单元测试。
+  - [ ] 仍需补齐 Playwright 关键路径和真实浏览器回归验证。
   - 补齐前端单元测试和 Playwright 关键路径测试。
   - 运行 typecheck、lint、unit、build、bundle-size、`go test ./...` 和 `go vet ./...`。
   - 在浏览器验证登录、概览、配置保存、冲突、密钥、运维与回滚流程。
