@@ -14,7 +14,7 @@
   - 保持 LLM API Key 独立只写接口，并补齐契约测试。
   - _Requirement: 5-10, 13_
 
-- [ ] 3. 实现应用壳、认证和强类型请求层
+- [x] 3. 实现应用壳、认证和强类型请求层
   - 实现 Vapor 应用入口、工业化布局、轻量 History 路由和错误边界。
   - 实现 `sessionStorage` Bearer 会话、登录验证、401 清理和退出。
   - 实现强类型 `fetch` client、DTO 收窄、取消请求和统一错误模型。

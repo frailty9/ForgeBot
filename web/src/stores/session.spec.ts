@@ -8,13 +8,17 @@ describe('session store', () => {
     setActivePinia(createPinia())
   })
 
-  it('toggles the prototype session state', () => {
+  it('stores and clears the session token', () => {
     const session = useSessionStore()
 
     expect(session.authenticated).toBe(false)
 
-    session.toggle()
+    session.complete('test-token')
 
     expect(session.authenticated).toBe(true)
+
+    session.clear()
+
+    expect(session.authenticated).toBe(false)
   })
 })
