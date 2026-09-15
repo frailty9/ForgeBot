@@ -25,10 +25,9 @@ type Service struct {
 
 // UpdateRequest is a complete runtime replacement guarded by expected_version.
 type UpdateRequest struct {
-	ExpectedVersion uint64               `json:"expected_version"`
-	Runtime         config.RuntimeConfig `json:"runtime"`
-	Source          string               `json:"source"`
-	Force           bool                 `json:"force,omitempty"`
+	ExpectedVersion uint64        `json:"expected_version"`
+	Runtime         RuntimeConfig `json:"runtime"`
+	Source          string        `json:"source"`
 }
 
 // RollbackRequest identifies a persisted runtime revision to restore.
@@ -46,26 +45,26 @@ func New(runtime *runtimecfg.Manager, store settings.Store, secrets *secret.Mana
 	return &Service{runtime: runtime, settings: store, secrets: secrets}, nil
 }
 
-func (s *Service) Config(ctx context.Context) (map[string]any, error) {
+func (s *Service) Config(ctx context.Context) (ConfigResponse, error) {
 	snapshot, status := s.runtime.Snapshot()
-	configured := false
 	var secretStatus secret.Status
 	if s.secrets != nil {
 		var err error
 		secretStatus, err = s.secrets.Status(ctx, snapshot.Runtime.LLM.APIKeyRef)
 		if err != nil {
-			return nil, err
+			return ConfigResponse{}, err
 		}
-		configured = secretStatus.Configured
 	}
-	result := snapshot.Public(configured)
-	result["runtime_status"] = status
-	if configured {
-		result["llm_api_key"] = secretStatus
-	} else {
-		result["llm_api_key"] = map[string]any{"configured": false}
+	return configResponse(snapshot, status, secretStatus), nil
+}
+
+func (s *Service) resolveRuntime(runtime RuntimeConfig) (config.RuntimeConfig, error) {
+	snapshot, _ := s.runtime.Snapshot()
+	resolved, err := runtime.resolve(snapshot.Runtime)
+	if err != nil {
+		return config.RuntimeConfig{}, err
 	}
-	return result, nil
+	return resolved, nil
 }
 
 func (s *Service) History(ctx context.Context, limit int) ([]settings.RevisionMeta, error) {
@@ -75,22 +74,50 @@ func (s *Service) History(ctx context.Context, limit int) ([]settings.RevisionMe
 	return s.settings.History(ctx, limit)
 }
 
-func (s *Service) Validate(runtime config.RuntimeConfig) error { return runtime.Validate() }
+func (s *Service) Validate(runtime RuntimeConfig) error {
+	resolved, err := s.resolveRuntime(runtime)
+	if err != nil {
+		return err
+	}
+	if err := resolved.Validate(); err != nil {
+		return &FieldError{Field: "runtime", Err: err}
+	}
+	return nil
+}
 
 func (s *Service) Update(ctx context.Context, request UpdateRequest) (runtimecfg.ApplyResult, error) {
 	if s.settings == nil {
 		return runtimecfg.ApplyResult{}, ErrUnavailable
 	}
+	resolved, err := s.resolveRuntime(request.Runtime)
+	if err != nil {
+		return runtimecfg.ApplyResult{}, err
+	}
 	request.Source = strings.TrimSpace(request.Source)
 	if request.Source == "" {
 		request.Source = "admin"
 	}
-	return s.runtime.CommitRuntime(ctx, request.Runtime, func() (config.Snapshot, error) {
+	if err := resolved.Validate(); err != nil {
+		return runtimecfg.ApplyResult{}, &FieldError{Field: "runtime", Err: err}
+	}
+	return s.runtime.CommitRuntime(ctx, resolved, func() (config.Snapshot, error) {
 		return s.settings.Update(ctx, settings.UpdateRequest{
-			ExpectedVersion: request.ExpectedVersion, Runtime: request.Runtime,
-			Source: request.Source, Force: request.Force,
+			ExpectedVersion: request.ExpectedVersion, Runtime: resolved,
+			Source: request.Source,
 		})
 	})
+}
+
+func (s *Service) ApplyResponse(ctx context.Context, result runtimecfg.ApplyResult) (ApplyResponse, error) {
+	var secretStatus secret.Status
+	if s.secrets != nil {
+		var err error
+		secretStatus, err = s.secrets.Status(ctx, result.Snapshot.Runtime.LLM.APIKeyRef)
+		if err != nil {
+			return ApplyResponse{}, err
+		}
+	}
+	return ApplyResponse{Action: result.Action, Config: configResponse(result.Snapshot, result.Status, secretStatus)}, nil
 }
 
 func (s *Service) Rollback(ctx context.Context, request RollbackRequest) (runtimecfg.ApplyResult, error) {

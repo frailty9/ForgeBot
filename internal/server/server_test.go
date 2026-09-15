@@ -31,6 +31,9 @@ func TestAdminRequiresBearerToken(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", response.Code)
 	}
+	if !strings.Contains(response.Body.String(), `"code":"unauthorized"`) {
+		t.Fatalf("unstable unauthorized response: %s", response.Body.String())
+	}
 
 	request = httptest.NewRequest(http.MethodGet, "/v1/admin/config", nil)
 	request.Header.Set("Authorization", "Bearer test-admin-token")
@@ -74,13 +77,17 @@ func TestAPIKeyEndpointIsWriteOnly(t *testing.T) {
 func TestOrdinaryConfigRejectsAPIKeyAndStaleVersion(t *testing.T) {
 	fixture := newAdminFixture(t)
 	response := fixture.request(t, http.MethodPut, "/v1/admin/config", `{"expected_version":1,"runtime":{"llm":{"api_key":"forbidden"}}}`)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unknown field") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) || !strings.Contains(response.Body.String(), "unknown field") {
 		t.Fatalf("api_key response = %d %s", response.Code, response.Body.String())
 	}
 
-	runtimeConfig := config.DefaultRuntime()
-	runtimeConfig.Bot.Name = "UpdatedBot"
-	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: 1, Runtime: runtimeConfig, Source: "test"})
+	get := fixture.request(t, http.MethodGet, "/v1/admin/config", "")
+	var current admin.ConfigResponse
+	if err := json.Unmarshal(get.Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	current.Runtime.Bot.Name = "UpdatedBot"
+	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: 1, Runtime: current.Runtime, Source: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +98,87 @@ func TestOrdinaryConfigRejectsAPIKeyAndStaleVersion(t *testing.T) {
 	response = fixture.requestBytes(t, http.MethodPut, "/v1/admin/config", body)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("stale update = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminConfigRoundTripPreservesAndMutatesSecretsExplicitly(t *testing.T) {
+	fixture := newAdminFixture(t)
+	response := fixture.request(t, http.MethodGet, "/v1/admin/config", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("get = %d %s", response.Code, response.Body.String())
+	}
+	bodyText := response.Body.String()
+	for _, plaintext := range []string{"send-secret", "receive-secret", "mcp-secret-ref", "private-value"} {
+		if strings.Contains(bodyText, plaintext) {
+			t.Fatalf("GET exposed %q: %s", plaintext, bodyText)
+		}
+	}
+	var current admin.ConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	if !current.Runtime.LLM.APIKeyRef.Configured || !current.Runtime.Platforms.Connectors[1].OneBot.SendToken.Configured || !current.Runtime.Extensions.MCP[0].Environment["PRIVATE"].Configured {
+		t.Fatalf("configured flags missing: %+v", current.Runtime)
+	}
+	current.Runtime.Bot.Name = "SafeRoundTrip"
+	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: current.Version, Runtime: current.Runtime, Source: "test:roundtrip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = fixture.requestBytes(t, http.MethodPut, "/v1/admin/config", body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("round trip = %d %s", response.Code, response.Body.String())
+	}
+	persisted, err := config.ReadRuntimeDocument(fixture.runtimePath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Runtime.Platforms.Connectors[1].OneBot.SendToken != "send-secret" || persisted.Runtime.Platforms.Connectors[1].OneBot.ReceiveSecret != "receive-secret" || persisted.Runtime.Extensions.MCP[0].APIKeyRef != "mcp-secret-ref" || persisted.Runtime.Extensions.MCP[0].Environment["PRIVATE"] != "private-value" {
+		t.Fatalf("round trip lost secrets: %+v", persisted.Runtime)
+	}
+
+	current.Version++
+	current.Runtime.Platforms.Connectors[1].OneBot.SendToken = admin.SecretField{Configured: true, Action: admin.SecretReplace, Value: "new-send-secret"}
+	current.Runtime.Platforms.Connectors[1].OneBot.ReceiveSecret = admin.SecretField{Configured: true, Action: admin.SecretDelete}
+	current.Runtime.Extensions.MCP[0].Environment["PRIVATE"] = admin.SecretField{Configured: true, Action: admin.SecretDelete}
+	body, err = json.Marshal(admin.UpdateRequest{ExpectedVersion: current.Version, Runtime: current.Runtime, Source: "test:secrets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = fixture.requestBytes(t, http.MethodPut, "/v1/admin/config", body)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "new-send-secret") {
+		t.Fatalf("secret update = %d %s", response.Code, response.Body.String())
+	}
+	persisted, err = config.ReadRuntimeDocument(fixture.runtimePath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := persisted.Runtime.Platforms.Connectors[1].OneBot.SendToken; got != "new-send-secret" {
+		t.Fatalf("send token = %q", got)
+	}
+	if persisted.Runtime.Platforms.Connectors[1].OneBot.ReceiveSecret != "" {
+		t.Fatal("receive secret was not deleted")
+	}
+	if _, exists := persisted.Runtime.Extensions.MCP[0].Environment["PRIVATE"]; exists {
+		t.Fatal("MCP environment secret was not deleted")
+	}
+}
+
+func TestAdminConfigRejectsInvalidSecretActionWithField(t *testing.T) {
+	fixture := newAdminFixture(t)
+	get := fixture.request(t, http.MethodGet, "/v1/admin/config", "")
+	var current admin.ConfigResponse
+	if err := json.Unmarshal(get.Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	current.Runtime.Platforms.Connectors[1].OneBot.SendToken.Action = "expose"
+	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: current.Version, Runtime: current.Runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := fixture.requestBytes(t, http.MethodPut, "/v1/admin/config", body)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"validation_failed"`) || !strings.Contains(response.Body.String(), `"field":"runtime.platforms.connectors[1].onebot.send_token"`) {
+		t.Fatalf("invalid action = %d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -123,8 +211,9 @@ func TestAdminReflectionScanRequiresAuthenticationAndReportsDisabled(t *testing.
 }
 
 type adminFixture struct {
-	server     *Server
-	secretPath string
+	server      *Server
+	secretPath  string
+	runtimePath string
 }
 
 func newAdminFixture(t *testing.T) adminFixture {
@@ -132,6 +221,14 @@ func newAdminFixture(t *testing.T) adminFixture {
 	dir := t.TempDir()
 	runtimePath := filepath.Join(dir, "runtime.json")
 	runtimeConfig := config.DefaultRuntime()
+	runtimeConfig.Platforms.Connectors = append(runtimeConfig.Platforms.Connectors, config.ConnectorConfig{
+		ID: "qq-disabled", Type: "onebot", OneBot: &config.OneBotConnectorConfig{
+			SendToken: "send-secret", ReceiveSecret: "receive-secret",
+		},
+	})
+	runtimeConfig.Extensions.MCP = []config.MCPServerConfig{{
+		ID: "private-disabled", Transport: "stdio", Environment: map[string]string{"PRIVATE": "private-value"}, APIKeyRef: "mcp-secret-ref",
+	}}
 	data, err := json.Marshal(runtimeConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +273,7 @@ func newAdminFixture(t *testing.T) adminFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return adminFixture{server: New(snapshot, slog.New(slog.NewTextHandler(io.Discard, nil)), runtimeManager, adminService), secretPath: secretPath}
+	return adminFixture{server: New(snapshot, slog.New(slog.NewTextHandler(io.Discard, nil)), runtimeManager, adminService), secretPath: secretPath, runtimePath: runtimePath}
 }
 
 func (f adminFixture) request(t *testing.T, method, path, body string) *httptest.ResponseRecorder {

@@ -485,31 +485,41 @@ DELETE /v1/admin/llm/api-key
 
 ### 7.1 推荐更新流程
 
-运行时更新是**完整替换**，不是 JSON Merge Patch。不要只发送想修改的局部字段。
+运行时更新是**完整替换**，不是 JSON Merge Patch。`GET /v1/admin/config` 返回的 `runtime` 可以直接作为编辑基线：敏感值不会返回明文，而是返回 `configured` 状态；缺省敏感动作默认为 `keep`，因此不会因保存普通字段而清空凭据。
 
-`GET /v1/admin/config` 返回脱敏视图：它不包含 `llm.api_key_ref`，OneBot 的 `send_token` 和 `receive_secret` 也只显示是否已配置。因此该响应用于查看状态和取得当前 `version`，**不能原样作为全量更新基线**。当前版本应以受操作系统权限保护的运行时 JSON 或部署配置源中的完整 runtime 为基线。
-
-1. 调用 `GET /v1/admin/config` 获取当前 `version` 和脱敏状态。
-2. 从受保护的运行时 JSON 或部署配置源取得完整 runtime，在副本中修改目标字段。
-3. 将完整 runtime 对象直接发送到 `POST /v1/admin/config/validate` 校验。
-4. 校验通过后，把它包进下述更新请求并发送到 `PUT /v1/admin/config`。
+1. 调用 `GET /v1/admin/config` 获取当前 `version` 和可编辑 runtime。
+2. 在副本中修改目标字段；敏感字段使用 `action: replace` 或 `action: delete`，保留原值时省略 action/value。
+3. 将 `{ "runtime": { ... } }` 发送到 `POST /v1/admin/config/validate` 校验。
+4. 校验通过后，将 runtime 包进下述更新请求并发送到 `PUT /v1/admin/config`。
 
 更新请求：
 
 ```json
 {
   "expected_version": 1,
-  "runtime": {"...": "完整运行时配置"},
-  "source": "admin:model-switch",
-  "force": false
+  "runtime": {"...": "管理 DTO 中的完整运行时配置"},
+  "source": "admin:model-switch"
 }
 ```
 
-`expected_version` 提供乐观并发控制。版本不一致时拒绝写入，客户端应重新读取并合并；`force: true` 会绕过版本检查，只应在明确接受覆盖并发修改时使用。
+例如替换 OneBot 凭据：
+
+```json
+{
+  "runtime": {
+    "platforms": {"connectors": [{"onebot": {
+      "send_token": {"action": "replace", "value": "new-token"},
+      "receive_secret": {"action": "delete"}
+    }}]}
+  }
+}
+```
+
+`expected_version` 提供乐观并发控制。版本不一致时返回 `409` 和 `error.code: version_conflict`，客户端应重新读取并合并。敏感字段动作仅支持 `keep`、`replace`、`delete`；替换值只接受写入请求，响应永远不会回显。
 
 配置应用和持久化作为一个事务处理：候选组件启动或文件持久化失败时，ForgeBot 回滚到旧的活动配置。某些变更会重建或重启对应的 Bot、LLM、检索或平台连接器，但不要求整个进程重启。
 
-这项全量更新与脱敏读取之间的不对称是当前管理 API 的已知限制。构建通用 Web 管理面板前，需要提供服务端字段级更新或不可见字段保留语义；在此之前，不应让面板根据脱敏响应拼装全量配置。
+校验失败返回 `error.code: validation_failed`，并在可定位时附带 `error.field` 字段路径。其他错误也使用稳定错误码，前端无需解析英文错误消息。
 
 ### 7.2 回滚
 

@@ -26,6 +26,16 @@ import (
 
 const maxAdminBodyBytes = 1 << 20
 
+type adminErrorEnvelope struct {
+	Error adminErrorBody `json:"error"`
+}
+
+type adminErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Field   string `json:"field,omitempty"`
+}
+
 // Engine is the inbound boundary used by HTTP ingress and platform adapters.
 type Engine interface {
 	HandleInbound(context.Context, messaging.InboundMessage) (platform.HandleResult, error)
@@ -84,11 +94,11 @@ func (s *Server) authorize(next http.Handler) http.Handler {
 		}
 		if token == "" || len(token) != len(provided) || subtle.ConstantTimeCompare([]byte(token), []byte(provided)) != 1 {
 			w.Header().Set("WWW-Authenticate", "Bearer")
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			writeAdminError(w, http.StatusUnauthorized, "unauthorized", "administrator authentication failed", "")
 			return
 		}
 		if s.admin == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "management API unavailable"})
+			writeAdminError(w, http.StatusServiceUnavailable, "management_unavailable", "management API unavailable", "")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -115,12 +125,12 @@ func (s *Server) adminHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminValidate(w http.ResponseWriter, r *http.Request) {
-	var runtimeConfig config.RuntimeConfig
-	if err := decodeAdminJSON(w, r, &runtimeConfig); err != nil {
+	var request admin.ValidateRequest
+	if err := decodeAdminJSON(w, r, &request); err != nil {
 		s.writeAdminError(w, err)
 		return
 	}
-	if err := s.admin.Validate(runtimeConfig); err != nil {
+	if err := s.admin.Validate(request.Runtime); err != nil {
 		s.writeAdminError(w, err)
 		return
 	}
@@ -138,7 +148,12 @@ func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		s.writeAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, publicApplyResult(result))
+	response, err := s.admin.ApplyResponse(r.Context(), result)
+	if err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) adminRollback(w http.ResponseWriter, r *http.Request) {
@@ -152,15 +167,12 @@ func (s *Server) adminRollback(w http.ResponseWriter, r *http.Request) {
 		s.writeAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, publicApplyResult(result))
-}
-
-func publicApplyResult(result runtimecfg.ApplyResult) map[string]any {
-	return map[string]any{
-		"action": result.Action,
-		"status": result.Status,
-		"config": result.Snapshot.Public(false),
+	response, err := s.admin.ApplyResponse(r.Context(), result)
+	if err != nil {
+		s.writeAdminError(w, err)
+		return
 	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) adminRuntime(w http.ResponseWriter, _ *http.Request) {
@@ -264,7 +276,26 @@ func (s *Server) writeAdminError(w http.ResponseWriter, err error) {
 	if errors.Is(err, runtimecfg.ErrReflectionDisabled) || errors.Is(err, runtimecfg.ErrReflectionUnavailable) {
 		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	code := "invalid_request"
+	if errors.Is(err, settings.ErrVersionConflict) {
+		code = "version_conflict"
+	}
+	if errors.Is(err, settings.ErrVersionNotFound) {
+		code = "version_not_found"
+	}
+	if errors.Is(err, admin.ErrUnavailable) {
+		code = "management_unavailable"
+	}
+	field := ""
+	var fieldError *admin.FieldError
+	if errors.As(err, &fieldError) {
+		code, field = "validation_failed", fieldError.Field
+	}
+	writeAdminError(w, status, code, err.Error(), field)
+}
+
+func writeAdminError(w http.ResponseWriter, status int, code, message, field string) {
+	writeJSON(w, status, adminErrorEnvelope{Error: adminErrorBody{Code: code, Message: message, Field: field}})
 }
 
 func (s *Server) Start() error {
