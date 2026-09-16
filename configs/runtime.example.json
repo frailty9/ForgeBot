@@ -1,0 +1,140 @@
+{
+  "log": {
+    "level": "info",
+    "format": "text"
+  },
+  "bot": {
+	"name": "ForgeBot",
+	"system_prompt": ""
+  },
+  "llm": {
+    "protocol": "openai_responses",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_ref": "llm/default",
+    "model": "gpt-5",
+    "anthropic_version": "2023-06-01",
+    "timeout": "60s"
+  },
+  "gate": {
+    "enabled": true,
+    "silence": "4s",
+    "max_count": 8,
+    "max_window": "25s",
+    "dedup_ttl": "60s",
+    "dedup_max": 10000,
+    "max_buffered": 50,
+    "max_text_len": 500,
+    "max_concurrent": 4
+  },
+  "search": {
+    "enabled": false,
+    "policy": "on_demand",
+    "backend": "structured",
+    "document_root": "D:/forgebot-docs",
+    "extensions": [".md", ".mdx", ".txt"],
+    "default_results": 5,
+    "max_results": 8,
+    "min_match_ratio": 0.35,
+    "query_timeout": "750ms",
+    "build_timeout": "20s",
+    "max_queries_per_turn": 1,
+    "max_context_chars": 12000,
+    "max_section_chars": 8000,
+    "max_file_bytes": 4194304,
+    "max_total_bytes": 268435456,
+    "max_files": 10000
+  },
+  "platforms": {
+    "connectors": [
+      {
+        "id": "echo-local",
+        "type": "echo",
+        "enabled": true
+      },
+      {
+        "id": "qq-main",
+        "type": "onebot",
+        "enabled": false,
+        "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
+        "onebot": {
+          "api_url": "http://127.0.0.1:5700",
+          "send_token": "",
+          "webhook_addr": "127.0.0.1:8090",
+          "webhook_path": "/onebot/qq-main",
+          "receive_secret": "",
+          "request_limit": 1048576,
+          "timeout": "15s",
+          "replay_ttl": "5m",
+          "replay_max": 10000
+        }
+      }
+    ],
+    "groups": [
+      {"id": "local", "connector_id": "echo-local", "target": "local", "auto_reply_unmentioned": false},
+      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。", "auto_reply_unmentioned": false}
+    ]
+  },
+  "operations": {
+    "groups": [
+      {
+        "conversation_id": "local",
+        "notifications": true,
+        "commands": ["status", "restart", "pause", "resume", "gate", "reload_docs"]
+      }
+    ]
+  },
+  "administration": {
+    "administrators": [
+      {"conversation_id": "local", "user_id": "replace-with-platform-user-id"}
+    ]
+  },
+  "reflection": {
+    "enabled": false,
+    "mode": "off",
+    "conversation_ids": ["local"],
+    "scan_interval": "15m",
+    "message_ttl": "24h",
+    "quiet_window": "3m",
+    "max_session_duration": "30m",
+    "max_messages_per_conversation": 1000,
+    "max_messages_total": 10000,
+    "max_message_chars": 4000,
+    "max_pairs_per_scan": 50,
+    "min_confidence": 0.9,
+    "extra_directory": "extra"
+  },
+  "extensions": {
+    "mcp": [
+      {
+        "id": "platform",
+        "enabled": false,
+        "transport": "streamable_http",
+        "endpoint": "http://127.0.0.1:9000/mcp",
+        "api_key_ref": "mcp/platform",
+        "allowed_tools": ["list_models", "get_model_pricing", "get_group_multiplier"],
+        "timeout": "10s",
+        "max_response_bytes": 1048576
+      },
+      {
+        "id": "local-tools",
+        "enabled": false,
+        "transport": "stdio",
+        "command": "node",
+        "args": ["./extensions/local-tools/server.js"],
+        "working_directory": "./extensions/local-tools",
+        "environment": {
+          "FORGEBOT_TOOL_MODE": "readonly"
+        },
+        "allowed_tools": ["list_models"],
+        "timeout": "10s",
+        "max_response_bytes": 1048576
+      }
+    ],
+    "skills": {
+      "directories": ["skills"],
+      "max_file_bytes": 131072,
+      "max_total_bytes": 1048576,
+      "max_files": 64
+    }
+  }
+}

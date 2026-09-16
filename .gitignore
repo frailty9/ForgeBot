@@ -1,0 +1,35 @@
+# Build output
+/forgebot
+/forgebot.exe
+/dist/
+/bin/
+
+# Runtime data
+/data/
+/logs/
+*.log
+
+# Local configuration
+/configs/*.local.json
+/configs/*-local.json
+/configs/*.local.yaml
+/configs/*-local.yaml
+/configs/secrets.json
+.env
+.env.*
+
+# Go
+/coverage.out
+/coverage.html
+
+# Web toolchain
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+
+# Editors
+.idea/
+.vscode/
+*.swp

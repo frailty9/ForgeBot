@@ -1,0 +1,13 @@
+server:
+  addr: 127.0.0.1:8080
+  read_timeout: 10s
+  write_timeout: 30s
+  shutdown_timeout: 15s
+
+runtime_config_path: runtime.example.json
+
+# Enable together with FORGEBOT_SECRET_KEY.
+# secret_store_path: secrets.json
+
+# Prefer FORGEBOT_ADMIN_TOKEN in production.
+admin_token: change-me-before-exposing-the-admin-api
