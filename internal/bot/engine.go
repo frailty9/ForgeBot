@@ -7,13 +7,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/gate"
+	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -55,25 +59,50 @@ type GatePolicy struct {
 
 // Dependencies are the replaceable boundaries required by Engine.
 type Dependencies struct {
-	Sender    platform.Sender
-	LLM       llm.Client
-	Retriever searchcontract.Retriever
-	Tools     tooling.Executor
-	Policy    Policy
+	Hooks      *hooks.Chain
+	CloseHooks func(context.Context) error
+	Generation uint64
+	Sender     platform.Sender
+	LLM        llm.Client
+	Retriever  searchcontract.Retriever
+	Tools      tooling.Executor
+	Policy     Policy
 }
 
 // Engine handles inbound messages for one immutable runtime generation.
 type Engine struct {
-	deps   Dependencies
-	logger *slog.Logger
-	gate   *gate.Pool
+	deps      Dependencies
+	logger    *slog.Logger
+	gate      *gate.Pool
+	lifetime  sync.RWMutex
+	closing   atomic.Bool
+	closeOnce sync.Once
+	closed    chan struct{}
 }
 
-const (
-	searchPreReply      = "正在检索相关文档，请稍候。"
-	imageOnlyUserPrompt = "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。"
-	emptyMentionPrompt  = "请简单介绍一下你自己。"
-)
+var runSequence atomic.Uint64
+
+type runKey struct{}
+type execution struct {
+	info              hooks.Info
+	progressAttempted bool
+}
+
+var errEmptyInput = errors.New("empty_input")
+var errModuleStopped = errors.New("module_stopped")
+var errReplySuppressed = errors.New("reply_suppressed")
+var errHookFailed = errors.New("hook_failed")
+
+func (e *Engine) beginRun(ctx context.Context, in messaging.InboundMessage, trigger string) context.Context {
+	return context.WithValue(ctx, runKey{}, &execution{info: hooks.Info{RunID: fmt.Sprintf("run-%d", runSequence.Add(1)), Generation: e.deps.Generation, ConversationID: in.ConversationID, UserID: in.UserID, MessageID: in.MessageID, Trigger: trigger}})
+}
+func runFrom(ctx context.Context) *execution {
+	run, _ := ctx.Value(runKey{}).(*execution)
+	if run == nil {
+		return &execution{}
+	}
+	return run
+}
 
 // NewEngine validates dependencies and starts the message gate.
 func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
@@ -83,7 +112,7 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 	if deps.Sender == nil {
 		return nil, fmt.Errorf("bot sender is required")
 	}
-	engine := &Engine{deps: deps, logger: logger}
+	engine := &Engine{deps: deps, logger: logger, closed: make(chan struct{})}
 	engine.gate = gate.New(ctx, engine.gatePolicy, engine.onGateFlush, gate.Options{
 		DedupTTL:      deps.Policy.Gate.DedupTTL,
 		DedupMax:      deps.Policy.Gate.DedupMax,
@@ -96,6 +125,15 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 // HandleInbound processes one normalized inbound message and returns a verdict
 // describing whether it was handled, buffered, or rejected.
 func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+	e.lifetime.RLock()
+	defer e.lifetime.RUnlock()
+	if e.closing.Load() {
+		return platform.HandleResult{Verdict: "stopped"}, errors.New("engine is stopped")
+	}
+	if err := ctx.Err(); err != nil {
+		return platform.HandleResult{Verdict: "canceled"}, err
+	}
+	ctx = e.beginRun(ctx, msg, "direct")
 	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
@@ -121,11 +159,23 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	}
 	reply, err := e.replyText(ctx, msg)
 	if err != nil {
+		if errors.Is(err, errEmptyInput) || errors.Is(err, errModuleStopped) {
+			return platform.HandleResult{Verdict: err.Error()}, nil
+		}
+		if errors.Is(err, errHookFailed) {
+			return platform.HandleResult{Verdict: "hook_failed"}, err
+		}
 		e.logger.DebugContext(ctx, "bot reply generation failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, err
 	}
 	e.logger.DebugContext(ctx, "bot reply generated", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "reply_len", len([]rune(reply)))
 	if err := e.reply(ctx, msg, reply); err != nil {
+		if errors.Is(err, errReplySuppressed) {
+			return platform.HandleResult{Verdict: "reply_suppressed"}, nil
+		}
+		if errors.Is(err, errHookFailed) {
+			return platform.HandleResult{Verdict: "hook_failed"}, err
+		}
 		e.logger.DebugContext(ctx, "bot reply delivery failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
@@ -134,13 +184,40 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 
 // Shutdown stops pending gate work and closes external tool executors.
 func (e *Engine) Shutdown(grace time.Duration) {
-	e.gate.Close(grace)
-	if closer, ok := e.deps.Tools.(io.Closer); ok {
-		if err := closer.Close(); err != nil {
-			e.logger.Warn("close tool executor failed", "err", err)
-		}
+	e.closeOnce.Do(func() {
+		e.closing.Store(true)
+		go func() {
+			e.lifetime.Lock()
+			defer e.lifetime.Unlock()
+			defer close(e.closed)
+			e.gate.Close(0)
+			if e.deps.CloseHooks != nil {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				if err := e.deps.CloseHooks(closeCtx); err != nil {
+					e.logger.Warn("close modules failed", "err", err)
+				}
+				cancel()
+			}
+			if closer, ok := e.deps.Tools.(io.Closer); ok {
+				if err := closer.Close(); err != nil {
+					e.logger.Warn("close tool executor failed", "err", err)
+				}
+			}
+		}()
+	})
+	if grace <= 0 {
+		<-e.closed
+		return
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-e.closed:
+	case <-timer.C:
 	}
 }
+
+func (e *Engine) Done() <-chan struct{} { return e.closed }
 
 func (e *Engine) GateStats() gate.Stats {
 	return e.gate.Stats()
@@ -168,17 +245,44 @@ func (e *Engine) onGateFlush(ctx context.Context, batch gate.Batch) {
 		trigger = batch.Msgs[len(batch.Msgs)-1]
 	}
 	in := messaging.InboundMessage{ConversationID: batch.ConversationID, UserID: trigger.UserID, MessageID: trigger.MsgID, Text: transcript, PromptSuffix: trigger.PromptSuffix}
+	ctx = e.beginRun(ctx, in, "proactive")
 	reply, err := e.replyText(ctx, in)
 	if err != nil {
+		if errors.Is(err, errEmptyInput) || errors.Is(err, errModuleStopped) {
+			return
+		}
 		e.logger.ErrorContext(ctx, "generate proactive gate reply", "err", err, "conversation_id", batch.ConversationID)
 		return
 	}
 	if err := e.reply(ctx, in, reply); err != nil {
+		if errors.Is(err, errReplySuppressed) {
+			return
+		}
 		e.logger.ErrorContext(ctx, "send proactive gate reply", "err", err, "conversation_id", batch.ConversationID)
 	}
 }
 
 func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text string) error {
+	return e.deliver(ctx, in, text, "final")
+}
+
+func (e *Engine) deliver(ctx context.Context, in messaging.InboundMessage, text, kind string) error {
+	result, err := e.deps.Hooks.Reply(ctx, runFrom(ctx).info, hooks.ReplyInput{Text: text, Kind: kind})
+	if err != nil {
+		return fmt.Errorf("%w: %w", errHookFailed, err)
+	}
+	if result.Suppress {
+		return errReplySuppressed
+	}
+	if result.Text != nil {
+		text = *result.Text
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		return errReplySuppressed
+	}
 	message := messaging.OutboundMessage{
 		ConversationID:   in.ConversationID,
 		ReplyToMessageID: in.MessageID,
@@ -189,23 +293,53 @@ func (e *Engine) reply(ctx context.Context, in messaging.InboundMessage, text st
 
 func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
 	text := strings.TrimSpace(in.Text)
-	if text == "" && in.Mentioned && len(in.Media) == 0 {
-		text = emptyMentionPrompt
-		in.Text = text
-	}
 	instructions := e.instructions(in.PromptSuffix)
 	if query, explicit := explicitSearchQuery(text); explicit {
 		return e.explicitSearch(ctx, query, instructions)
+	}
+	user := userMessage(in)
+	images := 0
+	for _, part := range user.Content {
+		if part.Type == "image" {
+			images++
+		}
+	}
+	prepared, err := e.deps.Hooks.Prepare(ctx, runFrom(ctx).info, hooks.Input{Text: text, Mentioned: in.Mentioned, Images: images, MediaCount: len(in.Media)})
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errHookFailed, err)
+	}
+	if prepared.Stop {
+		return "", errModuleStopped
+	}
+	if prepared.Text != nil {
+		text = strings.TrimSpace(*prepared.Text)
+		if len(user.Content) > 0 && user.Content[0].Type == "text" {
+			user.Content = user.Content[1:]
+			if text != "" {
+				user.Content = append([]llm.ContentPart{{Type: "text", Text: text}}, user.Content...)
+			}
+		} else if text != "" {
+			user.Content = append(user.Content, llm.ContentPart{Type: "text", Text: text})
+		}
+	}
+	if text == "" && images == 0 {
+		return "", errEmptyInput
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if e.deps.LLM == nil {
 		name := strings.TrimSpace(e.deps.Policy.Name)
 		if name == "" {
 			name = "ForgeBot"
 		}
-		return name + " received: " + strings.TrimSpace(text), nil
+		if strings.TrimSpace(in.Text) == "" && images > 0 {
+			text = ""
+		}
+		return name + " received: " + text, nil
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
-	messages := []llm.Message{userMessage(in)}
+	messages := []llm.Message{user}
 	tools := e.toolDefinitions()
 	startedAt := time.Now()
 	response, err := e.deps.LLM.Complete(ctx, llm.Request{
@@ -227,11 +361,14 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	if budget <= 0 {
 		budget = 1
 	}
-	preReplySent := false
+	allowed := make(map[string]bool, len(tools))
+	for _, definition := range tools {
+		allowed[definition.Name] = true
+	}
 	for index, call := range response.Message.ToolCalls {
 		result := tooling.Result{Code: "budget_exhausted"}
 		if index < budget && e.deps.Tools != nil {
-			if call.Name == "search_docs" && !e.deps.Policy.Search.Enabled {
+			if !allowed[call.Name] {
 				result = tooling.Result{Code: "tool_not_allowed"}
 				payload, marshalErr := json.Marshal(result)
 				if marshalErr != nil {
@@ -240,15 +377,28 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 				messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
 				continue
 			}
-			if !preReplySent && call.Name == "search_docs" {
-				preReplySent = true
-				if err := e.reply(ctx, in, searchPreReply); err != nil {
-					e.logger.WarnContext(ctx, "send search pre-reply failed", "conversation_id", in.ConversationID, "message_id", in.MessageID, "err", err)
-				} else {
-					e.logger.DebugContext(ctx, "search pre-reply sent", "conversation_id", in.ConversationID, "message_id", in.MessageID)
-				}
+			run := runFrom(ctx)
+			decision, hookErr := e.deps.Hooks.Tool(ctx, run.info, hooks.ToolInput{Name: call.Name, Arguments: call.Arguments})
+			if hookErr != nil {
+				return "", fmt.Errorf("%w: %w", errHookFailed, hookErr)
 			}
-			result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
+			if decision.Deny {
+				result = tooling.Result{Code: "module_denied"}
+			} else {
+				if decision.Progress != nil && !run.progressAttempted {
+					run.progressAttempted = true
+					if sendErr := e.deliver(ctx, in, decision.Progress.Text, "progress"); sendErr != nil && !errors.Is(sendErr, errReplySuppressed) {
+						if errors.Is(sendErr, errHookFailed) {
+							return "", sendErr
+						}
+						e.logger.WarnContext(ctx, "send progress reply failed", "run_id", run.info.RunID, "err", sendErr)
+					}
+				}
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
+			}
 		}
 		payload, marshalErr := json.Marshal(result)
 		if marshalErr != nil {
@@ -257,6 +407,9 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
 	}
 	startedAt = time.Now()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	final, err := e.deps.LLM.Complete(ctx, llm.Request{
 		Model: e.deps.Policy.Model, Instructions: instructions, Messages: messages,
 	})
@@ -274,7 +427,6 @@ func userMessage(in messaging.InboundMessage) llm.Message {
 	if text != "" {
 		parts = append(parts, llm.ContentPart{Type: "text", Text: text})
 	}
-	validImages := 0
 	for _, media := range in.Media {
 		if media.Kind != messaging.MediaImage {
 			continue
@@ -288,14 +440,7 @@ func userMessage(in messaging.InboundMessage) llm.Message {
 		}
 		if part.MediaURL != "" || part.Data != "" {
 			parts = append(parts, part)
-			validImages++
 		}
-	}
-	if text == "" && validImages > 0 {
-		parts = append(parts, llm.ContentPart{Type: "text", Text: imageOnlyUserPrompt})
-	}
-	if len(parts) == 0 {
-		parts = append(parts, llm.ContentPart{Type: "text", Text: strings.TrimSpace(in.Text)})
 	}
 	return llm.Message{Role: llm.RoleUser, Content: parts}
 }

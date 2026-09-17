@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
@@ -27,7 +30,7 @@ func TestEngineRepliesToAddressedMessage(t *testing.T) {
 	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +65,7 @@ func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +99,7 @@ func TestEngineUsesInjectedLLM(t *testing.T) {
 	policy := testPolicy()
 	policy.Model = "test-model"
 	policy.SystemPrompt = "test-system"
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +127,7 @@ func TestEngineRepliesToEmptyMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &fakeLLM{response: llm.Response{Text: "我是 ForgeBot。"}}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +137,7 @@ func TestEngineRepliesToEmptyMention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.request.Messages[0].Text() != emptyMentionPrompt {
+	if fake.request.Messages[0].Text() != replyexperience.EmptyMentionPrompt {
 		t.Fatalf("empty mention prompt = %q", fake.request.Messages[0].Text())
 	}
 	if sent := sender.Sent(); len(sent) != 1 || sent[0].Text != "我是 ForgeBot。" {
@@ -152,7 +155,7 @@ func TestEnginePassesInboundImageToLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &fakeLLM{response: llm.Response{Text: "看到了"}}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +182,7 @@ func TestEngineAddsInstructionForImageOnlyMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &fakeLLM{response: llm.Response{Text: "图片中的错误是鉴权失败"}}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +194,7 @@ func TestEngineAddsInstructionForImageOnlyMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := fake.request.Messages[0].Content
-	if len(content) != 2 || content[0].Type != "image" || content[1].Type != "text" || content[1].Text != imageOnlyUserPrompt {
+	if len(content) != 2 || content[0].Type != "image" || content[1].Type != "text" || content[1].Text != replyexperience.ImageOnlyPrompt {
 		t.Fatalf("content = %+v", content)
 	}
 }
@@ -208,7 +211,7 @@ func TestEngineAppendsPromptSuffix(t *testing.T) {
 	fake := &fakeLLM{response: llm.Response{Text: "plain", Message: llm.TextMessage(llm.RoleAssistant, "plain")}}
 	policy := testPolicy()
 	policy.SystemPrompt = "base"
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +225,7 @@ func TestEngineAppendsPromptSuffix(t *testing.T) {
 }
 
 func TestEngineRequiresSender(t *testing.T) {
-	if _, err := NewEngine(context.Background(), Dependencies{Policy: testPolicy()}, slog.Default()); err == nil {
+	if _, err := newTestEngine(context.Background(), Dependencies{Policy: testPolicy()}, slog.Default()); err == nil {
 		t.Fatal("missing sender accepted")
 	}
 }
@@ -257,7 +260,7 @@ func TestEngineExecutesOneSearchToolAndStopsLoop(t *testing.T) {
 		t.Fatalf("tool messages = %+v", messages)
 	}
 	sent := sender.Sent()
-	if len(sent) != 2 || sent[0].Text != searchPreReply || sent[1].Text != "document answer" {
+	if len(sent) != 2 || sent[0].Text != replyexperience.SearchProgressText || sent[1].Text != "document answer" {
 		t.Fatalf("sent = %+v", sender.Sent())
 	}
 }
@@ -366,7 +369,7 @@ func searchEngineFixture(t *testing.T, responses []llm.Response) (*Engine, *fake
 	policy := testPolicy()
 	policy.Model = "test-model"
 	policy.Search = SearchPolicy{Enabled: true, DefaultResults: 5, MaxResults: 8, MaxQueriesPerTurn: 1, MaxContextChars: 12000}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Retriever: retriever, Tools: tooling.NewRegistry(tool), Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Retriever: retriever, Tools: tooling.NewRegistry(tool), Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,6 +381,19 @@ func testInbound(text string) messaging.InboundMessage {
 }
 func (f *fakeLLM) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, error) {
 	return nil, nil
+}
+
+func newTestEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
+	registry := modules.NewRegistry()
+	if err := registry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
+		return nil, err
+	}
+	set, err := registry.Build(ctx, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	deps.Hooks, deps.CloseHooks = set.Chain(), set.Close
+	return NewEngine(ctx, deps, logger)
 }
 
 func testPolicy() Policy {
