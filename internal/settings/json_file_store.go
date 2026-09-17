@@ -56,17 +56,18 @@ func (s *JSONFileStore) RuntimeAt(_ context.Context, version uint64) (config.Run
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if version == s.document.Version {
-		return s.document.Runtime, nil
+		return s.document.Runtime.Clone(), nil
 	}
 	for _, revision := range s.document.History {
 		if revision.Version == version {
-			return revision.Runtime, nil
+			return revision.Runtime.Clone(), nil
 		}
 	}
 	return config.RuntimeConfig{}, ErrVersionNotFound
 }
 
 func (s *JSONFileStore) Update(_ context.Context, request UpdateRequest) (config.Snapshot, error) {
+	request.Runtime = request.Runtime.Clone()
 	if err := request.Runtime.Validate(); err != nil {
 		return config.Snapshot{}, err
 	}
@@ -136,7 +137,7 @@ func (s *JSONFileStore) updateLocked(request UpdateRequest) (config.Snapshot, er
 	}
 	s.document = config.RuntimeDocument{
 		Version: s.document.Version + 1, UpdatedAt: s.now().UTC(), Source: request.Source,
-		Runtime: request.Runtime, History: history,
+		Runtime: request.Runtime.Clone(), History: history,
 	}
 	if err := s.persistLocked(); err != nil {
 		s.document = previous
@@ -146,12 +147,16 @@ func (s *JSONFileStore) updateLocked(request UpdateRequest) (config.Snapshot, er
 }
 
 func (s *JSONFileStore) snapshotLocked() config.Snapshot {
-	return config.Snapshot{Version: s.document.Version, UpdatedAt: s.document.UpdatedAt, Static: s.static, Runtime: s.document.Runtime}
+	return config.Snapshot{Version: s.document.Version, UpdatedAt: s.document.UpdatedAt, Static: s.static, Runtime: s.document.Runtime.Clone()}
 }
 
 func cloneDocument(document config.RuntimeDocument) config.RuntimeDocument {
 	copy := document
 	copy.History = append([]config.RuntimeRevision(nil), document.History...)
+	copy.Runtime = document.Runtime.Clone()
+	for index := range copy.History {
+		copy.History[index].Runtime = copy.History[index].Runtime.Clone()
+	}
 	return copy
 }
 

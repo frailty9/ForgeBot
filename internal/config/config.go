@@ -60,16 +60,17 @@ type StaticConfig struct {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
-	Log            LogConfig            `json:"log"`
-	Bot            BotConfig            `json:"bot"`
-	Gate           GateConfig           `json:"gate"`
-	LLM            LLMConfig            `json:"llm"`
-	Search         SearchConfig         `json:"search"`
-	Platforms      PlatformConfig       `json:"platforms"`
-	Administration AdministrationConfig `json:"administration"`
-	Reflection     ReflectionConfig     `json:"reflection"`
-	Operations     OperationsConfig     `json:"operations"`
-	Extensions     ExtensionsConfig     `json:"extensions"`
+	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
+	Log            LogConfig               `json:"log"`
+	Bot            BotConfig               `json:"bot"`
+	Gate           GateConfig              `json:"gate"`
+	LLM            LLMConfig               `json:"llm"`
+	Search         SearchConfig            `json:"search"`
+	Platforms      PlatformConfig          `json:"platforms"`
+	Administration AdministrationConfig    `json:"administration"`
+	Reflection     ReflectionConfig        `json:"reflection"`
+	Operations     OperationsConfig        `json:"operations"`
+	Extensions     ExtensionsConfig        `json:"extensions"`
 }
 
 // ExtensionsConfig configures MCP servers and text-only skills.
@@ -609,6 +610,9 @@ func (c RuntimeConfig) Validate() error {
 		problems = append(problems, err.Error())
 	}
 	if err := c.Extensions.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if err := ValidateModules(c.Modules); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if len(problems) > 0 {
