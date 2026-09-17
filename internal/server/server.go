@@ -249,6 +249,9 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
 
 func (s *Server) writeAdminError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
+	if errors.Is(err, runtimecfg.ErrRuntimeBusy) {
+		status = http.StatusConflict
+	}
 	if errors.Is(err, settings.ErrVersionConflict) {
 		status = http.StatusConflict
 	}

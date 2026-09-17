@@ -20,6 +20,7 @@ import (
 	"github.com/soleapi/forgebot/internal/knowledge/markdown"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -39,7 +40,10 @@ var (
 	ErrStaticConfigChanged   = errors.New("static configuration requires a process restart")
 	ErrReflectionDisabled    = errors.New("reflection is disabled")
 	ErrReflectionUnavailable = errors.New("reflection scanner is unavailable")
+	ErrRuntimeBusy           = errors.New("runtime_busy: previous generation is still retiring")
 )
+
+var generationSequence atomic.Uint64
 
 type State string
 
@@ -65,6 +69,7 @@ const (
 )
 
 type Status struct {
+	Modules    []modules.Status           `json:"modules"`
 	State      State                      `json:"state"`
 	Action     Action                     `json:"action"`
 	Version    uint64                     `json:"version"`
@@ -104,6 +109,7 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	Modules           *modules.Registry
 	Sender            platform.Sender
 	Secrets           secret.Store
 	ClientFactory     ClientFactory
@@ -116,14 +122,39 @@ type Builder struct {
 
 // Build constructs a complete bot engine and its configured dependencies.
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
+	snapshot = snapshot.Clone()
+	if err := b.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+		return nil, err
+	}
 	retriever, err := b.buildSearch(ctx, snapshot.Runtime.Search, nil)
 	if err != nil {
 		return nil, err
 	}
-	return b.build(ctx, snapshot, b.Sender, retriever, "", "")
+	moduleSet, err := b.Modules.Build(ctx, snapshot.Runtime.Modules, nil)
+	if err != nil {
+		return nil, err
+	}
+	engine, err := b.build(ctx, snapshot, b.Sender, retriever, "", "", moduleSet)
+	if err == nil {
+		moduleSet.Mark("active")
+	}
+	return engine, err
 }
 
-func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, secretRef, secretValue string) (*bot.Engine, error) {
+func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, secretRef, secretValue string, moduleSet *modules.Set) (built *bot.Engine, buildErr error) {
+	var executors []tooling.Executor
+	defer func() {
+		if built == nil {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = moduleSet.Close(closeCtx)
+			for _, executor := range executors {
+				if closer, ok := executor.(interface{ Close() error }); ok {
+					_ = closer.Close()
+				}
+			}
+		}
+	}()
 	if sender == nil {
 		return nil, errors.New("runtime sender is required")
 	}
@@ -150,7 +181,6 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 			}
 		}
 	}
-	var executors []tooling.Executor
 	if snapshot.Runtime.Search.Enabled && retriever != nil {
 		searchConfig := snapshot.Runtime.Search
 		executors = append(executors, tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars)))
@@ -200,7 +230,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy, Hooks: moduleSet.Chain(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {
@@ -292,6 +322,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 // Manager owns the active generation and coordinates lifecycle, updates,
 // persistence, notifications, and administrative actions.
 type Manager struct {
+	retiring        <-chan struct{}
 	applyMu         sync.Mutex
 	routeMu         sync.RWMutex
 	statusMu        sync.RWMutex
@@ -309,6 +340,7 @@ type Manager struct {
 }
 
 type generation struct {
+	modules            *modules.Set
 	snapshot           config.Snapshot
 	engine             *bot.Engine
 	connectors         platform.ConnectorSet
@@ -325,6 +357,8 @@ type generation struct {
 
 // NewManager validates and publishes the initial runtime generation.
 func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) (*Manager, error) {
+	snapshot = snapshot.Clone()
+	builder.Modules = builder.Modules.Clone()
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
 	}
@@ -334,12 +368,25 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
+	generation.modules.Mark("active")
 	manager.reflection = generation.reflection
 	manager.storeSnapshot(snapshot)
 	return manager, nil
 }
 
 func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, retriever searchcontract.Retriever, secretRef, secretValue string) (*generation, error) {
+	if m.retiring != nil {
+		select {
+		case <-m.retiring:
+			m.retiring = nil
+		default:
+			return nil, ErrRuntimeBusy
+		}
+	}
+	snapshot = snapshot.Clone()
+	if err := m.builder.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+		return nil, err
+	}
 	if connectors == nil && m.builder.ConnectorFactory != nil {
 		var err error
 		connectors, err = m.builder.ConnectorFactory(snapshot.Runtime.Platforms)
@@ -355,7 +402,11 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	engine, err := m.builder.build(ctx, snapshot, sender, retriever, secretRef, secretValue)
+	moduleSet, err := m.builder.Modules.Build(ctx, snapshot.Runtime.Modules, nil)
+	if err != nil {
+		return nil, err
+	}
+	engine, err := m.builder.build(ctx, snapshot, sender, retriever, secretRef, secretValue, moduleSet)
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +451,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		}
 	}
 	return &generation{
+		modules:  moduleSet,
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
 		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
 		reflectionEnabled:  snapshot.Runtime.Reflection.Enabled,
@@ -503,7 +555,8 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	if generation == nil {
 		return config.Snapshot{}, status
 	}
-	snapshot := *m.snapshot.Load()
+	snapshot := m.snapshot.Load().Clone()
+	status.Modules = generation.modules.Status()
 	if generation.connectors != nil {
 		status.Connectors = generation.connectors.Status()
 	}
@@ -555,7 +608,7 @@ func (m *Manager) ScanReflection(ctx context.Context) (ReflectionScanResult, err
 }
 
 func (m *Manager) storeSnapshot(snapshot config.Snapshot) {
-	copy := snapshot
+	copy := snapshot.Clone()
 	m.snapshot.Store(&copy)
 }
 
@@ -662,6 +715,10 @@ func (m *Manager) watchConnectorErrors(generation *generation) {
 
 // Apply builds a candidate generation and swaps it in atomically after success.
 func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyResult, error) {
+	snapshot = snapshot.Clone()
+	if err := m.builder.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+		return ApplyResult{}, err
+	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	current := m.current.Load()
@@ -676,7 +733,7 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 	}
 	action := classify(current.snapshot.Runtime, snapshot.Runtime)
 	if action == ActionNone {
-		return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: current.snapshot}, nil
+		return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: current.snapshot.Clone()}, nil
 	}
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
 	connectors := current.connectors
@@ -703,6 +760,10 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 // CommitRuntime builds a candidate before persistence and only publishes it
 // after persistence returns the matching, monotonically newer snapshot.
 func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.RuntimeConfig, persist Persist) (ApplyResult, error) {
+	runtimeConfig = runtimeConfig.Clone()
+	if err := m.builder.Modules.Validate(runtimeConfig.Modules); err != nil {
+		return ApplyResult{}, err
+	}
 	if persist == nil {
 		return ApplyResult{}, errors.New("runtime persistence callback is required")
 	}
@@ -725,7 +786,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 			return ApplyResult{}, errors.New("persisted runtime snapshot does not match candidate")
 		}
 		current.mu.Lock()
-		current.snapshot = persisted
+		current.snapshot = persisted.Clone()
 		current.mu.Unlock()
 		m.storeSnapshot(persisted)
 		if action == ActionUpdateLog && m.builder.ApplyLog != nil {
@@ -897,21 +958,27 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 	if generation == nil {
 		return
 	}
+	generation.modules.Mark("retiring")
 	done := make(chan struct{})
-	go func() { generation.mu.Lock(); close(done) }()
-	if grace > 0 {
-		select {
-		case <-done:
-		case <-time.After(grace):
-			// The engine stays alive until in-flight requests release the generation.
-			go func() { <-done; generation.engine.Shutdown(grace); generation.mu.Unlock() }()
-			return
-		}
-	} else {
+	m.retiring = done
+	go func() {
+		generation.mu.Lock()
+		defer generation.mu.Unlock()
+		defer close(done)
+		generation.engine.Shutdown(0)
+	}()
+	if grace <= 0 {
 		<-done
+		m.retiring = nil
+		return
 	}
-	generation.engine.Shutdown(grace)
-	generation.mu.Unlock()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-done:
+		m.retiring = nil
+	case <-timer.C:
+	}
 }
 
 func (m *Manager) publish(_ context.Context, current, next *generation, persist func() (config.Snapshot, error)) (config.Snapshot, error) {
@@ -949,7 +1016,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, err
 		}
-		next.snapshot = published
+		next.snapshot = published.Clone()
 	}
 	if next.reflectionEnabled && m.reflection != nil {
 		if err := next.reflection.UpdateConfig(reflectionBufferConfig(next.snapshot.Runtime.Reflection)); err != nil {
@@ -962,6 +1029,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	if next.reflection != nil {
 		m.reflection = next.reflection
 	}
+	next.modules.Mark("active")
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {
@@ -984,7 +1052,18 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		}
 	}
 	m.drain(old, next.snapshot.Static.Server.ShutdownTimeout)
-	return published, nil
+	return published.Clone(), nil
+}
+
+func (m *Manager) ValidateConfiguration(cfg config.RuntimeConfig) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return m.builder.Modules.Validate(cfg.Modules)
+}
+
+func (m *Manager) PublicModules(cfg config.RuntimeConfig) (map[string]any, error) {
+	return m.builder.Modules.Public(cfg.Modules)
 }
 
 func (m *Manager) rollbackConnectors(current, next *generation, changed bool) {

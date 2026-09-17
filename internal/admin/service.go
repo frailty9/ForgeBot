@@ -59,6 +59,11 @@ func (s *Service) Config(ctx context.Context) (map[string]any, error) {
 		configured = secretStatus.Configured
 	}
 	result := snapshot.Public(configured)
+	publicModules, err := s.runtime.PublicModules(snapshot.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	result["runtime"].(map[string]any)["modules"] = publicModules
 	result["runtime_status"] = status
 	if configured {
 		result["llm_api_key"] = secretStatus
@@ -75,7 +80,9 @@ func (s *Service) History(ctx context.Context, limit int) ([]settings.RevisionMe
 	return s.settings.History(ctx, limit)
 }
 
-func (s *Service) Validate(runtime config.RuntimeConfig) error { return runtime.Validate() }
+func (s *Service) Validate(runtime config.RuntimeConfig) error {
+	return s.runtime.ValidateConfiguration(runtime)
+}
 
 func (s *Service) Update(ctx context.Context, request UpdateRequest) (runtimecfg.ApplyResult, error) {
 	if s.settings == nil {

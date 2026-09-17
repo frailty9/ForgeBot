@@ -12,7 +12,10 @@ import (
 
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/logging"
+	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -44,7 +47,11 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{ConnectorFactory: connectorFactory(logger), SearchFactory: searchFactory, ApplyLog: func(logConfig config.LogConfig) {
+	moduleRegistry := modules.NewRegistry()
+	if err := moduleRegistry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
+		return nil, err
+	}
+	builder := runtimecfg.Builder{Modules: moduleRegistry, ConnectorFactory: connectorFactory(logger), SearchFactory: searchFactory, ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}

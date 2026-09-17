@@ -318,6 +318,11 @@ func (p *Pool) armLocked(b *bucket, pol Policy, now time.Time) {
 }
 
 func (p *Pool) onTimer(b *bucket, generation uint64) {
+	p.lifecycle.RLock()
+	defer p.lifecycle.RUnlock()
+	if p.closed.Load() || p.ctx.Err() != nil {
+		return
+	}
 	pol := p.policy(b.conversationID)
 	now := p.clock.Now()
 
