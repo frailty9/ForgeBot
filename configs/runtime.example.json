@@ -1,4 +1,14 @@
 {
+  "modules": {
+    "native.reply_experience": {
+      "enabled": true,
+      "options": {
+        "empty_mention_prompt": "请简单介绍一下你自己。",
+        "image_only_prompt": "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。",
+        "search_progress_text": "正在检索相关文档，请稍候。"
+      }
+    }
+  },
   "log": {
     "level": "info",
     "format": "text"

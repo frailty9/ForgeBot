@@ -16,6 +16,9 @@ other product.
 - Explicit interfaces between the bot core, platform connectors, LLM clients,
   retrieval, tools, and runtime management.
 - Multiple connectors and group bindings active at the same time.
+- Module-level native feature switches backed by typed, immutable Hook chains.
+  The first module controls empty-mention/image hints and search progress replies;
+  external FPP plugins are not implemented yet.
 - OneBot 11 HTTP webhook support with outbound `send_msg`, HMAC-SHA1 request
   verification, replay protection, and bounded request handling.
 - A single logical conversation identity for the bot core, independent of the

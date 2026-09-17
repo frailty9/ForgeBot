@@ -92,6 +92,41 @@ must not depend on or expose the complete Web administration service.
    an administrator. Runtime configuration resolves that identity before
    application handlers consume a message.
 
+## Declarative Native Modules
+
+The composition root explicitly registers factories in `internal/modules`.
+`runtime.modules` enables or disables each whole module, not individual hooks.
+Factories validate their own options; configuration storage continues to use
+`settings.Store` with `JSONFileStore`. Runtime snapshots and history own their
+maps, slices, pointers and opaque module options rather than sharing mutable data.
+
+`internal/hooks` compiles immutable typed chains for `agent.input.prepare`,
+`tool.before_execute`, and `reply.before_send`. Inputs contain value-only text
+and attribution, never mutable identity, media, routing targets, credentials or
+the Runtime Manager. Typed results are validated before application. Source tier,
+host order, module ID and handler ID determine order. Business equivalence or
+replacement coverage is deliberately not checked.
+
+The first native module is `native.reply_experience`: empty mention and image
+analysis hints plus a once-per-run retrieval progress effect. The host sends
+effects only after the tool chain passes. No message-sending tool is added to the
+LLM. Reply hooks cover Engine replies only, not operator/notification delivery.
+Gate, reflection, command registration and async jobs have not been migrated.
+
+The Engine owns module cleanup after construction; failed builders clean up
+candidate modules. Retirement waits for direct requests and active Gate callbacks
+before closing modules and tools. Pending Gate items retain the existing shutdown
+cancel/drop semantics; they are not persisted or replayed. One overdue retirement
+blocks further generation rebuilds with `runtime_busy`. This is not a forced
+unload or rollback of effects already delivered to external systems.
+
+Native handlers execute synchronously with cooperative cancellation (200 ms per
+handler, 1 s per node chain). No goroutine is spawned per hook to fake a hard
+timeout. Uncooperative native code cannot be forcibly interrupted. The factory
+and cleanup contract is likewise for trusted native code, not a sandbox.
+External-source test doubles exercise ordering, but no FPP transport, public SDK,
+plugin installer, background-job API or asynchronous observation queue exists yet.
+
 ## Search Lifecycle
 
 Structured search parses local `.md`, `.mdx`, and `.txt` files and builds an

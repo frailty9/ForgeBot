@@ -1,5 +1,13 @@
 # ForgeBot Roadmap
 
+Current implementation planning and handoff are tracked in
+[`specs/README.md`](../specs/README.md) and [`specs/roadmap.md`](../specs/roadmap.md).
+The phase lists below are historical milestones, not a complete implementation audit.
+
+- [x] Module-level native feature switches and typed Hook chains; first migration:
+  reply experience (empty mention, image hint, retrieval progress).
+- [ ] External FPP plugin handshake and transports; not part of the native Hook release.
+
 ## Phase 1: Foundation
 
 - [x] YAML startup config and JSON runtime config with validation.

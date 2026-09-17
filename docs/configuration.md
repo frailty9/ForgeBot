@@ -458,6 +458,56 @@ stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
 - `timeout`、`max_response_bytes` 超限或子进程退出会使调用失败。
 - 模型不调用工具时，依次检查工具发现、原始工具名匹配、模型工具调用能力和系统提示词。
 
+## 6.6 原生功能模块与 Hook
+
+`runtime.modules` 按完整功能模块配置，不按单个 Hook 启停。首版内置模块为
+`native.reply_experience`，同时控制空 @ 自我介绍提示、纯图片分析提示和检索预回复。
+旧 JSON 不写 `modules` 或不写该模块时默认启用，显式 `enabled: false` 才会关闭。
+
+```json
+{
+  "modules": {
+    "native.reply_experience": {
+      "enabled": true,
+      "options": {
+        "empty_mention_prompt": "请简单介绍一下你自己。",
+        "image_only_prompt": "请读取图片并直接处理图片中提出的问题。",
+        "search_progress_text": "正在检索相关文档，请稍候。"
+      }
+    }
+  }
+}
+```
+
+这是完整 runtime 内的一段配置，不是可以单独发送的 PATCH 请求。
+options 可省略或仅填写部分字段；缺省字段使用内置文案，已填写值必须为
+1–4096 字节的非空白字符串，不接受 `null` 或未知字段。模块级 options
+不超过 16 KiB，总 options 不超过 256 KiB，配置模块项不超过 64 个。
+
+关闭模块后：
+
+- 空 @ 没有其他处理器补充正文时返回 `empty_input`，不调用 LLM、不发错误回复。
+- 纯图片仍传给多模态模型，但不自动追加图片分析提示。
+- 文档检索仍然可用，只是不发送检索预回复。
+- 普通文字、图文及显式 `/search` 的既有行为不变。
+
+检索预回复只在工具通过白名单和预算校验且实际准备执行时产生。
+每次请求最多尝试一次；发送失败不阻止检索。它是程序行为，不是开放给 LLM 的发送工具。
+
+模块变化通过管理 API 的完整配置更新、版本检查和回滚生效，沿用 Engine
+重建路径，不重启整个进程。旧请求沿旧 Hook 链完成，关闭模块不撤销已在执行的请求。
+旧 generation 超过退场宽限仍未释放时，再次重建返回 HTTP 409，错误包含
+`runtime_busy`；等待旧请求退出后重试，避免重复点击重建造成资源堆积。
+
+`GET /v1/admin/config` 显示模块有效开关和允许公开的文案；
+`GET /v1/admin/runtime` 的 `modules` 显示模块 ID、来源、状态及挂载节点。
+存储仍是 `settings.Store` 接口下的 JSONFileStore，本期无 DBStore 或多文件配置。
+
+首版只注册上述原生模块，未知模块 ID 会被拒绝。外部 FPP 插件尚未实现，
+不能仅往 JSON 添加一个 ID 就动态加载 Go 代码。Gate、反思和管理命令尚未迁入
+此模块目录，继续使用各自原有开关与配置。当前发送 Hook 仅覆盖 Engine 的普通、
+主动和进度回复，不包含管理命令及运维通知。
+
 ## 7. 管理 API 与热更新
 
 所有 `/v1/admin/*` 请求都必须携带：
