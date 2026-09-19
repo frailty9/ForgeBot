@@ -147,24 +147,11 @@ func (r *ReflectionConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (g GateConfig) MarshalJSON() ([]byte, error) {
-	type encodedGateConfig struct {
-		Enabled       bool   `json:"enabled"`
-		Silence       string `json:"silence"`
-		MaxCount      int    `json:"max_count"`
-		MaxWindow     string `json:"max_window"`
-		DedupTTL      string `json:"dedup_ttl"`
-		DedupMax      int    `json:"dedup_max"`
-		MaxBuffered   int    `json:"max_buffered"`
-		MaxTextLen    int    `json:"max_text_len"`
-		MaxConcurrent int    `json:"max_concurrent"`
-	}
-	return json.Marshal(encodedGateConfig{
-		Enabled: g.Enabled, Silence: g.Silence.String(),
-		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow.String(), DedupTTL: g.DedupTTL.String(),
-		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,
-		MaxConcurrent: g.MaxConcurrent,
-	})
+func (a AdmissionConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		DedupTTL string `json:"dedup_ttl"`
+		DedupMax int    `json:"dedup_max"`
+	}{DedupTTL: a.DedupTTL.String(), DedupMax: a.DedupMax})
 }
 
 func (l LLMConfig) MarshalJSON() ([]byte, error) {
@@ -351,50 +338,22 @@ func (d *ServerConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (g *GateConfig) UnmarshalJSON(data []byte) error {
-	type rawGateConfig struct {
-		Enabled       *bool           `json:"enabled"`
-		Silence       json.RawMessage `json:"silence"`
-		MaxCount      *int            `json:"max_count"`
-		MaxWindow     json.RawMessage `json:"max_window"`
-		DedupTTL      json.RawMessage `json:"dedup_ttl"`
-		DedupMax      *int            `json:"dedup_max"`
-		MaxBuffered   *int            `json:"max_buffered"`
-		MaxTextLen    *int            `json:"max_text_len"`
-		MaxConcurrent *int            `json:"max_concurrent"`
+func (a *AdmissionConfig) UnmarshalJSON(data []byte) error {
+	type rawAdmissionConfig struct {
+		DedupTTL json.RawMessage `json:"dedup_ttl"`
+		DedupMax *int            `json:"dedup_max"`
 	}
-	defaults := DefaultRuntime().Gate
-	var raw rawGateConfig
+	defaults := DefaultRuntime().Admission
+	var raw rawAdmissionConfig
 	if err := decodeStrictJSON(data, &raw); err != nil {
 		return err
 	}
-	*g = defaults
-	if raw.Enabled != nil {
-		g.Enabled = *raw.Enabled
-	}
-	if raw.MaxCount != nil {
-		g.MaxCount = *raw.MaxCount
-	}
+	*a = defaults
 	if raw.DedupMax != nil {
-		g.DedupMax = *raw.DedupMax
-	}
-	if raw.MaxBuffered != nil {
-		g.MaxBuffered = *raw.MaxBuffered
-	}
-	if raw.MaxTextLen != nil {
-		g.MaxTextLen = *raw.MaxTextLen
-	}
-	if raw.MaxConcurrent != nil {
-		g.MaxConcurrent = *raw.MaxConcurrent
+		a.DedupMax = *raw.DedupMax
 	}
 	var err error
-	if g.Silence, err = decodeDuration(raw.Silence, defaults.Silence); err != nil {
-		return fmt.Errorf("silence: %w", err)
-	}
-	if g.MaxWindow, err = decodeDuration(raw.MaxWindow, defaults.MaxWindow); err != nil {
-		return fmt.Errorf("max_window: %w", err)
-	}
-	if g.DedupTTL, err = decodeDuration(raw.DedupTTL, defaults.DedupTTL); err != nil {
+	if a.DedupTTL, err = decodeDuration(raw.DedupTTL, defaults.DedupTTL); err != nil {
 		return fmt.Errorf("dedup_ttl: %w", err)
 	}
 	return nil

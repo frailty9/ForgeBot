@@ -16,9 +16,9 @@ import (
 
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
+	"github.com/soleapi/forgebot/internal/proactive"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/settings"
@@ -29,7 +29,7 @@ const maxAdminBodyBytes = 1 << 20
 // Engine is the inbound boundary used by HTTP ingress and platform adapters.
 type Engine interface {
 	HandleInbound(context.Context, messaging.InboundMessage) (platform.HandleResult, error)
-	GateStats() gate.Stats
+	ProactiveStats() proactive.Stats
 }
 
 // Server owns HTTP routes and delegates state changes to the admin facade.
@@ -51,7 +51,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /v1/runtime", s.runtime)
-	mux.HandleFunc("GET /v1/gate/stats", s.gateStats)
+	mux.HandleFunc("GET /v1/proactive/stats", s.proactiveStats)
 	mux.HandleFunc("POST /v1/messages", s.messages)
 	mux.Handle("GET /v1/admin/config", s.authorize(http.HandlerFunc(s.adminConfig)))
 	mux.Handle("GET /v1/admin/config/history", s.authorize(http.HandlerFunc(s.adminHistory)))
@@ -300,14 +300,14 @@ func (s *Server) runtime(w http.ResponseWriter, r *http.Request) {
 		snapshot, runtimeStatus = provider.Snapshot()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"config":     snapshot.Public(false),
-		"gate_stats": s.engine.GateStats(),
-		"status":     runtimeStatus,
+		"config":          snapshot.Public(false),
+		"proactive_stats": s.engine.ProactiveStats(),
+		"status":          runtimeStatus,
 	})
 }
 
-func (s *Server) gateStats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.engine.GateStats())
+func (s *Server) proactiveStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.engine.ProactiveStats())
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {

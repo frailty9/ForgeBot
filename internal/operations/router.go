@@ -19,7 +19,7 @@ const (
 	CommandRestart    Command = "restart"
 	CommandPause      Command = "pause"
 	CommandResume     Command = "resume"
-	CommandGate       Command = "gate"
+	CommandProactive  Command = "proactive"
 	CommandReloadDocs Command = "reload_docs"
 )
 
@@ -165,7 +165,7 @@ func Parse(message messaging.InboundMessage) (Request, bool) {
 
 func (c Command) Valid() bool {
 	switch c {
-	case CommandStatus, CommandRestart, CommandPause, CommandResume, CommandGate, CommandReloadDocs:
+	case CommandStatus, CommandRestart, CommandPause, CommandResume, CommandProactive, CommandReloadDocs:
 		return true
 	default:
 		return false

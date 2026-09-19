@@ -19,7 +19,7 @@ The phase lists below are historical milestones, not a complete implementation a
 - HTTP health, runtime, and message ingress.
 - Platform-neutral message contracts.
 - Sender registry.
-- Group message gate.
+- [x] Core Admission plus optional proactive-reply native module.
 
 ## Phase 2: Real Platform Adapters
 
@@ -62,7 +62,7 @@ text deltas. Retry policy and streamed tool-call assembly remain follow-up work.
 ## Phase 5: Tools and Operations
 
 - [x] Operator-group configuration, command allow-list, and routing contract.
-- [x] Runtime-backed status, restart, pause/resume, and Gate commands.
+- [x] Runtime-backed status, restart, pause/resume, and proactive commands.
 - [x] Non-blocking runtime, Connector, and LLM failure notifications.
 - [x] Structured-search reload command, status, and domain notifications.
 - [x] MCP registry and allow-listed Streamable HTTP/stdio tool client.

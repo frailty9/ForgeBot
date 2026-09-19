@@ -27,8 +27,8 @@ func TestLoadDefaults(t *testing.T) {
 	if snapshot.Static.Server.Addr != "127.0.0.1:8080" {
 		t.Fatalf("addr = %q", snapshot.Static.Server.Addr)
 	}
-	if snapshot.Runtime.Gate.DedupTTL != time.Minute {
-		t.Fatalf("dedup ttl = %s", snapshot.Runtime.Gate.DedupTTL)
+	if snapshot.Runtime.Admission.DedupTTL != time.Minute {
+		t.Fatalf("dedup ttl = %s", snapshot.Runtime.Admission.DedupTTL)
 	}
 	if snapshot.Runtime.LLM.Protocol != llm.OpenAIResponses {
 		t.Fatalf("protocol = %q", snapshot.Runtime.LLM.Protocol)
@@ -94,7 +94,7 @@ func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
 	legacy := `{
 		"log":{"level":"info","format":"text"},
 		"bot":{"name":"ForgeBot"},
-		"gate":{"enabled":false,"silence":"4s","max_count":8,"max_window":"25s","dedup_ttl":"60s","dedup_max":10000,"max_buffered":50,"max_text_len":500,"max_concurrent":4},
+		"admission":{"dedup_ttl":"60s","dedup_max":10000},
 		"llm":{"protocol":"openai_responses","api_key_ref":"llm/default","model":"","timeout":"60s"},
 		"platforms":{"connectors":[{"id":"echo","type":"echo","enabled":true}],"groups":[{"id":"local","connector_id":"echo","target":"local"}]},
 		"operations":{"groups":[]}
@@ -134,7 +134,7 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	runtimeBody := []byte(`{
 		"log": {"level": "info", "format": "json"},
 		"bot": {"name": "TestBot"},
-		"gate": {"enabled": true, "silence": "500ms", "max_count": 2, "max_window": "3s", "dedup_ttl": "5s", "dedup_max": 7, "max_buffered": 8, "max_text_len": 9, "max_concurrent": 2},
+		"admission": {"dedup_ttl": "5s", "dedup_max": 7},
 		"llm": {"protocol": "anthropic_messages", "base_url": "https://api.example.test", "api_key_ref": "llm/test", "model": "claude", "timeout": "9s"},
 		"platforms": {
 			"connectors": [{"id": "echo", "type": "echo", "enabled": true}],
@@ -169,8 +169,8 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	if snapshot.Runtime.Log.Level != "info" {
 		t.Fatalf("runtime log unexpectedly overridden: %q", snapshot.Runtime.Log.Level)
 	}
-	if snapshot.Runtime.Gate.Silence != 500*time.Millisecond {
-		t.Fatalf("gate silence = %s", snapshot.Runtime.Gate.Silence)
+	if snapshot.Runtime.Admission.DedupTTL != 5*time.Second {
+		t.Fatalf("admission dedup ttl = %s", snapshot.Runtime.Admission.DedupTTL)
 	}
 	if snapshot.Runtime.LLM.Protocol != llm.AnthropicMessages || snapshot.Runtime.LLM.Timeout != 9*time.Second {
 		t.Fatalf("llm config = %+v", snapshot.Runtime.LLM)
@@ -189,6 +189,22 @@ func TestRuntimeConfigRejectsAPIKey(t *testing.T) {
 	_, _, err := Load(LoadOptions{RuntimePath: path})
 	if err == nil || !strings.Contains(err.Error(), "unknown field \"api_key\"") {
 		t.Fatalf("expected api_key rejection, got %v", err)
+	}
+}
+
+func TestRuntimeConfigRejectsRemovedGateAndGroupSwitches(t *testing.T) {
+	for _, body := range []string{
+		"{\"gate\":{\"enabled\":false}}",
+		"{\"platforms\":{\"groups\":[{\"id\":\"local\",\"connector_id\":\"echo\",\"target\":\"local\",\"auto_reply_unmentioned\":true}]}}",
+	} {
+		path := filepath.Join(t.TempDir(), "runtime.json")
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := Load(LoadOptions{RuntimePath: path})
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("removed field accepted: %s, err=%v", body, err)
+		}
 	}
 }
 
@@ -363,7 +379,7 @@ func TestOperationsConfigRequiresBoundConversationAndKnownCommands(t *testing.T)
 	}
 	valid := OperationsConfig{Groups: []OperatorGroupConfig{{
 		ConversationID: "ops", Notifications: true,
-		Commands: []string{"status", "restart", "pause", "resume", "gate", "reload_docs"},
+		Commands: []string{"status", "restart", "pause", "resume", "proactive", "reload_docs"},
 	}}}
 	if err := valid.Validate(platforms); err != nil {
 		t.Fatal(err)

@@ -150,30 +150,19 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 LLM 配置可热切换协议、供应商地址和模型。新配置初始化失败时，当前运行实例继续服务。
 
-### 5.4 `gate`
+### 5.4 `admission`
 
 ```json
 {
-  "enabled": true,
-  "silence": "4s",
-  "max_count": 8,
-  "max_window": "25s",
   "dedup_ttl": "60s",
-  "dedup_max": 10000,
-  "max_buffered": 50,
-  "max_text_len": 500,
-  "max_concurrent": 4
+  "dedup_max": 10000
 }
 ```
 
-- `enabled`：启用消息门控。
-- `silence`、`max_count`、`max_window`：消息聚合的静默期、数量和时间窗口。对开启 `auto_reply_unmentioned` 的群组，主动介入只在静默窗口到期后触发，`max_count` 不会提前触发。
 - `dedup_ttl`、`dedup_max`：消息去重有效期和容量，必须为正数。
-- `max_buffered`：单次缓冲消息上限。
-- `max_text_len`：单条输入保留的最大字符数。
-- `max_concurrent`：并发处理上限，必须为正数。
 
-除 `dedup_ttl`、`dedup_max` 和 `max_concurrent` 外的数值限制项可以为 0，不能为负数。
+消息合法性、身份解析、寻址判断和去重属于不可关闭的核心 Admission。未 @ 消息的
+缓存、静默窗口和主动介入由 `native.proactive_reply` 模块配置。
 
 ### 5.5 `search`
 
@@ -239,7 +228,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 `connectors` 支持同时启用多个连接器，当前类型为 `echo` 和 `onebot`。ID 必须唯一。启用的 OneBot 连接器必须至少绑定一个群组。
 
-`groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。`auto_reply_unmentioned` 可选，只有同时启用 `gate.enabled` 时才允许未提及 Bot 的文本问题进入缓存并等待 `gate.silence`；若期间没有可信管理员直接回复该问题，Bot 才会谨慎主动介入，默认关闭。关闭 Gate 或关闭该群组开关时，未提及 Bot 的普通消息和媒体均不会调用 LLM；明确提及 Bot 和命令仍正常处理。
+`groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。未提及消息的主动介入不再由平台群组字段控制，而由 `modules.native.proactive_reply.options.groups` 按逻辑群组配置。模块关闭或群组未启用时，未提及 Bot 的普通消息和媒体均不会调用 LLM；明确提及 Bot 和命令仍正常处理。
 
 `connectors[].prompt_suffix` 和 `groups[].prompt_suffix` 都是可选的系统提示词追加内容。连接器级内容用于渠道通用约束（例如 QQ 使用纯文本），群组级内容用于该群组的语气、主题或行为约束。两者都存在时按“连接器后群组”的顺序拼接；都为空时不追加。它们属于运行时配置，可通过管理 API 热更新。
 
@@ -276,7 +265,7 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
   "groups": [{
     "conversation_id": "support",
     "notifications": true,
-    "commands": ["status", "restart", "pause", "resume", "gate", "reload_docs"]
+    "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
   }]
 }
 ```
@@ -287,7 +276,7 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 - `/restart`
 - `/pause`
 - `/resume`
-- `/gate on|off`
+- `/proactive on|off`
 - `/reload-docs`
 
 `notifications: true` 时，该群组接收 Runtime、Connector 和 LLM 故障通知。通讯侧运维能力刻意小于 Web 管理 API。
@@ -462,9 +451,9 @@ stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
 
 ## 6.6 原生功能模块与 Hook
 
-`runtime.modules` 按完整功能模块配置，不按单个 Hook 启停。首版内置模块为
-`native.reply_experience`，同时控制空 @ 自我介绍提示、纯图片分析提示和检索预回复。
-旧 JSON 不写 `modules` 或不写该模块时默认启用，显式 `enabled: false` 才会关闭。
+`runtime.modules` 按完整功能模块配置，不按单个 Hook 启停。当前内置模块包括
+`native.reply_experience` 和 `native.proactive_reply`。前者控制空 @、图片提示和
+检索预回复；后者控制未 @ 消息的有界缓存和谨慎主动介入。
 
 ```json
 {
@@ -475,6 +464,19 @@ stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
         "empty_mention_prompt": "请简单介绍一下你自己。",
         "image_only_prompt": "请读取图片并直接处理图片中提出的问题。",
         "search_progress_text": "正在检索相关文档，请稍候。"
+      }
+    },
+    "native.proactive_reply": {
+      "enabled": false,
+      "options": {
+        "silence": "4s",
+        "max_window": "25s",
+        "max_buffered": 50,
+        "max_text_len": 500,
+        "max_concurrent": 4,
+        "groups": {
+          "support": {"enabled": true}
+        }
       }
     }
   }
@@ -493,6 +495,11 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 - 文档检索仍然可用，只是不发送检索预回复。
 - 普通文字、图文及显式 `/search` 的既有行为不变。
 
+`native.proactive_reply` 默认关闭。启用后仍需在 `options.groups` 中按逻辑群组 ID
+显式打开；`silence` 和 `max_window` 控制等待时间，`max_buffered`、
+`max_text_len` 和 `max_concurrent` 提供资源边界。可信管理员引用待处理问题作答
+时，模块取消该问题的主动回复。
+
 检索预回复只在工具通过白名单和预算校验且实际准备执行时产生。
 每次请求最多尝试一次；发送失败不阻止检索。它是程序行为，不是开放给 LLM 的发送工具。
 
@@ -505,10 +512,9 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 `GET /v1/admin/runtime` 的 `modules` 显示模块 ID、来源、状态及挂载节点。
 存储仍是 `settings.Store` 接口下的 JSONFileStore，本期无 DBStore 或多文件配置。
 
-首版只注册上述原生模块，未知模块 ID 会被拒绝。外部 FPP 插件尚未实现，
-不能仅往 JSON 添加一个 ID 就动态加载 Go 代码。Gate、反思和管理命令尚未迁入
-此模块目录，继续使用各自原有开关与配置。当前发送 Hook 仅覆盖 Engine 的普通、
-主动和进度回复，不包含管理命令及运维通知。
+未知模块 ID 会被拒绝。外部 FPP 插件尚未实现，不能仅往 JSON 添加一个 ID 就动态
+加载 Go 代码。结构化检索和反思仍待后续迁移；主动介入已经由模块配置管理。当前
+发送 Hook 仅覆盖 Engine 的普通、主动和进度回复，不包含管理命令及运维通知。
 
 ## 7. 管理 API 与热更新
 

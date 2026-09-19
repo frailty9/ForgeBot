@@ -15,8 +15,8 @@ import (
 
 	"github.com/soleapi/forgebot/internal/administration"
 	"github.com/soleapi/forgebot/internal/bot"
+	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/knowledge/markdown"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -24,6 +24,7 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
+	"github.com/soleapi/forgebot/internal/proactive"
 	reflectionbuffer "github.com/soleapi/forgebot/internal/reflection/buffer"
 	reflectionpipeline "github.com/soleapi/forgebot/internal/reflection/pipeline"
 	reflectionreflector "github.com/soleapi/forgebot/internal/reflection/reflector"
@@ -932,13 +933,17 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 	return result, err
 }
 
-func (m *Manager) GateStats() gate.Stats {
+func (m *Manager) ProactiveStats() proactive.Stats {
 	generation := m.acquire()
 	if generation == nil {
-		return gate.Stats{}
+		return proactive.Stats{}
 	}
 	defer generation.mu.RUnlock()
-	return generation.engine.GateStats()
+	control, ok := capability.Resolve(generation.modules.Capabilities(), proactive.ControlKey)
+	if !ok || control == nil {
+		return proactive.Stats{}
+	}
+	return control.Stats()
 }
 
 func (m *Manager) acquire() *generation {
@@ -1126,19 +1131,11 @@ func classify(current, next config.RuntimeConfig) Action {
 }
 
 func policyFrom(runtime config.RuntimeConfig) bot.Policy {
-	g := runtime.Gate
 	s := runtime.Search
-	groupGates := make(map[string]bot.GatePolicy, len(runtime.Platforms.Groups))
-	for _, group := range runtime.Platforms.Groups {
-		groupGates[group.ID] = bot.GatePolicy{AutoReplyUnmentioned: group.AutoReplyUnmentioned}
-	}
-	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, GroupGates: groupGates, Search: bot.SearchPolicy{
+	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Search: bot.SearchPolicy{
 		Enabled: s.Enabled, DefaultResults: s.DefaultResults, MaxResults: s.MaxResults,
 		MaxQueriesPerTurn: s.MaxQueriesPerTurn, MaxContextChars: s.MaxContextChars,
-	}, Gate: bot.GatePolicy{
-		Enabled: g.Enabled, Silence: g.Silence,
-		MaxCount: g.MaxCount, MaxWindow: g.MaxWindow, DedupTTL: g.DedupTTL,
-		DedupMax: g.DedupMax, MaxBuffered: g.MaxBuffered, MaxTextLen: g.MaxTextLen,
-		MaxConcurrent: g.MaxConcurrent,
+	}, Admission: bot.AdmissionPolicy{
+		DedupTTL: runtime.Admission.DedupTTL, DedupMax: runtime.Admission.DedupMax,
 	}}
 }

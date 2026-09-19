@@ -113,7 +113,7 @@ func TestJSONFileStoreWritesReadableDurationsAndNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `"timeout": "1m0s"`) || !strings.Contains(text, `"silence": "4s"`) {
+	if !strings.Contains(text, `"timeout": "1m0s"`) || !strings.Contains(text, `"dedup_ttl": "1m0s"`) {
 		t.Fatalf("durations are not readable: %s", text)
 	}
 	if strings.Contains(text, `"api_key"`) {

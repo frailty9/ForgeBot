@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -117,7 +116,7 @@ func TestAllEngineRepliesUseReplyHook(t *testing.T) {
 	if _, err := engine.HandleInbound(context.Background(), testInbound("hi")); err != nil {
 		t.Fatal(err)
 	}
-	engine.onGateFlush(context.Background(), gate.Batch{ConversationID: "c", Msgs: []gate.Message{{MsgID: "p", UserID: "u", Text: "question"}}})
+	engine.respondDeferred(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "p", Text: "question"})
 	ctx := engine.beginRun(context.Background(), testInbound("hi"), "direct")
 	if err := engine.deliver(ctx, testInbound("hi"), "waiting", "progress"); err != nil {
 		t.Fatal(err)
@@ -233,38 +232,30 @@ func TestToolHooksCannotExpandAllowlistAndDenyBeforeProgress(t *testing.T) {
 	}
 }
 
-func TestShutdownWaitsForActiveGateBeforeClosingModules(t *testing.T) {
+func TestShutdownWaitsForModuleClose(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var closed atomic.Int32
-	policy := testPolicy()
-	policy.Gate.Enabled = true
-	policy.Gate.AutoReplyUnmentioned = true
-	policy.Gate.Silence = time.Millisecond
-	client := testClient(func(context.Context, llm.Request) (llm.Response, error) {
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: testSender(func(context.Context, messaging.OutboundMessage) error { return nil }), Policy: testPolicy(), CloseHooks: func(context.Context) error {
 		close(entered)
 		<-release
-		return llm.Response{Text: "done"}, nil
-	})
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: testSender(func(context.Context, messaging.OutboundMessage) error { return nil }), LLM: client, Policy: policy, CloseHooks: func(context.Context) error { closed.Add(1); return nil }}, nil)
+		closed.Add(1)
+		return nil
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer engine.Shutdown(0)
 	defer close(release)
-	message := testInbound("question")
-	message.Mentioned = false
-	if _, err := engine.HandleInbound(context.Background(), message); err != nil {
-		t.Fatal(err)
-	}
+	go engine.Shutdown(0)
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("gate did not flush")
+		t.Fatal("module close did not start")
 	}
 	engine.Shutdown(time.Millisecond)
 	if closed.Load() != 0 {
-		t.Fatal("modules closed during gate callback")
+		t.Fatal("modules closed before active shutdown work completed")
 	}
 	select {
 	case <-engine.Done():

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -69,8 +70,8 @@ func (s *Service) Execute(_ context.Context, request operations.Request) (operat
 				return "Runtime 重启完成。", nil
 			},
 		}, nil
-	case operations.CommandGate:
-		return s.gate(request)
+	case operations.CommandProactive:
+		return s.proactive(request)
 	case operations.CommandReloadDocs:
 		if err := requireNoArguments(request); err != nil {
 			return operations.Result{}, err
@@ -103,17 +104,25 @@ func (s *Service) status() string {
 	if status.Search.Enabled {
 		searchState = fmt.Sprintf("%s (%d documents, %d sections)", status.Search.State, status.Search.Documents, status.Search.Sections)
 	}
-	return fmt.Sprintf("Runtime: %s\n版本: %d\nBot: %s\nGate: %s\nSearch: %s\nConnector: %s",
-		status.State, snapshot.Version, enabled(!s.runtime.Paused()), enabled(snapshot.Runtime.Gate.Enabled), searchState, strings.Join(connectorStates, ", "))
+	proactiveEnabled := false
+	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {
+		proactiveEnabled = *entry.Enabled
+	}
+	return fmt.Sprintf("Runtime: %s\n版本: %d\nBot: %s\nProactive: %s\nSearch: %s\nConnector: %s",
+		status.State, snapshot.Version, enabled(!s.runtime.Paused()), enabled(proactiveEnabled), searchState, strings.Join(connectorStates, ", "))
 }
 
-func (s *Service) gate(request operations.Request) (operations.Result, error) {
+func (s *Service) proactive(request operations.Request) (operations.Result, error) {
 	snapshot, _ := s.runtime.Snapshot()
+	currentEnabled := false
+	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {
+		currentEnabled = *entry.Enabled
+	}
 	if len(request.Arguments) == 0 {
-		return operations.Result{Reply: "Gate 当前为 " + enabled(snapshot.Runtime.Gate.Enabled) + "。"}, nil
+		return operations.Result{Reply: "Proactive 当前为 " + enabled(currentEnabled) + "。"}, nil
 	}
 	if len(request.Arguments) != 1 {
-		return operations.Result{}, errors.New("用法：/gate on|off")
+		return operations.Result{}, errors.New("用法：/proactive on|off")
 	}
 	var enabledValue bool
 	switch strings.ToLower(strings.TrimSpace(request.Arguments[0])) {
@@ -122,20 +131,26 @@ func (s *Service) gate(request operations.Request) (operations.Result, error) {
 	case "off":
 		enabledValue = false
 	default:
-		return operations.Result{}, errors.New("用法：/gate on|off")
+		return operations.Result{}, errors.New("用法：/proactive on|off")
 	}
 	if s.settings == nil {
 		return operations.Result{}, errors.New("运行时配置存储不可用")
 	}
-	if snapshot.Runtime.Gate.Enabled == enabledValue {
-		return operations.Result{Reply: "Gate 已经是 " + enabled(enabledValue) + "。"}, nil
+	if currentEnabled == enabledValue {
+		return operations.Result{Reply: "Proactive 已经是 " + enabled(enabledValue) + "。"}, nil
 	}
 	return operations.Result{
-		Reply: "Gate 切换已受理。",
+		Reply: "Proactive 切换已受理。",
 		Followup: func(ctx context.Context) (string, error) {
 			current, _ := s.runtime.Snapshot()
 			next := current.Runtime
-			next.Gate.Enabled = enabledValue
+			next.Modules = maps.Clone(next.Modules)
+			if next.Modules == nil {
+				next.Modules = make(map[string]config.ModuleConfig)
+			}
+			entry := next.Modules["native.proactive_reply"]
+			entry.Enabled = &enabledValue
+			next.Modules["native.proactive_reply"] = entry
 			_, err := s.runtime.CommitRuntime(ctx, next, func() (config.Snapshot, error) {
 				return s.settings.Update(ctx, settings.UpdateRequest{
 					ExpectedVersion: current.Version, Runtime: next,
@@ -145,7 +160,7 @@ func (s *Service) gate(request operations.Request) (operations.Result, error) {
 			if err != nil {
 				return "", err
 			}
-			return "Gate 已切换为 " + enabled(enabledValue) + "。", nil
+			return "Proactive 已切换为 " + enabled(enabledValue) + "。", nil
 		},
 	}, nil
 }

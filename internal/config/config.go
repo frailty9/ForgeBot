@@ -63,7 +63,7 @@ type RuntimeConfig struct {
 	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
 	Log            LogConfig               `json:"log"`
 	Bot            BotConfig               `json:"bot"`
-	Gate           GateConfig              `json:"gate"`
+	Admission      AdmissionConfig         `json:"admission"`
 	LLM            LLMConfig               `json:"llm"`
 	Search         SearchConfig            `json:"search"`
 	Platforms      PlatformConfig          `json:"platforms"`
@@ -155,17 +155,10 @@ func (c LLMConfig) ClientConfig(apiKey string) llm.ClientConfig {
 	}
 }
 
-// GateConfig controls message buffering and proactive group replies.
-type GateConfig struct {
-	Enabled       bool          `json:"enabled" yaml:"enabled"`
-	Silence       time.Duration `json:"silence" yaml:"silence"`
-	MaxCount      int           `json:"max_count" yaml:"max_count"`
-	MaxWindow     time.Duration `json:"max_window" yaml:"max_window"`
-	DedupTTL      time.Duration `json:"dedup_ttl" yaml:"dedup_ttl"`
-	DedupMax      int           `json:"dedup_max" yaml:"dedup_max"`
-	MaxBuffered   int           `json:"max_buffered" yaml:"max_buffered"`
-	MaxTextLen    int           `json:"max_text_len" yaml:"max_text_len"`
-	MaxConcurrent int           `json:"max_concurrent" yaml:"max_concurrent"`
+// AdmissionConfig controls non-optional inbound deduplication limits.
+type AdmissionConfig struct {
+	DedupTTL time.Duration `json:"dedup_ttl" yaml:"dedup_ttl"`
+	DedupMax int           `json:"dedup_max" yaml:"dedup_max"`
 }
 
 // SearchConfig controls the structured local document index.
@@ -205,11 +198,10 @@ type ConnectorConfig struct {
 
 // GroupBindingConfig maps an external target to a logical conversation.
 type GroupBindingConfig struct {
-	ID                   string `json:"id" yaml:"id"`
-	ConnectorID          string `json:"connector_id" yaml:"connector_id"`
-	Target               string `json:"target" yaml:"target"`
-	PromptSuffix         string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
-	AutoReplyUnmentioned bool   `json:"auto_reply_unmentioned,omitempty" yaml:"auto_reply_unmentioned,omitempty"`
+	ID           string `json:"id" yaml:"id"`
+	ConnectorID  string `json:"connector_id" yaml:"connector_id"`
+	Target       string `json:"target" yaml:"target"`
+	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
 }
 
 // OperationsConfig grants limited command access to conversations.
@@ -278,14 +270,10 @@ func DefaultStatic() StaticConfig {
 
 func DefaultRuntime() RuntimeConfig {
 	return RuntimeConfig{
-		Log: LogConfig{Level: "info", Format: "text"},
-		Bot: BotConfig{Name: "ForgeBot"},
-		LLM: LLMConfig{Protocol: llm.OpenAIResponses, APIKeyRef: defaultAPIKeyRef, Timeout: 60 * time.Second},
-		Gate: GateConfig{
-			Enabled: false, Silence: 4 * time.Second, MaxCount: 8,
-			MaxWindow: 25 * time.Second, DedupTTL: 60 * time.Second, DedupMax: 10000,
-			MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4,
-		},
+		Log:       LogConfig{Level: "info", Format: "text"},
+		Bot:       BotConfig{Name: "ForgeBot"},
+		LLM:       LLMConfig{Protocol: llm.OpenAIResponses, APIKeyRef: defaultAPIKeyRef, Timeout: 60 * time.Second},
+		Admission: AdmissionConfig{DedupTTL: 60 * time.Second, DedupMax: 10000},
 		Search: SearchConfig{
 			Enabled: false, Policy: "on_demand", Backend: "structured",
 			Extensions: []string{".md", ".mdx", ".txt"}, DefaultResults: 5, MaxResults: 8,
@@ -588,7 +576,7 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Log.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.Gate.Validate(); err != nil {
+	if err := c.Admission.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if err := c.LLM.Validate(); err != nil {
@@ -916,7 +904,7 @@ func (c OperationsConfig) Validate(platforms PlatformConfig) error {
 			command = strings.ToLower(strings.TrimSpace(command))
 			commandPrefix := fmt.Sprintf("%s.commands[%d]", prefix, commandIndex)
 			if !isOperatorCommand(command) {
-				problems = append(problems, commandPrefix+" must be one of status, restart, pause, resume, gate, reload_docs")
+				problems = append(problems, commandPrefix+" must be one of status, restart, pause, resume, proactive, reload_docs")
 			} else if _, exists := commands[command]; exists {
 				problems = append(problems, commandPrefix+" is duplicated")
 			} else {
@@ -932,7 +920,7 @@ func (c OperationsConfig) Validate(platforms PlatformConfig) error {
 
 func isOperatorCommand(command string) bool {
 	switch command {
-	case "status", "restart", "pause", "resume", "gate", "reload_docs":
+	case "status", "restart", "pause", "resume", "proactive", "reload_docs":
 		return true
 	default:
 		return false
@@ -1064,31 +1052,13 @@ func (c LogConfig) Validate() error {
 	return nil
 }
 
-func (c GateConfig) Validate() error {
+func (c AdmissionConfig) Validate() error {
 	var problems []string
-	if c.Silence < 0 {
-		problems = append(problems, "gate.silence must not be negative")
-	}
-	if c.MaxCount < 0 {
-		problems = append(problems, "gate.max_count must not be negative")
-	}
-	if c.MaxWindow < 0 {
-		problems = append(problems, "gate.max_window must not be negative")
-	}
 	if c.DedupTTL <= 0 {
-		problems = append(problems, "gate.dedup_ttl must be positive")
+		problems = append(problems, "admission.dedup_ttl must be positive")
 	}
 	if c.DedupMax <= 0 {
-		problems = append(problems, "gate.dedup_max must be positive")
-	}
-	if c.MaxBuffered < 0 {
-		problems = append(problems, "gate.max_buffered must not be negative")
-	}
-	if c.MaxTextLen < 0 {
-		problems = append(problems, "gate.max_text_len must not be negative")
-	}
-	if c.MaxConcurrent <= 0 {
-		problems = append(problems, "gate.max_concurrent must be positive")
+		problems = append(problems, "admission.dedup_max must be positive")
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -1115,13 +1085,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion,
 				"timeout": c.Runtime.LLM.Timeout.String(), "api_key_configured": apiKeyConfigured,
 			},
-			"gate": map[string]any{
-				"enabled": c.Runtime.Gate.Enabled,
-				"silence": c.Runtime.Gate.Silence.String(), "max_count": c.Runtime.Gate.MaxCount,
-				"max_window": c.Runtime.Gate.MaxWindow.String(), "dedup_ttl": c.Runtime.Gate.DedupTTL.String(),
-				"dedup_max": c.Runtime.Gate.DedupMax, "max_buffered": c.Runtime.Gate.MaxBuffered,
-				"max_text_len": c.Runtime.Gate.MaxTextLen, "max_concurrent": c.Runtime.Gate.MaxConcurrent,
-			},
+			"admission":      c.Runtime.Admission,
 			"search":         c.Runtime.Search,
 			"platforms":      c.Runtime.Platforms.Public(),
 			"administration": c.Runtime.Administration,

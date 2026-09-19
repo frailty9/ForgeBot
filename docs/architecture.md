@@ -7,8 +7,9 @@ external platform
   -> platform adapter
   -> connector binding (external target -> logical group)
   -> messaging.InboundMessage
+  -> core Admission (validation and deduplication)
+  -> native module observers / participants / commands
   -> bot.Engine
-  -> gate.Pool
   -> search / tools / llm
   -> messaging.OutboundMessage
   -> group registry (logical group -> connector target)
@@ -54,8 +55,9 @@ must not depend on or expose the complete Web administration service.
 - `internal/notification`: bounded, non-blocking operational event dispatch to
   the currently configured notification-enabled operator groups.
 - `internal/bot`: orchestration layer.
-- `internal/gate`: group message buffering, deduplication, and delayed
-  unmentioned-message intervention with trusted-administrator cancellation.
+- `internal/admission`: non-optional inbound deduplication owned by the core.
+- `internal/proactive`: bounded delayed participation used by the optional
+  `native.proactive_reply` module, including trusted-administrator cancellation.
 - `internal/llm`: protocol-neutral LLM contract and HTTP clients for
   Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions.
 - `internal/search`: protocol-neutral retrieval contract and bounded,
@@ -111,11 +113,13 @@ The first native module is `native.reply_experience`: empty mention and image
 analysis hints plus a once-per-run retrieval progress effect. The host sends
 effects only after the tool chain passes. No message-sending tool is added to the
 LLM. Reply hooks cover Engine replies only, not operator/notification delivery.
-Gate, reflection, command registration and async jobs have not been migrated.
+`native.proactive_reply` now owns unaddressed-message buffering through the
+generic participant registration and a constrained deferred responder. Reflection,
+search Tool registration, command registration, and async jobs remain in migration.
 
 The Engine owns module cleanup after construction; failed builders clean up
-candidate modules. Retirement waits for direct requests and active Gate callbacks
-before closing modules and tools. Pending Gate items retain the existing shutdown
+candidate modules. Retirement waits for direct requests and active participant callbacks
+before closing modules and tools. Pending proactive items retain the existing shutdown
 cancel/drop semantics; they are not persisted or replayed. One overdue retirement
 blocks further generation rebuilds with `runtime_busy`. This is not a forced
 unload or rollback of effects already delivered to external systems.

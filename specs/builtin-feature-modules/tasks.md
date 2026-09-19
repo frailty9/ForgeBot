@@ -22,11 +22,11 @@
       ID 去重、身份/寻址前置约束和命令优先边界不可关闭。
 - [x] 2.2 新增 native.proactive_reply，迁移有界缓存、静默窗口、管理员引用取消、
       群组开关、flush 和 DeferredResponder。
-- [ ] 2.3 删除 platforms.groups[].auto_reply_unmentioned，将群级开关迁入模块 options；
+- [x] 2.3 删除 platforms.groups[].auto_reply_unmentioned，将群级开关迁入模块 options；
       删除未生效的 max_count。
-- [ ] 2.4 将管理命令从 /gate 重命名为 /proactive，状态和统计归模块 capability；
+- [x] 2.4 将管理命令从 /gate 重命名为 /proactive，状态和统计归模块 capability；
       删除旧 Gate HTTP 统计路径。
-- [ ] 2.5 增加关闭模块、群未启用、未 @ 不调用 LLM、明确 @/命令不受影响、管理员
+- [x] 2.5 增加关闭模块、群未启用、未 @ 不调用 LLM、明确 @/命令不受影响、管理员
       取消和 generation 退场测试。
 - Requirement: R1, R5, R7
 

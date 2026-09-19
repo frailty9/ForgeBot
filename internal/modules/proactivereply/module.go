@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/capability"
-	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -136,8 +135,8 @@ func (Factory) Build(ctx context.Context, raw json.RawMessage) (modules.Instance
 		return nil, err
 	}
 	item := &instance{options: options}
-	item.pool = gate.New(ctx, item.policy, item.flush, gate.Options{
-		DisableDedup: true, ManualStart: true,
+	item.pool = proactive.New(ctx, item.policy, item.flush, proactive.Options{
+		ManualStart:   true,
 		MaxConcurrent: options.MaxConcurrent, IdleBucketTTL: time.Minute,
 	})
 	return item, nil
@@ -145,7 +144,7 @@ func (Factory) Build(ctx context.Context, raw json.RawMessage) (modules.Instance
 
 type instance struct {
 	options   Options
-	pool      *gate.Pool
+	pool      *proactive.Pool
 	mu        sync.RWMutex
 	responder modules.DeferredResponder
 }
@@ -160,9 +159,9 @@ func (i *instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	}
 }
 
-func (i *instance) policy(conversationID string) gate.Policy {
+func (i *instance) policy(conversationID string) proactive.Policy {
 	group := i.options.Groups[conversationID]
-	return gate.Policy{
+	return proactive.Policy{
 		Silence: i.options.Silence, MaxWindow: i.options.MaxWindow,
 		MaxBuffered: i.options.MaxBuffered, MaxTextLen: i.options.MaxTextLen,
 		AutoReplyUnmentioned: group.Enabled,
@@ -173,22 +172,22 @@ func (i *instance) handle(_ context.Context, message messaging.InboundMessage, r
 	i.mu.Lock()
 	i.responder = responder
 	i.mu.Unlock()
-	verdict := i.pool.Absorb(gate.Input{
+	verdict := i.pool.Absorb(proactive.Input{
 		ConversationID: message.ConversationID, MsgID: message.MessageID,
 		UserID: message.UserID, UserName: message.UserName, Text: message.Text,
 		ReplyToMessageID: message.ReplyToMessageID, PromptSuffix: message.PromptSuffix,
 		Administrator: message.Administrator, Addressed: message.Addressed(),
 		HasMedia: message.HasMedia(), At: message.At,
 	})
-	if verdict == gate.VerdictPass {
+	if verdict == proactive.VerdictPass {
 		return modules.ParticipantResult{}, nil
 	}
 	return modules.ParticipantResult{
-		Consume: true, Accepted: verdict == gate.VerdictAbsorbed, Verdict: verdict.String(),
+		Consume: true, Accepted: verdict == proactive.VerdictAbsorbed, Verdict: verdict.String(),
 	}, nil
 }
 
-func (i *instance) flush(ctx context.Context, batch gate.Batch) {
+func (i *instance) flush(ctx context.Context, batch proactive.Batch) {
 	i.mu.RLock()
 	responder := i.responder
 	i.mu.RUnlock()
@@ -206,9 +205,9 @@ func (i *instance) flush(ctx context.Context, batch gate.Batch) {
 	})
 }
 
-func (i *instance) Stats() gate.Stats     { return i.pool.Stats() }
-func (i *instance) Start(context.Context) { i.pool.Start() }
-func (i *instance) Retire()               { i.pool.DropPending() }
+func (i *instance) Stats() proactive.Stats { return i.pool.Stats() }
+func (i *instance) Start(context.Context)  { i.pool.Start() }
+func (i *instance) Retire()                { i.pool.DropPending() }
 func (i *instance) Close(ctx context.Context) error {
 	grace := time.Duration(0)
 	if deadline, ok := ctx.Deadline(); ok {

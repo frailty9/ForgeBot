@@ -21,7 +21,6 @@ import (
 
 func TestEngineRepliesToAddressedMessage(t *testing.T) {
 	policy := testPolicy()
-	policy.Gate.Enabled = true
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
 	if err := registry.RegisterConnector("echo", sender); err != nil {
@@ -54,9 +53,6 @@ func TestEngineRepliesToAddressedMessage(t *testing.T) {
 
 func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	policy := testPolicy()
-	policy.Gate.Enabled = true
-	policy.Gate.AutoReplyUnmentioned = true
-	policy.Gate.Silence = time.Hour
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
 	if err := registry.RegisterConnector("echo", sender); err != nil {
@@ -65,7 +61,10 @@ func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, Policy: policy}, slog.Default())
+	participant := modules.ParticipantRegistration{ID: "buffer", Handle: func(context.Context, messaging.InboundMessage, modules.DeferredResponder) (modules.ParticipantResult, error) {
+		return modules.ParticipantResult{Consume: true, Accepted: true, Verdict: "absorbed"}, nil
+	}}
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, Policy: policy, Participants: []modules.ParticipantRegistration{participant}}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +85,7 @@ func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	}
 }
 
-func TestEngineIgnoresUnaddressedMessagesWhenGateDisabled(t *testing.T) {
+func TestEngineIgnoresUnaddressedMessagesWithoutParticipant(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
 	if err := registry.RegisterConnector("echo", sender); err != nil {
@@ -96,11 +95,7 @@ func TestEngineIgnoresUnaddressedMessagesWhenGateDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &fakeLLM{response: llm.Response{Text: "unexpected"}}
-	policy := testPolicy()
-	policy.Gate.Enabled = false
-	policy.Gate.AutoReplyUnmentioned = true
-	policy.GroupGates = map[string]GatePolicy{"c": {AutoReplyUnmentioned: true}}
-	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +123,7 @@ func TestEngineIgnoresUnaddressedMessagesWhenGateDisabled(t *testing.T) {
 	}
 }
 
-func TestEngineDeduplicatesAddressedMessagesWhenGateDisabled(t *testing.T) {
+func TestEngineDeduplicatesAddressedMessages(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
 	if err := registry.RegisterConnector("echo", sender); err != nil {
@@ -528,8 +523,5 @@ func newTestEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) 
 }
 
 func testPolicy() Policy {
-	return Policy{Name: "ForgeBot", Gate: GatePolicy{
-		Silence: 4 * time.Second, MaxCount: 8, MaxWindow: 25 * time.Second,
-		DedupTTL: time.Minute, DedupMax: 10000, MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4,
-	}}
+	return Policy{Name: "ForgeBot", Admission: AdmissionPolicy{DedupTTL: time.Minute, DedupMax: 10000}}
 }

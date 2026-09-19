@@ -58,7 +58,6 @@ Runtime Manager 直接构建、调用和管理，导致业务功能继续侵入�
       "enabled": false,
       "options": {
         "silence": "4s",
-        "max_count": 8,
         "max_window": "25s",
         "max_buffered": 50,
         "max_text_len": 500,

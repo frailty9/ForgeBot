@@ -78,10 +78,10 @@ func TestRestartUsesDeferredFollowup(t *testing.T) {
 	}
 }
 
-func TestGateRequiresStoreAndUsesDeferredCommit(t *testing.T) {
+func TestProactiveRequiresStoreAndUsesDeferredCommit(t *testing.T) {
 	runtime := &fakeRuntime{snapshot: config.DefaultSnapshot()}
 	service, _ := New(runtime, nil)
-	_, err := service.Execute(context.Background(), operations.Request{Command: operations.CommandGate, Arguments: []string{"on"}})
+	_, err := service.Execute(context.Background(), operations.Request{Command: operations.CommandProactive, Arguments: []string{"on"}})
 	if err == nil || !strings.Contains(err.Error(), "存储不可用") {
 		t.Fatalf("err=%v", err)
 	}
@@ -89,13 +89,13 @@ func TestGateRequiresStoreAndUsesDeferredCommit(t *testing.T) {
 	store := &fakeStore{snapshot: runtime.snapshot}
 	service, _ = New(runtime, store)
 	result, err := service.Execute(context.Background(), operations.Request{
-		Command: operations.CommandGate, Arguments: []string{"on"}, ConversationID: "ops",
+		Command: operations.CommandProactive, Arguments: []string{"on"}, ConversationID: "ops",
 	})
 	if err != nil || result.Followup == nil || runtime.commits != 0 {
 		t.Fatalf("result=%+v err=%v commits=%d", result, err, runtime.commits)
 	}
 	text, err := result.Followup(context.Background())
-	if err != nil || text != "Gate 已切换为 on。" || runtime.commits != 1 || !runtime.snapshot.Runtime.Gate.Enabled {
+	if err != nil || text != "Proactive 已切换为 on。" || runtime.commits != 1 || runtime.snapshot.Runtime.Modules["native.proactive_reply"].Enabled == nil || !*runtime.snapshot.Runtime.Modules["native.proactive_reply"].Enabled {
 		t.Fatalf("text=%q err=%v commits=%d", text, err, runtime.commits)
 	}
 }

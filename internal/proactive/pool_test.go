@@ -1,4 +1,4 @@
-package gate
+package proactive
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func TestAutoReplyUnmentionedWaitsForSilence(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)
 	p := New(context.Background(), func(string) Policy {
-		return Policy{Silence: 4 * time.Second, MaxCount: 1, AutoReplyUnmentioned: true}
+		return Policy{Silence: 4 * time.Second, AutoReplyUnmentioned: true}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
 	if got := p.Absorb(Input{ConversationID: "c", UserID: "u", MsgID: "q", Text: "question"}); got != VerdictAbsorbed {
 		t.Fatalf("got %v, want absorbed", got)
@@ -137,32 +137,6 @@ func TestAdministratorReplyCancelsPendingQuestion(t *testing.T) {
 	p.Close(time.Second)
 }
 
-func TestDedupFastLane(t *testing.T) {
-	p := New(context.Background(), func(string) Policy { return Policy{} }, nil, Options{})
-	in := Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "/help", Addressed: true}
-	if got := p.Absorb(in); got != VerdictPass {
-		t.Fatalf("first addressed message got %v", got)
-	}
-	if got := p.Absorb(in); got != VerdictDuplicate {
-		t.Fatalf("duplicate addressed message got %v", got)
-	}
-	p.Close(time.Second)
-}
-
-func TestDedupPreservesDistinctMessageIDsWithSameText(t *testing.T) {
-	p := New(context.Background(), func(string) Policy { return Policy{} }, nil, Options{})
-	first := Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello", Addressed: true}
-	second := first
-	second.MsgID = "2"
-	if got := p.Absorb(first); got != VerdictPass {
-		t.Fatalf("first message got %v", got)
-	}
-	if got := p.Absorb(second); got != VerdictPass {
-		t.Fatalf("distinct message got %v", got)
-	}
-	p.Close(time.Second)
-}
-
 func TestSilenceFlushesBatch(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)
@@ -188,7 +162,7 @@ func TestAutoReplyIgnoresCountFlush(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)
 	p := New(context.Background(), func(string) Policy {
-		return Policy{Silence: time.Second, MaxCount: 2, AutoReplyUnmentioned: true}
+		return Policy{Silence: time.Second, AutoReplyUnmentioned: true}
 	}, func(_ context.Context, b Batch) { flushed <- b }, Options{clock: clock})
 	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "one"})
 	p.Absorb(Input{ConversationID: "conversation-1", UserID: "u", MsgID: "2", Text: "two"})

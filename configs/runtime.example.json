@@ -25,16 +25,9 @@
     "anthropic_version": "2023-06-01",
     "timeout": "60s"
   },
-  "gate": {
-    "enabled": true,
-    "silence": "4s",
-    "max_count": 8,
-    "max_window": "25s",
+  "admission": {
     "dedup_ttl": "60s",
-    "dedup_max": 10000,
-    "max_buffered": 50,
-    "max_text_len": 500,
-    "max_concurrent": 4
+    "dedup_max": 10000
   },
   "search": {
     "enabled": false,
@@ -80,8 +73,8 @@
       }
     ],
     "groups": [
-      {"id": "local", "connector_id": "echo-local", "target": "local", "auto_reply_unmentioned": false},
-      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。", "auto_reply_unmentioned": false}
+      {"id": "local", "connector_id": "echo-local", "target": "local" },
+      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
     ]
   },
   "operations": {
@@ -89,7 +82,7 @@
       {
         "conversation_id": "local",
         "notifications": true,
-        "commands": ["status", "restart", "pause", "resume", "gate", "reload_docs"]
+        "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
       }
     ]
   },

@@ -1,6 +1,6 @@
-// Package gate buffers unaddressed group messages and applies deduplication,
-// silence windows, and bounded concurrency before handing batches to the bot.
-package gate
+// Package proactive buffers unaddressed group messages and applies silence
+// windows and bounded concurrency before requesting a deferred bot turn.
+package proactive
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Input is the gate-facing projection of an inbound message.
+// Input is the proactive buffer projection of an inbound message.
 type Input struct {
 	ConversationID   string
 	MsgID            string
@@ -28,7 +28,7 @@ type Input struct {
 
 func (i Input) SessionKey() string { return i.ConversationID }
 
-// Message is the bounded message record retained by the gate.
+// Message is the bounded record retained while awaiting a trusted answer.
 type Message struct {
 	MsgID            string
 	ReplyToMessageID string
@@ -43,7 +43,6 @@ type FlushReason uint8
 
 const (
 	ReasonSilence FlushReason = iota
-	ReasonCount
 	ReasonWindow
 )
 
@@ -90,7 +89,6 @@ func (b Batch) Trigger(asker string) Message {
 // Policy controls when and how an unaddressed conversation is flushed.
 type Policy struct {
 	Silence              time.Duration
-	MaxCount             int
 	MaxWindow            time.Duration
 	MaxBuffered          int
 	MaxTextLen           int
@@ -102,7 +100,6 @@ type Verdict uint8
 const (
 	VerdictPass Verdict = iota
 	VerdictAbsorbed
-	VerdictDuplicate
 	VerdictIgnored
 )
 
@@ -112,8 +109,6 @@ func (v Verdict) String() string {
 		return "pass"
 	case VerdictAbsorbed:
 		return "absorbed"
-	case VerdictDuplicate:
-		return "duplicate"
 	case VerdictIgnored:
 		return "ignored"
 	default:
@@ -144,12 +139,10 @@ type Pool struct {
 	buckets   map[string]*bucket
 	policy    func(string) Policy
 	onFlush   func(context.Context, Batch)
-	dedup     *dedupTable
 	sem       chan struct{}
 	wg        sync.WaitGroup
 	closed    atomic.Bool
 	absorbed  atomic.Int64
-	deduped   atomic.Int64
 	ignored   atomic.Int64
 	dropped   atomic.Int64
 	flushed   atomic.Int64
@@ -159,15 +152,12 @@ type Pool struct {
 
 type Options struct {
 	clock         clock
-	DedupTTL      time.Duration
-	DedupMax      int
-	DisableDedup  bool
 	ManualStart   bool
 	MaxConcurrent int
 	IdleBucketTTL time.Duration
 }
 
-// New creates a gate pool. The policy callback is evaluated per conversation.
+// New creates a proactive buffer pool. Policy is evaluated per conversation.
 func New(ctx context.Context, policy func(string) Policy, onFlush func(context.Context, Batch), opts Options) *Pool {
 	if ctx == nil {
 		ctx = context.Background()
@@ -176,23 +166,13 @@ func New(ctx context.Context, policy func(string) Policy, onFlush func(context.C
 	if policy == nil {
 		policy = func(string) Policy { return Policy{} }
 	}
-	if opts.DedupTTL <= 0 {
-		opts.DedupTTL = time.Minute
-	}
-	if opts.DedupMax <= 0 {
-		opts.DedupMax = 10000
-	}
 	if opts.MaxConcurrent <= 0 {
 		opts.MaxConcurrent = 1
 	}
 	if opts.clock == nil {
 		opts.clock = realClock{}
 	}
-	var dedup *dedupTable
-	if !opts.DisableDedup {
-		dedup = newDedupTable(opts.DedupTTL, opts.DedupMax)
-	}
-	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, dedup: dedup, sem: make(chan struct{}, opts.MaxConcurrent), idleTTL: opts.IdleBucketTTL}
+	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, sem: make(chan struct{}, opts.MaxConcurrent), idleTTL: opts.IdleBucketTTL}
 	if !opts.ManualStart {
 		p.Start()
 	}
@@ -222,18 +202,6 @@ func (p *Pool) Absorb(in Input) Verdict {
 	messageTime := in.At
 	if messageTime.IsZero() {
 		messageTime = now
-	}
-	key := in.SessionKey()
-	if p.dedup != nil && in.MsgID != "" && p.dedup.seenOrAdd("id|"+key+"|"+in.MsgID, now) {
-		p.deduped.Add(1)
-		return VerdictDuplicate
-	}
-	// Text is only a fallback identity for adapters that cannot provide a
-	// message ID. Distinct platform events may legitimately contain the same
-	// text and must not be collapsed.
-	if p.dedup != nil && strings.TrimSpace(in.Text) != "" && in.MsgID == "" && p.dedup.seenOrAdd("tx|"+key+"|"+in.UserID+"|"+strings.TrimSpace(in.Text), now) {
-		p.deduped.Add(1)
-		return VerdictDuplicate
 	}
 	pol := p.policy(in.ConversationID)
 	if in.Administrator {
@@ -456,9 +424,6 @@ func (p *Pool) janitor(idle time.Duration) {
 		case <-p.ctx.Done():
 			return
 		case now := <-ticker.C:
-			if p.dedup != nil {
-				p.dedup.gc(now)
-			}
 			p.mu.Lock()
 			for key, b := range p.buckets {
 				b.mu.Lock()
@@ -505,7 +470,6 @@ func (p *Pool) Stats() Stats {
 	}
 	return Stats{
 		Absorbed: p.absorbed.Load(),
-		Deduped:  p.deduped.Load(),
 		Ignored:  p.ignored.Load(),
 		Dropped:  p.dropped.Load(),
 		Flushed:  p.flushed.Load(),
@@ -524,7 +488,6 @@ func (p *Pool) BucketCount() int {
 
 type Stats struct {
 	Absorbed int64 `json:"absorbed"`
-	Deduped  int64 `json:"deduped"`
 	Ignored  int64 `json:"ignored"`
 	Dropped  int64 `json:"dropped"`
 	Flushed  int64 `json:"flushed"`

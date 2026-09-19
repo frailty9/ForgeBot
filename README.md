@@ -48,7 +48,7 @@ platform adapter
     -> normalized inbound message
     -> logical group binding
     -> bot engine
-    -> gate / tools / search / LLM
+    -> Admission / native modules / tools / LLM
     -> normalized outbound message
     -> platform sender
 ```
@@ -156,7 +156,7 @@ configuration:
 
 - YAML and documented environment variables configure the HTTP server, runtime
   JSON path, SecretStore path, and management token.
-- Runtime JSON configures the Bot, LLM, gate, search, platforms,
+- Runtime JSON configures the Bot, LLM, Admission, native modules, search, platforms,
   administration, operations, and reflection.
 - LLM API keys are stored separately and can be replaced without exposing their
   value in configuration reads or history.
