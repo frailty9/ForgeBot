@@ -9,17 +9,23 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
+	"github.com/soleapi/forgebot/internal/tooling"
 )
 
 type Descriptor struct {
 	ID             string
 	DefaultEnabled bool
 	Hooks          []hooks.Stage
+	Provides       []capability.ID
+	Requires       []capability.ID
+	Registrations  []RegistrationKind
 }
 type Factory interface {
 	Descriptor() Descriptor
@@ -73,7 +79,30 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 		}
 		seen[stage] = true
 	}
+	seenCapabilities := make(map[capability.ID]bool)
+	for _, id := range append(slices.Clone(descriptor.Provides), descriptor.Requires...) {
+		if !id.Valid() || seenCapabilities[id] {
+			return fmt.Errorf("invalid or duplicate capability %q", id)
+		}
+		seenCapabilities[id] = true
+	}
+	seenKinds := make(map[RegistrationKind]bool)
+	for _, kind := range descriptor.Registrations {
+		switch kind {
+		case RegistrationTools, RegistrationCommands, RegistrationObservers,
+			RegistrationParticipants, RegistrationJobs, RegistrationStatus:
+		default:
+			return fmt.Errorf("unsupported registration kind %q", kind)
+		}
+		if seenKinds[kind] {
+			return fmt.Errorf("duplicate registration kind %q", kind)
+		}
+		seenKinds[kind] = true
+	}
 	descriptor.Hooks = slices.Clone(descriptor.Hooks)
+	descriptor.Provides = slices.Clone(descriptor.Provides)
+	descriptor.Requires = slices.Clone(descriptor.Requires)
+	descriptor.Registrations = slices.Clone(descriptor.Registrations)
 	r.entries[descriptor.ID] = entry{descriptor, factory, source, order, failure}
 	return nil
 }
@@ -84,6 +113,9 @@ func (r *Registry) Clone() *Registry {
 	if r != nil {
 		for id, value := range r.entries {
 			value.descriptor.Hooks = slices.Clone(value.descriptor.Hooks)
+			value.descriptor.Provides = slices.Clone(value.descriptor.Provides)
+			value.descriptor.Requires = slices.Clone(value.descriptor.Requires)
+			value.descriptor.Registrations = slices.Clone(value.descriptor.Registrations)
 			copy.entries[id] = value
 		}
 	}
@@ -160,13 +192,77 @@ type Status struct {
 	Error   string              `json:"error,omitempty"`
 }
 type Set struct {
-	chain       *hooks.Chain
-	instances   []Instance
-	instanceIDs []string
-	status      []Status
-	mu          sync.RWMutex
-	closeOnce   sync.Once
-	closeErr    error
+	chain        *hooks.Chain
+	capabilities capability.Values
+	tools        []ToolRegistration
+	commands     []CommandRegistration
+	observers    []ObserverRegistration
+	participants []ParticipantRegistration
+	jobs         []BackgroundJob
+	statuses     []func() any
+	instances    []Instance
+	instanceIDs  []string
+	status       []Status
+	mu           sync.RWMutex
+	closeOnce    sync.Once
+	closeErr     error
+}
+
+func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig) ([]string, error) {
+	ids := r.ids()
+	enabledIDs := make(map[string]bool, len(ids))
+	providers := make(map[capability.ID]string)
+	for _, id := range ids {
+		entry := r.entries[id]
+		if !enabled(entry, entries[id]) {
+			continue
+		}
+		enabledIDs[id] = true
+		for _, provided := range entry.descriptor.Provides {
+			if previous, exists := providers[provided]; exists {
+				return nil, fmt.Errorf("capability %q provided by both %s and %s", provided, previous, id)
+			}
+			providers[provided] = id
+		}
+	}
+	state := make(map[string]uint8, len(ids))
+	ordered := make([]string, 0, len(ids))
+	var visit func(string) error
+	visit = func(id string) error {
+		if !enabledIDs[id] {
+			return nil
+		}
+		switch state[id] {
+		case 1:
+			return fmt.Errorf("capability dependency cycle at module %s", id)
+		case 2:
+			return nil
+		}
+		state[id] = 1
+		for _, required := range r.entries[id].descriptor.Requires {
+			provider, ok := providers[required]
+			if !ok {
+				return fmt.Errorf("module %s requires unavailable capability %q", id, required)
+			}
+			if err := visit(provider); err != nil {
+				return err
+			}
+		}
+		state[id] = 2
+		ordered = append(ordered, id)
+		return nil
+	}
+	for _, id := range ids {
+		if err := visit(id); err != nil {
+			return nil, err
+		}
+	}
+	for _, id := range ids {
+		if !enabledIDs[id] {
+			ordered = append(ordered, id)
+		}
+	}
+	return ordered, nil
 }
 
 func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleConfig, logger *slog.Logger) (result *Set, err error) {
@@ -176,7 +272,11 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 	if err = r.Validate(entries); err != nil {
 		return nil, err
 	}
-	set := &Set{status: []Status{}}
+	orderedIDs, err := r.orderedIDs(entries)
+	if err != nil {
+		return nil, err
+	}
+	set := &Set{status: []Status{}, capabilities: capability.NewValues()}
 	defer func() {
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -185,7 +285,7 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 		}
 	}()
 	var mounts []hooks.Mount
-	for _, id := range r.ids() {
+	for _, id := range orderedIDs {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -193,7 +293,13 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 		cfg := entries[id]
 		status := Status{ID: id, Source: entry.source, Enabled: enabled(entry, cfg), State: "disabled", Hooks: []hooks.Description{}}
 		if status.Enabled {
-			instance, buildErr := entry.factory.Build(ctx, slices.Clone(cfg.Options))
+			var instance Instance
+			var buildErr error
+			if contextual, ok := entry.factory.(ContextFactory); ok {
+				instance, buildErr = contextual.BuildWithContext(ctx, BuildContext{Capabilities: set.capabilities.View()}, slices.Clone(cfg.Options))
+			} else {
+				instance, buildErr = entry.factory.Build(ctx, slices.Clone(cfg.Options))
+			}
 			if instance != nil {
 				set.instances = append(set.instances, instance)
 				set.instanceIDs = append(set.instanceIDs, id)
@@ -212,6 +318,25 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 				}
 			}
 			mounts = append(mounts, hooks.Mount{ModuleID: id, Source: entry.source, Order: entry.order, Failure: entry.failure, Registrations: registrations})
+			if extended, ok := instance.(ExtendedProvider); ok {
+				extra := extended.ExtendedRegistrations()
+				if err := validateExtended(entry.descriptor, extra); err != nil {
+					return nil, fmt.Errorf("module %s: %w", id, err)
+				}
+				set.tools = append(set.tools, extra.Tools...)
+				set.commands = append(set.commands, extra.Commands...)
+				set.observers = append(set.observers, extra.Observers...)
+				set.participants = append(set.participants, extra.Participants...)
+				set.jobs = append(set.jobs, extra.Jobs...)
+				if extra.Status != nil {
+					set.statuses = append(set.statuses, extra.Status)
+				}
+				for _, provided := range extra.Capabilities {
+					if err := set.capabilities.Provide(provided.ID, provided.Value); err != nil {
+						return nil, fmt.Errorf("module %s: %w", id, err)
+					}
+				}
+			}
 			status.State = "prepared"
 		}
 		set.status = append(set.status, status)
@@ -220,13 +345,124 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 	if err != nil {
 		return nil, err
 	}
+	if err := validateToolAndCommandNames(set.tools, set.commands); err != nil {
+		return nil, err
+	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
 	return set, nil
 }
 
-func (s *Set) Chain() *hooks.Chain { return s.chain }
+func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations) error {
+	allowed := make(map[RegistrationKind]bool, len(descriptor.Registrations))
+	for _, kind := range descriptor.Registrations {
+		allowed[kind] = true
+	}
+	if len(registrations.Tools) > 0 && !allowed[RegistrationTools] {
+		return errors.New("returned undeclared tool registrations")
+	}
+	if len(registrations.Commands) > 0 && !allowed[RegistrationCommands] {
+		return errors.New("returned undeclared command registrations")
+	}
+	if len(registrations.Observers) > 0 && !allowed[RegistrationObservers] {
+		return errors.New("returned undeclared observer registrations")
+	}
+	if len(registrations.Participants) > 0 && !allowed[RegistrationParticipants] {
+		return errors.New("returned undeclared participant registrations")
+	}
+	if len(registrations.Jobs) > 0 && !allowed[RegistrationJobs] {
+		return errors.New("returned undeclared job registrations")
+	}
+	if registrations.Status != nil && !allowed[RegistrationStatus] {
+		return errors.New("returned undeclared status registration")
+	}
+	declared := make(map[capability.ID]bool, len(descriptor.Provides))
+	for _, id := range descriptor.Provides {
+		declared[id] = true
+	}
+	for _, provided := range registrations.Capabilities {
+		if !declared[provided.ID] {
+			return fmt.Errorf("returned undeclared capability %q", provided.ID)
+		}
+	}
+	return nil
+}
+
+func validateToolAndCommandNames(tools []ToolRegistration, commands []CommandRegistration) error {
+	seenTools := make(map[string]string, len(tools))
+	for _, registration := range tools {
+		if registration.Tool == nil {
+			return errors.New("nil tool registration")
+		}
+		name := strings.TrimSpace(registration.Tool.Definition().Name)
+		if name == "" {
+			return errors.New("tool registration has empty name")
+		}
+		if previous, exists := seenTools[name]; exists {
+			return fmt.Errorf("tool %q is registered more than once (%s and %s)", name, previous, registration.ID)
+		}
+		seenTools[name] = registration.ID
+	}
+	seenCommands := make(map[string]string, len(commands))
+	for _, registration := range commands {
+		name := strings.TrimSpace(strings.ToLower(registration.Name))
+		if name == "" || registration.Handle == nil {
+			return errors.New("invalid command registration")
+		}
+		if previous, exists := seenCommands[name]; exists {
+			return fmt.Errorf("command %q is registered more than once (%s and %s)", name, previous, registration.ID)
+		}
+		seenCommands[name] = registration.ID
+	}
+	return nil
+}
+
+func (s *Set) Chain() *hooks.Chain             { return s.chain }
+func (s *Set) Capabilities() capability.Values { return s.capabilities.Clone() }
+func (s *Set) Tools() []ToolRegistration       { return slices.Clone(s.tools) }
+func (s *Set) ToolExecutor() tooling.Executor {
+	tools := make([]tooling.Tool, 0, len(s.tools))
+	for _, registration := range s.tools {
+		if registration.Tool != nil {
+			tools = append(tools, registration.Tool)
+		}
+	}
+	return tooling.NewRegistry(tools...)
+}
+func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.commands) }
+func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
+func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
+func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }
+func (s *Set) StatusDetails() []any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]any, 0, len(s.statuses))
+	for _, status := range s.statuses {
+		result = append(result, status())
+	}
+	return result
+}
+
+// Start activates optional module jobs after the Set has been published.
+func (s *Set) Start(ctx context.Context) {
+	for _, instance := range s.instances {
+		if starter, ok := instance.(Starter); ok {
+			starter.Start(ctx)
+		}
+	}
+	s.Mark("active")
+}
+
+// Retire asks optional modules to stop accepting new asynchronous work.
+func (s *Set) Retire() {
+	for index := len(s.instances) - 1; index >= 0; index-- {
+		if retirer, ok := s.instances[index].(Retirer); ok {
+			retirer.Retire()
+		}
+	}
+	s.Mark("retiring")
+}
 func (s *Set) Mark(state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,6 +483,7 @@ func (s *Set) Status() []Status {
 }
 func (s *Set) Close(ctx context.Context) error {
 	s.closeOnce.Do(func() {
+		s.Retire()
 		for index := len(s.instances) - 1; index >= 0; index-- {
 			if err := s.instances[index].Close(ctx); err != nil {
 				s.closeErr = errors.Join(s.closeErr, fmt.Errorf("close module %s: %w", s.instanceIDs[index], err))

@@ -2,17 +2,17 @@
 
 依据：requirements.md 与 design.md。
 
-状态：任务已于 2026-09-19 确认；文档基线已提交，代码实施尚未开始。
+状态：任务已于 2026-09-19 确认；第 1 项基础运行时能力已完成，开始进入第 2 项。
 
 ## 1. 扩展内置模块运行时与能力注册
 
-- [ ] 1.1 新增受限 capability 容器、稳定能力 ID、类型解析和依赖拓扑校验。
-- [ ] 1.2 将 modules.Descriptor、Factory、Instance 和注册集合扩展为 Tool、Command、
+- [x] 1.1 新增受限 capability 容器、稳定能力 ID、类型解析和依赖拓扑校验。
+- [x] 1.2 将 modules.Descriptor、Factory、Instance 和注册集合扩展为 Tool、Command、
       Observer、Background Job、Status 及 capability provider/consumer。
-- [ ] 1.3 实现候选 Set 的 Prepare、Start、Retire、Close 生命周期和逆序资源清理。
+- [x] 1.3 实现候选 Set 的 Prepare、Start、Retire、Close 生命周期和逆序资源清理。
 - [ ] 1.4 将通用 Tool 目录编译移入模块 Set，拒绝重复工具名；Engine 只消费通用
       Tool 定义和执行器，不保留业务工具名特判。
-- [ ] 1.5 增加模块状态、构建错误、依赖错误和生命周期测试；保持现有
+- [x] 1.5 增加模块状态、构建错误、依赖错误和生命周期测试；保持现有
       native.reply_experience 行为。
 - Requirement: R4, R5, R6, R7
 

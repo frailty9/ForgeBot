@@ -9,10 +9,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
+	"github.com/soleapi/forgebot/internal/tooling"
 )
 
 type factory struct {
@@ -178,6 +180,136 @@ func TestValidationDoesNotBuild(t *testing.T) {
 	}
 	if plugin.builds != 0 {
 		t.Fatal("validation started module")
+	}
+}
+
+type extendedFactory struct {
+	id       string
+	provides capability.ID
+	requires capability.ID
+	instance modules.Instance
+}
+
+func (f *extendedFactory) Descriptor() modules.Descriptor {
+	descriptor := modules.Descriptor{ID: f.id, DefaultEnabled: true, Registrations: []modules.RegistrationKind{modules.RegistrationTools}}
+	if f.provides != "" {
+		descriptor.Provides = []capability.ID{f.provides}
+	}
+	if f.requires != "" {
+		descriptor.Requires = []capability.ID{f.requires}
+	}
+	return descriptor
+}
+func (*extendedFactory) ValidateOptions(json.RawMessage) error      { return nil }
+func (*extendedFactory) PublicOptions(json.RawMessage) (any, error) { return nil, nil }
+func (f *extendedFactory) Build(context.Context, json.RawMessage) (modules.Instance, error) {
+	return f.instance, nil
+}
+func (f *extendedFactory) BuildWithContext(_ context.Context, build modules.BuildContext, _ json.RawMessage) (modules.Instance, error) {
+	if f.requires != "" && !build.Capabilities.Has(f.requires) {
+		return nil, errors.New("required capability was not prepared")
+	}
+	return f.instance, nil
+}
+
+type extendedInstance struct {
+	capabilityID capability.ID
+	tool         tooling.Tool
+	started      *int
+	retired      *int
+}
+
+func (i *extendedInstance) Registrations() hooks.Registrations { return hooks.Registrations{} }
+func (i *extendedInstance) Close(context.Context) error        { return nil }
+func (i *extendedInstance) Start(context.Context) {
+	if i.started != nil {
+		*i.started++
+	}
+}
+func (i *extendedInstance) Retire() {
+	if i.retired != nil {
+		*i.retired++
+	}
+}
+func (i *extendedInstance) ExtendedRegistrations() modules.ExtendedRegistrations {
+	return modules.ExtendedRegistrations{
+		Tools:        []modules.ToolRegistration{{ID: "tool", Tool: i.tool}},
+		Capabilities: []modules.CapabilityRegistration{{ID: i.capabilityID, Value: struct{}{}}},
+	}
+}
+
+type testTool struct{ name string }
+
+func (t testTool) Definition() tooling.Definition { return tooling.Definition{Name: t.name} }
+func (testTool) Execute(context.Context, tooling.Call) tooling.Result {
+	return tooling.Result{OK: true}
+}
+
+func TestRegistryBuildsCapabilityDependenciesAndCollectsTools(t *testing.T) {
+	provided := capability.ID("example.provider.v1")
+	required := capability.ID("example.consumer.v1")
+	registry := modules.NewRegistry()
+	provider := &extendedFactory{id: "provider", provides: provided, instance: &extendedInstance{capabilityID: provided, tool: testTool{name: "provider_tool"}}}
+	consumer := &extendedFactory{id: "consumer", requires: provided, provides: required, instance: &extendedInstance{capabilityID: required, tool: testTool{name: "consumer_tool"}}}
+	if err := registry.Register(consumer, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(provider, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	set, err := registry.Build(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+	if !set.Capabilities().Has(required) || len(set.Tools()) != 2 {
+		t.Fatalf("capabilities/tools = %v/%d", set.Capabilities().Has(required), len(set.Tools()))
+	}
+}
+
+func TestRegistryRejectsDuplicateTools(t *testing.T) {
+	registry := modules.NewRegistry()
+	first := &extendedFactory{id: "first", provides: "example.first.v1", instance: &extendedInstance{capabilityID: "example.first.v1", tool: testTool{name: "duplicate"}}}
+	second := &extendedFactory{id: "second", provides: "example.second.v1", instance: &extendedInstance{capabilityID: "example.second.v1", tool: testTool{name: "duplicate"}}}
+	if err := registry.Register(first, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(second, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Build(context.Background(), nil, nil); err == nil {
+		t.Fatal("duplicate tool accepted")
+	}
+}
+
+func TestRegistryLifecycleStartsAndRetiresInstances(t *testing.T) {
+	started, retired := 0, 0
+	registry := modules.NewRegistry()
+	item := &extendedInstance{capabilityID: "example.lifecycle.v1", tool: testTool{name: "lifecycle_tool"}, started: &started, retired: &retired}
+	factory := &extendedFactory{id: "lifecycle", provides: "example.lifecycle.v1", instance: item}
+	if err := registry.Register(factory, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	set, err := registry.Build(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started != 0 || retired != 0 {
+		t.Fatalf("prepared lifecycle ran early: %d/%d", started, retired)
+	}
+	set.Start(context.Background())
+	if started != 1 {
+		t.Fatalf("started = %d", started)
+	}
+	set.Retire()
+	if retired != 1 {
+		t.Fatalf("retired = %d", retired)
+	}
+	if err := set.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if retired != 2 {
+		t.Fatalf("close repeated retire = %d", retired)
 	}
 }
 
