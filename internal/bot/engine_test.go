@@ -86,6 +86,74 @@ func TestEngineAbsorbsUnaddressedGroupMessage(t *testing.T) {
 	}
 }
 
+func TestEngineIgnoresUnaddressedMessagesWhenGateDisabled(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "unexpected"}}
+	policy := testPolicy()
+	policy.Gate.Enabled = false
+	policy.Gate.AutoReplyUnmentioned = true
+	policy.GroupGates = map[string]GatePolicy{"c": {AutoReplyUnmentioned: true}}
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: policy}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(0)
+
+	messages := []messaging.InboundMessage{
+		{ConversationID: "c", UserID: "u", MessageID: "text", Text: "hello"},
+		{ConversationID: "c", UserID: "u", MessageID: "image", Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/a.jpg"}}},
+	}
+	for _, message := range messages {
+		result, handleErr := engine.HandleInbound(context.Background(), message)
+		if handleErr != nil || result.Accepted || result.Verdict != "ignored" {
+			t.Fatalf("message %s: result=%+v err=%v", message.MessageID, result, handleErr)
+		}
+	}
+	addressedImage := messages[1]
+	addressedImage.MessageID = "quoted-image"
+	addressedImage.Mentioned = true
+	result, err := engine.HandleInbound(context.Background(), addressedImage)
+	if err != nil || !result.Accepted {
+		t.Fatalf("addressed image: result=%+v err=%v", result, err)
+	}
+	if len(fake.requests) != 1 || len(sender.Sent()) != 1 {
+		t.Fatalf("llm requests=%d sent=%+v", len(fake.requests), sender.Sent())
+	}
+}
+
+func TestEngineDeduplicatesAddressedMessagesWhenGateDisabled(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "reply"}}
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(0)
+	message := messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "same", Text: "hello", Mentioned: true}
+	first, firstErr := engine.HandleInbound(context.Background(), message)
+	second, secondErr := engine.HandleInbound(context.Background(), message)
+	if firstErr != nil || !first.Accepted || secondErr != nil || second.Verdict != "duplicate" {
+		t.Fatalf("first=%+v err=%v second=%+v err=%v", first, firstErr, second, secondErr)
+	}
+	if len(fake.requests) != 1 || len(sender.Sent()) != 1 {
+		t.Fatalf("llm requests=%d sent=%d", len(fake.requests), len(sender.Sent()))
+	}
+}
+
 func TestEngineUsesInjectedLLM(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())
@@ -104,7 +172,7 @@ func TestEngineUsesInjectedLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{
-		ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello",
+		ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello", Mentioned: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +229,8 @@ func TestEnginePassesInboundImageToLLM(t *testing.T) {
 	}
 	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{
 		ConversationID: "c", UserID: "u", MessageID: "m", Text: "这是什么？",
-		Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/a.jpg", MimeType: "image/jpeg"}},
+		Mentioned: true,
+		Media:     []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/a.jpg", MimeType: "image/jpeg"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +256,7 @@ func TestEngineAddsInstructionForImageOnlyMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{
-		ConversationID: "c", UserID: "u", MessageID: "m",
+		ConversationID: "c", UserID: "u", MessageID: "m", Mentioned: true,
 		Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/error.jpg"}},
 	})
 	if err != nil {
@@ -215,7 +284,7 @@ func TestEngineAppendsPromptSuffix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{PromptSuffix: "仅使用纯文本，不要使用 Markdown。", ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello"})
+	_, err = engine.HandleInbound(context.Background(), messaging.InboundMessage{PromptSuffix: "仅使用纯文本，不要使用 Markdown。", ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello", Mentioned: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +446,7 @@ func searchEngineFixture(t *testing.T, responses []llm.Response) (*Engine, *fake
 }
 
 func testInbound(text string) messaging.InboundMessage {
-	return messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "m", Text: text, Command: strings.HasPrefix(text, "/")}
+	return messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "m", Text: text, Mentioned: true, Command: strings.HasPrefix(text, "/")}
 }
 func (f *fakeLLM) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, error) {
 	return nil, nil

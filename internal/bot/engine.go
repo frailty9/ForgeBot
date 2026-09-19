@@ -138,24 +138,21 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	if err := validateInbound(msg); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
 	}
-	verdict := VerdictPass
-	if e.deps.Policy.Gate.Enabled {
-		verdict = Verdict(e.gate.Absorb(gate.Input{
-			ConversationID:   msg.ConversationID,
-			MsgID:            msg.MessageID,
-			UserID:           msg.UserID,
-			UserName:         msg.UserName,
-			Text:             msg.Text,
-			ReplyToMessageID: msg.ReplyToMessageID,
-			PromptSuffix:     msg.PromptSuffix,
-			Administrator:    msg.Administrator,
-			Addressed:        msg.Addressed(),
-			HasMedia:         msg.HasMedia(),
-			At:               msg.At,
-		}))
-		if verdict != VerdictPass {
-			return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
-		}
+	verdict := Verdict(e.gate.Absorb(gate.Input{
+		ConversationID:   msg.ConversationID,
+		MsgID:            msg.MessageID,
+		UserID:           msg.UserID,
+		UserName:         msg.UserName,
+		Text:             msg.Text,
+		ReplyToMessageID: msg.ReplyToMessageID,
+		PromptSuffix:     msg.PromptSuffix,
+		Administrator:    msg.Administrator,
+		Addressed:        msg.Addressed(),
+		HasMedia:         msg.HasMedia(),
+		At:               msg.At,
+	}))
+	if verdict != VerdictPass {
+		return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
 	}
 	reply, err := e.replyText(ctx, msg)
 	if err != nil {
@@ -234,7 +231,7 @@ func (e *Engine) gatePolicy(conversationID string) gate.Policy {
 		MaxWindow:            policy.MaxWindow,
 		MaxBuffered:          policy.MaxBuffered,
 		MaxTextLen:           policy.MaxTextLen,
-		AutoReplyUnmentioned: policy.AutoReplyUnmentioned,
+		AutoReplyUnmentioned: policy.Enabled && policy.AutoReplyUnmentioned,
 	}
 }
 

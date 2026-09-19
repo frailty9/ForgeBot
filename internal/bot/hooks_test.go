@@ -85,6 +85,7 @@ func TestModuleDisabledPreservesMediaAndIgnoresEmptyMention(t *testing.T) {
 		t.Fatalf("%+v %v", result, err)
 	}
 	msg.Media = []messaging.Media{{Kind: messaging.MediaImage, URL: "https://example.test/image.png"}}
+	msg.MessageID = "image"
 	result, err = engine.HandleInbound(context.Background(), msg)
 	if err != nil || !result.Accepted {
 		t.Fatal(result, err)
@@ -251,7 +252,9 @@ func TestShutdownWaitsForActiveGateBeforeClosingModules(t *testing.T) {
 	}
 	defer engine.Shutdown(0)
 	defer close(release)
-	if _, err := engine.HandleInbound(context.Background(), testInbound("question")); err != nil {
+	message := testInbound("question")
+	message.Mentioned = false
+	if _, err := engine.HandleInbound(context.Background(), message); err != nil {
 		t.Fatal(err)
 	}
 	select {

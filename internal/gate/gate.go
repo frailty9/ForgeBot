@@ -211,7 +211,10 @@ func (p *Pool) Absorb(in Input) Verdict {
 		p.deduped.Add(1)
 		return VerdictDuplicate
 	}
-	if text := strings.TrimSpace(in.Text); text != "" && p.dedup.seenOrAdd("tx|"+key+"|"+in.UserID+"|"+text, now) {
+	// Text is only a fallback identity for adapters that cannot provide a
+	// message ID. Distinct platform events may legitimately contain the same
+	// text and must not be collapsed.
+	if text := strings.TrimSpace(in.Text); in.MsgID == "" && text != "" && p.dedup.seenOrAdd("tx|"+key+"|"+in.UserID+"|"+text, now) {
 		p.deduped.Add(1)
 		return VerdictDuplicate
 	}

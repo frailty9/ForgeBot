@@ -149,6 +149,20 @@ func TestDedupFastLane(t *testing.T) {
 	p.Close(time.Second)
 }
 
+func TestDedupPreservesDistinctMessageIDsWithSameText(t *testing.T) {
+	p := New(context.Background(), func(string) Policy { return Policy{} }, nil, Options{})
+	first := Input{ConversationID: "conversation-1", UserID: "u", MsgID: "1", Text: "hello", Addressed: true}
+	second := first
+	second.MsgID = "2"
+	if got := p.Absorb(first); got != VerdictPass {
+		t.Fatalf("first message got %v", got)
+	}
+	if got := p.Absorb(second); got != VerdictPass {
+		t.Fatalf("distinct message got %v", got)
+	}
+	p.Close(time.Second)
+}
+
 func TestSilenceFlushesBatch(t *testing.T) {
 	clock := newFakeClock()
 	flushed := make(chan Batch, 1)

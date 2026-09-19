@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -558,7 +559,7 @@ func assertReply(t *testing.T, manager *Manager, sender *memory.Sender, expected
 	t.Helper()
 	before := len(sender.Sent())
 	result, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{
-		ConversationID: "c", UserID: "u", MessageID: "m", Text: "hello",
+		ConversationID: "c", UserID: "u", MessageID: fmt.Sprintf("m-%d", before), Text: "hello", Mentioned: true,
 	})
 	if err != nil {
 		t.Fatal(err)

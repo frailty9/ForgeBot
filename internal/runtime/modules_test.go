@@ -125,7 +125,7 @@ func TestModulesGenerationPinningAndRetirementLimit(t *testing.T) {
 	defer unblock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "old", Text: "hello"})
+		_, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "old", Text: "hello", Mentioned: true})
 		done <- err
 	}()
 	select {
@@ -265,6 +265,7 @@ func TestNativeModuleDisableAndRollback(t *testing.T) {
 	if _, err := manager.Apply(context.Background(), restored); err != nil {
 		t.Fatal(err)
 	}
+	message.MessageID = "restored"
 	result, err = manager.HandleInbound(context.Background(), message)
 	if err != nil || !result.Accepted {
 		t.Fatal(result, err)
