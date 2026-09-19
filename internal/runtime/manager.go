@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/administration"
+	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
@@ -131,18 +132,26 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 	if err != nil {
 		return nil, err
 	}
-	moduleSet, err := b.Modules.Build(ctx, snapshot.Runtime.Modules, nil)
+	client, err := b.buildClient(ctx, snapshot, "", "")
 	if err != nil {
 		return nil, err
 	}
-	engine, err := b.build(ctx, snapshot, b.Sender, retriever, "", "", moduleSet)
+	initial := capability.NewValues()
+	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
+		_ = initial.Provide(agent.CompleterKey.ID(), completer)
+	}
+	moduleSet, err := b.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
+	if err != nil {
+		return nil, err
+	}
+	engine, err := b.build(ctx, snapshot, b.Sender, retriever, client, moduleSet)
 	if err == nil {
 		moduleSet.Start(ctx)
 	}
 	return engine, err
 }
 
-func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, secretRef, secretValue string, moduleSet *modules.Set) (built *bot.Engine, buildErr error) {
+func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, client llm.Client, moduleSet *modules.Set) (built *bot.Engine, buildErr error) {
 	var executors []tooling.Executor
 	defer func() {
 		if built == nil {
@@ -159,32 +168,12 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	if sender == nil {
 		return nil, errors.New("runtime sender is required")
 	}
-	clientFactory := b.ClientFactory
-	if clientFactory == nil {
-		clientFactory = func(cfg llm.ClientConfig) (llm.Client, error) { return llm.NewClient(cfg) }
-	}
-	var client llm.Client
-	if snapshot.Runtime.LLM.Model != "" {
-		apiKey := ""
-		var err error
-		if secretRef == snapshot.Runtime.LLM.APIKeyRef {
-			apiKey = secretValue
-		} else if b.Secrets != nil {
-			apiKey, err = b.Secrets.Get(ctx, snapshot.Runtime.LLM.APIKeyRef)
-		}
-		if err != nil && !errors.Is(err, secret.ErrNotFound) {
-			return nil, fmt.Errorf("resolve LLM API key: %w", err)
-		}
-		if apiKey != "" {
-			client, err = clientFactory(snapshot.Runtime.LLM.ClientConfig(apiKey))
-			if err != nil {
-				return nil, fmt.Errorf("create LLM client: %w", err)
-			}
-		}
-	}
 	if snapshot.Runtime.Search.Enabled && retriever != nil {
 		searchConfig := snapshot.Runtime.Search
 		executors = append(executors, tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars)))
+	}
+	if len(moduleSet.Tools()) > 0 {
+		executors = append(executors, moduleSet.ToolExecutor())
 	}
 	var extensionInstructions string
 	if snapshot.Runtime.Extensions.Skills.MaxFiles > 0 {
@@ -231,7 +220,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {
@@ -252,6 +241,34 @@ func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, curre
 		return nil, errors.New("search factory returned nil retriever")
 	}
 	return retriever, nil
+}
+
+func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
+	if strings.TrimSpace(snapshot.Runtime.LLM.Model) == "" {
+		return nil, nil
+	}
+	apiKey := ""
+	var err error
+	if secretRef == snapshot.Runtime.LLM.APIKeyRef {
+		apiKey = secretValue
+	} else if b.Secrets != nil {
+		apiKey, err = b.Secrets.Get(ctx, snapshot.Runtime.LLM.APIKeyRef)
+	}
+	if err != nil && !errors.Is(err, secret.ErrNotFound) {
+		return nil, fmt.Errorf("resolve LLM API key: %w", err)
+	}
+	if apiKey == "" {
+		return nil, nil
+	}
+	factory := b.ClientFactory
+	if factory == nil {
+		factory = func(cfg llm.ClientConfig) (llm.Client, error) { return llm.NewClient(cfg) }
+	}
+	client, err := factory(snapshot.Runtime.LLM.ClientConfig(apiKey))
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+	return client, nil
 }
 
 // ReplaceSecret builds a complete candidate runtime before making the secret
@@ -403,11 +420,19 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	moduleSet, err := m.builder.Modules.Build(ctx, snapshot.Runtime.Modules, nil)
+	client, err := m.builder.buildClient(ctx, snapshot, secretRef, secretValue)
 	if err != nil {
 		return nil, err
 	}
-	engine, err := m.builder.build(ctx, snapshot, sender, retriever, secretRef, secretValue, moduleSet)
+	initial := capability.NewValues()
+	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
+		_ = initial.Provide(agent.CompleterKey.ID(), completer)
+	}
+	moduleSet, err := m.builder.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
+	if err != nil {
+		return nil, err
+	}
+	engine, err := m.builder.build(ctx, snapshot, sender, retriever, client, moduleSet)
 	if err != nil {
 		return nil, err
 	}
@@ -438,11 +463,6 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	var reflectionScanner *reflectionscanner.Scanner
 	var reflectionPipeline *reflectionpipeline.Processor
 	if snapshot.Runtime.Reflection.Enabled && reflection != nil {
-		client, clientErr := m.buildReflectionClient(ctx, snapshot, secretRef, secretValue)
-		if clientErr != nil {
-			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
-			return nil, clientErr
-		}
 		if client != nil {
 			reflectionScanner, reflectionPipeline, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, retriever)
 		}

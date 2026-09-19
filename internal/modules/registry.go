@@ -208,7 +208,7 @@ type Set struct {
 	closeErr     error
 }
 
-func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig) ([]string, error) {
+func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig, initial capability.Values) ([]string, error) {
 	ids := r.ids()
 	enabledIDs := make(map[string]bool, len(ids))
 	providers := make(map[capability.ID]string)
@@ -219,6 +219,9 @@ func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig) ([]string,
 		}
 		enabledIDs[id] = true
 		for _, provided := range entry.descriptor.Provides {
+			if initial.Has(provided) {
+				return nil, fmt.Errorf("capability %q is already provided by the host", provided)
+			}
 			if previous, exists := providers[provided]; exists {
 				return nil, fmt.Errorf("capability %q provided by both %s and %s", provided, previous, id)
 			}
@@ -240,6 +243,9 @@ func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig) ([]string,
 		}
 		state[id] = 1
 		for _, required := range r.entries[id].descriptor.Requires {
+			if initial.Has(required) {
+				continue
+			}
 			provider, ok := providers[required]
 			if !ok {
 				return fmt.Errorf("module %s requires unavailable capability %q", id, required)
@@ -266,17 +272,21 @@ func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig) ([]string,
 }
 
 func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleConfig, logger *slog.Logger) (result *Set, err error) {
+	return r.BuildWithCapabilities(ctx, entries, logger, capability.NewValues())
+}
+
+func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string]config.ModuleConfig, logger *slog.Logger, initial capability.Values) (result *Set, err error) {
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err = r.Validate(entries); err != nil {
 		return nil, err
 	}
-	orderedIDs, err := r.orderedIDs(entries)
+	orderedIDs, err := r.orderedIDs(entries, initial)
 	if err != nil {
 		return nil, err
 	}
-	set := &Set{status: []Status{}, capabilities: capability.NewValues()}
+	set := &Set{status: []Status{}, capabilities: initial.Clone()}
 	defer func() {
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -392,7 +402,7 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 func validateToolAndCommandNames(tools []ToolRegistration, commands []CommandRegistration) error {
 	seenTools := make(map[string]string, len(tools))
 	for _, registration := range tools {
-		if registration.Tool == nil {
+		if strings.TrimSpace(registration.ID) == "" || registration.Tool == nil || registration.MaxCalls <= 0 {
 			return errors.New("nil tool registration")
 		}
 		name := strings.TrimSpace(registration.Tool.Definition().Name)
@@ -407,7 +417,7 @@ func validateToolAndCommandNames(tools []ToolRegistration, commands []CommandReg
 	seenCommands := make(map[string]string, len(commands))
 	for _, registration := range commands {
 		name := strings.TrimSpace(strings.ToLower(registration.Name))
-		if name == "" || registration.Handle == nil {
+		if strings.TrimSpace(registration.ID) == "" || name == "" || strings.HasPrefix(name, "/") || registration.Handle == nil {
 			return errors.New("invalid command registration")
 		}
 		if previous, exists := seenCommands[name]; exists {
@@ -429,6 +439,15 @@ func (s *Set) ToolExecutor() tooling.Executor {
 		}
 	}
 	return tooling.NewRegistry(tools...)
+}
+func (s *Set) ToolBudgets() map[string]int {
+	result := make(map[string]int, len(s.tools))
+	for _, registration := range s.tools {
+		if registration.Tool != nil {
+			result[registration.Tool.Definition().Name] = registration.MaxCalls
+		}
+	}
+	return result
 }
 func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.commands) }
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }

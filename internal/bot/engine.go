@@ -58,6 +58,7 @@ type Dependencies struct {
 	LLM          llm.Client
 	Retriever    searchcontract.Retriever
 	Tools        tooling.Executor
+	ToolBudgets  map[string]int
 	Participants []modules.ParticipantRegistration
 	Policy       Policy
 }
@@ -300,17 +301,21 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		return response.Text, nil
 	}
 	messages = append(messages, llm.AssistantToolCallMessage(response.Message))
-	budget := e.deps.Policy.Search.MaxQueriesPerTurn
-	if budget <= 0 {
-		budget = 1
-	}
+	used := make(map[string]int)
 	allowed := make(map[string]bool, len(tools))
 	for _, definition := range tools {
 		allowed[definition.Name] = true
 	}
-	for index, call := range response.Message.ToolCalls {
+	for _, call := range response.Message.ToolCalls {
 		result := tooling.Result{Code: "budget_exhausted"}
-		if index < budget && e.deps.Tools != nil {
+		budget := e.deps.ToolBudgets[call.Name]
+		if budget <= 0 {
+			budget = e.deps.Policy.Search.MaxQueriesPerTurn
+		}
+		if budget <= 0 {
+			budget = 1
+		}
+		if used[call.Name] < budget && e.deps.Tools != nil {
 			if !allowed[call.Name] {
 				result = tooling.Result{Code: "tool_not_allowed"}
 				payload, marshalErr := json.Marshal(result)
@@ -320,6 +325,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 				messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
 				continue
 			}
+			used[call.Name]++
 			run := runFrom(ctx)
 			decision, hookErr := e.deps.Hooks.Tool(ctx, run.info, hooks.ToolInput{Name: call.Name, Arguments: call.Arguments})
 			if hookErr != nil {

@@ -220,11 +220,11 @@ func TestToolHooksCannotExpandAllowlistAndDenyBeforeProgress(t *testing.T) {
 	if _, err := engine.HandleInbound(context.Background(), testInbound("question")); err != nil {
 		t.Fatal(err)
 	}
-	if tool.count.Load() != 0 || hookCalls.Load() != 1 || deliveries.Load() != 1 {
+	if tool.count.Load() != 0 || hookCalls.Load() != 2 || deliveries.Load() != 1 {
 		t.Fatal(tool.count.Load(), hookCalls.Load(), deliveries.Load())
 	}
 	messages := fake.requests[1].Messages
-	for index, code := range []string{"tool_not_allowed", "module_denied", "budget_exhausted"} {
+	for index, code := range []string{"tool_not_allowed", "module_denied", "module_denied"} {
 		var result tooling.Result
 		if err := json.Unmarshal([]byte(messages[index+2].Text()), &result); err != nil || result.Code != code {
 			t.Fatal(result, err)

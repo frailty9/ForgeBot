@@ -10,7 +10,7 @@
 - [x] 1.2 将 modules.Descriptor、Factory、Instance 和注册集合扩展为 Tool、Command、
       Observer、Background Job、Status 及 capability provider/consumer。
 - [x] 1.3 实现候选 Set 的 Prepare、Start、Retire、Close 生命周期和逆序资源清理。
-- [ ] 1.4 将通用 Tool 目录编译移入模块 Set，拒绝重复工具名；Engine 只消费通用
+- [x] 1.4 将通用 Tool 目录编译移入模块 Set，拒绝重复工具名；Engine 只消费通用
       Tool 定义和执行器，不保留业务工具名特判。
 - [x] 1.5 增加模块状态、构建错误、依赖错误和生命周期测试；保持现有
       native.reply_experience 行为。

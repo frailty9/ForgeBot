@@ -233,7 +233,7 @@ func (i *extendedInstance) Retire() {
 }
 func (i *extendedInstance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	return modules.ExtendedRegistrations{
-		Tools:        []modules.ToolRegistration{{ID: "tool", Tool: i.tool}},
+		Tools:        []modules.ToolRegistration{{ID: "tool", Tool: i.tool, MaxCalls: 1}},
 		Capabilities: []modules.CapabilityRegistration{{ID: i.capabilityID, Value: struct{}{}}},
 	}
 }
