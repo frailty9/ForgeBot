@@ -18,7 +18,7 @@
 
 ## 2. 拆分核心 Admission 与主动介入模块
 
-- [ ] 2.1 从 internal/bot 和 internal/gate 拆出核心 Admission：输入合法性、消息
+- [x] 2.1 从 internal/bot 和 internal/gate 拆出核心 Admission：输入合法性、消息
       ID 去重、身份/寻址前置约束和命令优先边界不可关闭。
 - [ ] 2.2 新增 native.proactive_reply，迁移有界缓存、静默窗口、管理员引用取消、
       群组开关、flush 和 DeferredResponder。

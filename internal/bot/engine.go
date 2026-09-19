@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/admission"
 	"github.com/soleapi/forgebot/internal/gate"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
@@ -73,6 +74,7 @@ type Dependencies struct {
 type Engine struct {
 	deps      Dependencies
 	logger    *slog.Logger
+	admission *admission.Checker
 	gate      *gate.Pool
 	lifetime  sync.RWMutex
 	closing   atomic.Bool
@@ -112,10 +114,9 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 	if deps.Sender == nil {
 		return nil, fmt.Errorf("bot sender is required")
 	}
-	engine := &Engine{deps: deps, logger: logger, closed: make(chan struct{})}
+	engine := &Engine{deps: deps, logger: logger, closed: make(chan struct{}), admission: admission.New(deps.Policy.Gate.DedupTTL, deps.Policy.Gate.DedupMax)}
 	engine.gate = gate.New(ctx, engine.gatePolicy, engine.onGateFlush, gate.Options{
-		DedupTTL:      deps.Policy.Gate.DedupTTL,
-		DedupMax:      deps.Policy.Gate.DedupMax,
+		DisableDedup:  true,
 		MaxConcurrent: deps.Policy.Gate.MaxConcurrent,
 		IdleBucketTTL: time.Minute,
 	})
@@ -137,6 +138,9 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
+	}
+	if e.admission.Check(msg) == admission.Duplicate {
+		return platform.HandleResult{Accepted: false, Verdict: VerdictDuplicate.String()}, nil
 	}
 	verdict := Verdict(e.gate.Absorb(gate.Input{
 		ConversationID:   msg.ConversationID,
@@ -217,7 +221,9 @@ func (e *Engine) Shutdown(grace time.Duration) {
 func (e *Engine) Done() <-chan struct{} { return e.closed }
 
 func (e *Engine) GateStats() gate.Stats {
-	return e.gate.Stats()
+	stats := e.gate.Stats()
+	stats.Deduped = e.admission.Duplicates()
+	return stats
 }
 
 func (e *Engine) gatePolicy(conversationID string) gate.Policy {

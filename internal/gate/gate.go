@@ -159,6 +159,7 @@ type Options struct {
 	clock         clock
 	DedupTTL      time.Duration
 	DedupMax      int
+	DisableDedup  bool
 	MaxConcurrent int
 	IdleBucketTTL time.Duration
 }
@@ -184,7 +185,11 @@ func New(ctx context.Context, policy func(string) Policy, onFlush func(context.C
 	if opts.clock == nil {
 		opts.clock = realClock{}
 	}
-	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, dedup: newDedupTable(opts.DedupTTL, opts.DedupMax), sem: make(chan struct{}, opts.MaxConcurrent)}
+	var dedup *dedupTable
+	if !opts.DisableDedup {
+		dedup = newDedupTable(opts.DedupTTL, opts.DedupMax)
+	}
+	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, dedup: dedup, sem: make(chan struct{}, opts.MaxConcurrent)}
 	if opts.IdleBucketTTL > 0 {
 		go p.janitor(opts.IdleBucketTTL)
 	}
@@ -207,14 +212,14 @@ func (p *Pool) Absorb(in Input) Verdict {
 		messageTime = now
 	}
 	key := in.SessionKey()
-	if in.MsgID != "" && p.dedup.seenOrAdd("id|"+key+"|"+in.MsgID, now) {
+	if p.dedup != nil && in.MsgID != "" && p.dedup.seenOrAdd("id|"+key+"|"+in.MsgID, now) {
 		p.deduped.Add(1)
 		return VerdictDuplicate
 	}
 	// Text is only a fallback identity for adapters that cannot provide a
 	// message ID. Distinct platform events may legitimately contain the same
 	// text and must not be collapsed.
-	if text := strings.TrimSpace(in.Text); in.MsgID == "" && text != "" && p.dedup.seenOrAdd("tx|"+key+"|"+in.UserID+"|"+text, now) {
+	if p.dedup != nil && strings.TrimSpace(in.Text) != "" && in.MsgID == "" && p.dedup.seenOrAdd("tx|"+key+"|"+in.UserID+"|"+strings.TrimSpace(in.Text), now) {
 		p.deduped.Add(1)
 		return VerdictDuplicate
 	}
@@ -439,7 +444,9 @@ func (p *Pool) janitor(idle time.Duration) {
 		case <-p.ctx.Done():
 			return
 		case now := <-ticker.C:
-			p.dedup.gc(now)
+			if p.dedup != nil {
+				p.dedup.gc(now)
+			}
 			p.mu.Lock()
 			for key, b := range p.buckets {
 				b.mu.Lock()
