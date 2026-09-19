@@ -253,6 +253,8 @@ OneBot 字段：
 - `timeout`：出站请求超时。
 - `replay_ttl`、`replay_max`：入站事件防重放窗口和容量。
 
+OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被引用消息，并将引用文字和图片作为独立上下文传给 LLM；引用内容不会并入当前消息文本，因此不会影响命令识别、消息准入或去重。
+
 注意：当前 `send_token` 和 `receive_secret` 仍以明文保存在运行时 JSON 中；管理 API 的公开配置响应只显示它们是否已配置。只有 LLM API Key 已接入加密 SecretStore。
 
 ### 5.7 `administration`

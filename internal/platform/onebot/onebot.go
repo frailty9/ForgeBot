@@ -208,8 +208,8 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			return
 		}
 		msg.Media = a.resolveMedia(r.Context(), msg.Media)
-		if len(msg.Media) == 0 && msg.ReplyToMessageID != "" {
-			msg.Media = a.resolveReplyMedia(r.Context(), msg.ReplyToMessageID)
+		if msg.ReplyToMessageID != "" {
+			msg.Quoted = a.resolveQuotedMessage(r.Context(), msg.ReplyToMessageID)
 		}
 		if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.Mentioned {
 			a.logger.DebugContext(r.Context(), "onebot message ignored", "reason", "no_supported_content", "message_id", msg.MessageID)
@@ -218,8 +218,9 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		a.logger.DebugContext(r.Context(), "onebot message mapped", "conversation_id", msg.ConversationID,
 			"message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned,
-			"text_len", len([]rune(msg.Text)), "media_count", len(msg.Media))
-		if len(msg.Media) == 0 {
+			"text_len", len([]rune(msg.Text)), "media_count", len(msg.Media), "reply_to", msg.ReplyToMessageID,
+			"quoted_text_len", quotedTextLength(msg.Quoted), "quoted_media_count", quotedMediaCount(msg.Quoted))
+		if !msg.HasMedia() {
 			a.logger.DebugContext(r.Context(), "onebot media not detected",
 				"message_bytes", len(event.Message), "message_prefix", truncateForLog(string(event.Message), 320),
 				"raw_message_len", len(event.RawMessage), "raw_message_prefix", truncateForLog(event.RawMessage, 160))
@@ -298,7 +299,7 @@ func (a *Adapter) resolveMedia(ctx context.Context, media []messaging.Media) []m
 	return media
 }
 
-func (a *Adapter) resolveReplyMedia(ctx context.Context, messageID string) []messaging.Media {
+func (a *Adapter) resolveQuotedMessage(ctx context.Context, messageID string) *messaging.QuotedMessage {
 	payload := map[string]any{"message_id": numericOrString(messageID)}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -323,7 +324,9 @@ func (a *Adapter) resolveReplyMedia(ctx context.Context, messageID string) []mes
 	}
 	defer response.Body.Close()
 	var envelope struct {
-		Data struct {
+		Status  string `json:"status"`
+		Retcode int    `json:"retcode"`
+		Data    struct {
 			Message    json.RawMessage `json:"message"`
 			RawMessage string          `json:"raw_message"`
 		} `json:"data"`
@@ -332,12 +335,35 @@ func (a *Adapter) resolveReplyMedia(ctx context.Context, messageID string) []mes
 		a.logger.DebugContext(ctx, "onebot get_msg decode failed", "message_id", messageID, "err", err)
 		return nil
 	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.Retcode != 0 || envelope.Status == "failed" {
+		a.logger.DebugContext(ctx, "onebot get_msg rejected", "message_id", messageID, "http_status", response.StatusCode, "retcode", envelope.Retcode, "status", envelope.Status)
+		return nil
+	}
+	text := extractText(envelope.Data.Message)
+	if text == "" {
+		text = stripCQ(strings.TrimSpace(envelope.Data.RawMessage))
+	}
 	media := extractMedia(envelope.Data.Message, envelope.Data.RawMessage)
 	media = a.resolveMedia(ctx, media)
-	if len(media) > 0 {
-		a.logger.DebugContext(ctx, "onebot reply media resolved", "message_id", messageID, "media_count", len(media))
+	if text == "" && len(media) == 0 {
+		return nil
 	}
-	return media
+	a.logger.DebugContext(ctx, "onebot quoted message resolved", "message_id", messageID, "text_len", len([]rune(text)), "media_count", len(media))
+	return &messaging.QuotedMessage{MessageID: messageID, Text: text, Media: media}
+}
+
+func quotedTextLength(quoted *messaging.QuotedMessage) int {
+	if quoted == nil {
+		return 0
+	}
+	return len([]rune(quoted.Text))
+}
+
+func quotedMediaCount(quoted *messaging.QuotedMessage) int {
+	if quoted == nil {
+		return 0
+	}
+	return len(quoted.Media)
 }
 
 func (a *Adapter) authorized(r *http.Request, body []byte) bool {

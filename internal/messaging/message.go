@@ -21,21 +21,31 @@ type Media struct {
 	Name     string    `json:"name,omitempty"`
 }
 
+// QuotedMessage is protocol-neutral context resolved from a platform reply.
+// It remains separate from the current message so commands, admission, and
+// deduplication never interpret quoted content as new user input.
+type QuotedMessage struct {
+	MessageID string  `json:"message_id"`
+	Text      string  `json:"text,omitempty"`
+	Media     []Media `json:"media,omitempty"`
+}
+
 type InboundMessage struct {
 	// PromptSuffix is adapter-provided system-instruction context. It is kept
 	// out of the public message JSON surface so callers cannot override it.
-	PromptSuffix     string    `json:"-"`
-	ConversationID   string    `json:"conversation_id"`
-	UserID           string    `json:"user_id"`
-	UserName         string    `json:"user_name,omitempty"`
-	MessageID        string    `json:"message_id"`
-	ReplyToMessageID string    `json:"reply_to_message_id,omitempty"`
-	Text             string    `json:"text,omitempty"`
-	Media            []Media   `json:"media,omitempty"`
-	Mentioned        bool      `json:"mentioned,omitempty"`
-	Command          bool      `json:"command,omitempty"`
-	Administrator    bool      `json:"-"`
-	At               time.Time `json:"at,omitempty"`
+	PromptSuffix     string         `json:"-"`
+	ConversationID   string         `json:"conversation_id"`
+	UserID           string         `json:"user_id"`
+	UserName         string         `json:"user_name,omitempty"`
+	MessageID        string         `json:"message_id"`
+	ReplyToMessageID string         `json:"reply_to_message_id,omitempty"`
+	Quoted           *QuotedMessage `json:"quoted,omitempty"`
+	Text             string         `json:"text,omitempty"`
+	Media            []Media        `json:"media,omitempty"`
+	Mentioned        bool           `json:"mentioned,omitempty"`
+	Command          bool           `json:"command,omitempty"`
+	Administrator    bool           `json:"-"`
+	At               time.Time      `json:"at,omitempty"`
 }
 
 func (m InboundMessage) SessionKey() string {
@@ -47,7 +57,11 @@ func (m InboundMessage) Addressed() bool {
 }
 
 func (m InboundMessage) HasMedia() bool {
-	return len(m.Media) > 0
+	return len(m.Media) > 0 || m.Quoted != nil && len(m.Quoted.Media) > 0
+}
+
+func (m InboundMessage) HasQuotedContent() bool {
+	return m.Quoted != nil && (m.Quoted.Text != "" || len(m.Quoted.Media) > 0)
 }
 
 type OutboundMessage struct {

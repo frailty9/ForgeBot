@@ -89,7 +89,7 @@ func (i *instance) prepare(_ context.Context, _ hooks.Info, input hooks.Input) (
 	var text string
 	if input.Images > 0 {
 		text = i.options.ImageOnlyPrompt
-	} else if input.Mentioned && input.MediaCount == 0 {
+	} else if input.Mentioned && input.MediaCount == 0 && !input.HasQuotedText {
 		text = i.options.EmptyMentionPrompt
 	} else {
 		return hooks.InputResult{}, nil

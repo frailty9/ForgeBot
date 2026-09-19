@@ -241,6 +241,68 @@ func TestEnginePassesInboundImageToLLM(t *testing.T) {
 	}
 }
 
+func TestEngineSeparatesQuotedAndCurrentContent(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "fixed"}}
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(0)
+	message := messaging.InboundMessage{
+		ConversationID: "c", UserID: "u", MessageID: "current", ReplyToMessageID: "quoted", Mentioned: true,
+		Text:  "怎么修？",
+		Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/current.jpg"}},
+		Quoted: &messaging.QuotedMessage{
+			MessageID: "quoted", Text: "错误 401",
+			Media: []messaging.Media{{Kind: messaging.MediaImage, URL: "https://cdn.example/quoted.jpg"}},
+		},
+	}
+	result, err := engine.HandleInbound(context.Background(), message)
+	if err != nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	content := fake.request.Messages[0].Content
+	if len(content) != 4 || content[0].Text != "Quoted message:\n错误 401" || content[1].MediaURL != "https://cdn.example/quoted.jpg" || content[2].Text != "Current message:\n怎么修？" || content[3].MediaURL != "https://cdn.example/current.jpg" {
+		t.Fatalf("content = %+v", content)
+	}
+}
+
+func TestEngineUsesQuotedTextWithoutEmptyMentionPrompt(t *testing.T) {
+	registry := platform.NewRegistry()
+	sender := memory.NewSender(slog.Default())
+	if err := registry.RegisterConnector("echo", sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "c", ConnectorID: "echo", Target: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{response: llm.Response{Text: "reply"}}
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Policy: testPolicy()}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(0)
+	message := messaging.InboundMessage{
+		ConversationID: "c", UserID: "u", MessageID: "current", ReplyToMessageID: "quoted", Mentioned: true,
+		Quoted: &messaging.QuotedMessage{MessageID: "quoted", Text: "请解释这段报错"},
+	}
+	if _, err := engine.HandleInbound(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	content := fake.request.Messages[0].Content
+	if len(content) != 1 || content[0].Text != "Quoted message:\n请解释这段报错" || strings.Contains(content[0].Text, replyexperience.EmptyMentionPrompt) {
+		t.Fatalf("content = %+v", content)
+	}
+}
+
 func TestEngineAddsInstructionForImageOnlyMessage(t *testing.T) {
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(slog.Default())

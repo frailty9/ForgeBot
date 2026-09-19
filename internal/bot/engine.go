@@ -290,18 +290,17 @@ func (e *Engine) deliver(ctx context.Context, in messaging.InboundMessage, text,
 
 func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
 	text := strings.TrimSpace(in.Text)
+	hadCurrentText := text != ""
 	instructions := e.instructions(in.PromptSuffix)
 	if query, explicit := explicitSearchQuery(text); explicit {
 		return e.explicitSearch(ctx, query, instructions)
 	}
-	user := userMessage(in)
-	images := 0
-	for _, part := range user.Content {
-		if part.Type == "image" {
-			images++
-		}
-	}
-	prepared, err := e.deps.Hooks.Prepare(ctx, runFrom(ctx).info, hooks.Input{Text: text, Mentioned: in.Mentioned, Images: images, MediaCount: len(in.Media)})
+	images, mediaCount := usableMediaCounts(in)
+	hasQuotedText := in.Quoted != nil && strings.TrimSpace(in.Quoted.Text) != ""
+	prepared, err := e.deps.Hooks.Prepare(ctx, runFrom(ctx).info, hooks.Input{
+		Text: text, Mentioned: in.Mentioned, HasQuotedText: hasQuotedText,
+		Images: images, MediaCount: mediaCount,
+	})
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", errHookFailed, err)
 	}
@@ -310,18 +309,11 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	if prepared.Text != nil {
 		text = strings.TrimSpace(*prepared.Text)
-		if len(user.Content) > 0 && user.Content[0].Type == "text" {
-			user.Content = user.Content[1:]
-			if text != "" {
-				user.Content = append([]llm.ContentPart{{Type: "text", Text: text}}, user.Content...)
-			}
-		} else if text != "" {
-			user.Content = append(user.Content, llm.ContentPart{Type: "text", Text: text})
-		}
 	}
-	if text == "" && images == 0 {
+	if text == "" && images == 0 && !hasQuotedText {
 		return "", errEmptyInput
 	}
+	user := userMessage(in, text, !hadCurrentText && text != "")
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -333,7 +325,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		if strings.TrimSpace(in.Text) == "" && images > 0 {
 			text = ""
 		}
-		return name + " received: " + text, nil
+		return name + " received: " + user.Text(), nil
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
 	messages := []llm.Message{user}
@@ -418,28 +410,77 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	return final.Text, nil
 }
 
-func userMessage(in messaging.InboundMessage) llm.Message {
-	parts := make([]llm.ContentPart, 0, len(in.Media)+1)
-	text := strings.TrimSpace(in.Text)
-	if text != "" {
-		parts = append(parts, llm.ContentPart{Type: "text", Text: text})
+func userMessage(in messaging.InboundMessage, currentText string, syntheticText bool) llm.Message {
+	capacity := len(in.Media) + 1
+	if in.Quoted != nil {
+		capacity += len(in.Quoted.Media) + 1
 	}
+	parts := make([]llm.ContentPart, 0, capacity)
+	if in.HasQuotedContent() {
+		quotedText := strings.TrimSpace(in.Quoted.Text)
+		label := "Quoted message:"
+		if quotedText != "" {
+			label += "\n" + quotedText
+		}
+		parts = append(parts, llm.ContentPart{Type: "text", Text: label})
+		parts = appendImageParts(parts, in.Quoted.Media)
+	}
+	currentText = strings.TrimSpace(currentText)
+	if currentText != "" && !syntheticText {
+		if in.HasQuotedContent() {
+			currentText = "Current message:\n" + currentText
+		}
+		parts = append(parts, llm.ContentPart{Type: "text", Text: currentText})
+	}
+	parts = appendImageParts(parts, in.Media)
+	if currentText != "" && syntheticText {
+		if in.HasQuotedContent() {
+			currentText = "Current message:\n" + currentText
+		}
+		parts = append(parts, llm.ContentPart{Type: "text", Text: currentText})
+	}
+	return llm.Message{Role: llm.RoleUser, Content: parts}
+}
+
+func usableMediaCounts(in messaging.InboundMessage) (images, total int) {
+	total = len(in.Media)
 	for _, media := range in.Media {
-		if media.Kind != messaging.MediaImage {
-			continue
+		if _, ok := imagePart(media); ok {
+			images++
 		}
-		part := llm.ContentPart{Type: "image", MediaURL: strings.TrimSpace(media.URL), MimeType: strings.TrimSpace(media.MimeType)}
-		if len(media.Data) > 0 {
-			if part.MimeType == "" {
-				part.MimeType = "image/jpeg"
+	}
+	if in.Quoted != nil {
+		total += len(in.Quoted.Media)
+		for _, media := range in.Quoted.Media {
+			if _, ok := imagePart(media); ok {
+				images++
 			}
-			part.Data = base64.StdEncoding.EncodeToString(media.Data)
 		}
-		if part.MediaURL != "" || part.Data != "" {
+	}
+	return images, total
+}
+
+func appendImageParts(parts []llm.ContentPart, mediaItems []messaging.Media) []llm.ContentPart {
+	for _, media := range mediaItems {
+		if part, ok := imagePart(media); ok {
 			parts = append(parts, part)
 		}
 	}
-	return llm.Message{Role: llm.RoleUser, Content: parts}
+	return parts
+}
+
+func imagePart(media messaging.Media) (llm.ContentPart, bool) {
+	if media.Kind != messaging.MediaImage {
+		return llm.ContentPart{}, false
+	}
+	part := llm.ContentPart{Type: "image", MediaURL: strings.TrimSpace(media.URL), MimeType: strings.TrimSpace(media.MimeType)}
+	if len(media.Data) > 0 {
+		if part.MimeType == "" {
+			part.MimeType = "image/jpeg"
+		}
+		part.Data = base64.StdEncoding.EncodeToString(media.Data)
+	}
+	return part, part.MediaURL != "" || part.Data != ""
 }
 
 func (e *Engine) instructions(suffix string) string {

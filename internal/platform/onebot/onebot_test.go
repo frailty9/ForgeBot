@@ -394,14 +394,17 @@ func TestWebhookResolvesImageFileThroughGetImage(t *testing.T) {
 	}
 }
 
-func TestWebhookResolvesImageFromRepliedMessage(t *testing.T) {
+func TestWebhookResolvesQuotedTextAndImage(t *testing.T) {
 	var gotMsg bool
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/get_msg" {
 			gotMsg = true
 			_, _ = w.Write(mustJSON(t, map[string]any{"status": "ok", "retcode": 0, "data": map[string]any{
-				"message": []map[string]any{{"type": "image", "data": map[string]string{"url": "https://cdn.example/replied.jpg"}}},
+				"message": []map[string]any{
+					{"type": "text", "data": map[string]string{"text": "quoted error 401"}},
+					{"type": "image", "data": map[string]string{"url": "https://cdn.example/replied.jpg"}},
+				},
 			}}))
 			return
 		}
@@ -428,7 +431,7 @@ func TestWebhookResolvesImageFromRepliedMessage(t *testing.T) {
 		got = msg
 		return platform.HandleResult{Accepted: true, Verdict: "pass"}, nil
 	}))(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
-	if rr.Code != http.StatusOK || !gotMsg || len(got.Media) != 1 || got.Media[0].URL != "https://cdn.example/replied.jpg" {
+	if rr.Code != http.StatusOK || !gotMsg || got.Quoted == nil || got.Quoted.MessageID != "460637946" || got.Quoted.Text != "quoted error 401" || len(got.Quoted.Media) != 1 || got.Quoted.Media[0].URL != "https://cdn.example/replied.jpg" || len(got.Media) != 0 {
 		t.Fatalf("status=%d get_msg=%v message=%+v", rr.Code, gotMsg, got)
 	}
 }

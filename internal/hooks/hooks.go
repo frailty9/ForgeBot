@@ -52,10 +52,11 @@ type Info struct {
 }
 
 type Input struct {
-	Text       string
-	Mentioned  bool
-	Images     int
-	MediaCount int
+	Text          string
+	Mentioned     bool
+	HasQuotedText bool
+	Images        int
+	MediaCount    int
 }
 type InputResult struct {
 	Text *string
