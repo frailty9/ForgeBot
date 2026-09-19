@@ -136,7 +136,7 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 	}
 	engine, err := b.build(ctx, snapshot, b.Sender, retriever, "", "", moduleSet)
 	if err == nil {
-		moduleSet.Mark("active")
+		moduleSet.Start(ctx)
 	}
 	return engine, err
 }
@@ -230,7 +230,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy, Hooks: moduleSet.Chain(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {
@@ -638,6 +638,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	current.modules.Start(ctx)
 	m.started = true
 	m.setStatus(StateReady, ActionNone, current.snapshot.Version, "")
 	return nil
@@ -958,7 +959,7 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 	if generation == nil {
 		return
 	}
-	generation.modules.Mark("retiring")
+	generation.modules.Retire()
 	done := make(chan struct{})
 	m.retiring = done
 	go func() {
@@ -1029,7 +1030,11 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	if next.reflection != nil {
 		m.reflection = next.reflection
 	}
-	next.modules.Mark("active")
+	if m.started {
+		next.modules.Start(m.runCtx)
+	} else {
+		next.modules.Mark("active")
+	}
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {

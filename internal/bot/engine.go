@@ -21,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/platform"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -60,14 +61,15 @@ type GatePolicy struct {
 
 // Dependencies are the replaceable boundaries required by Engine.
 type Dependencies struct {
-	Hooks      *hooks.Chain
-	CloseHooks func(context.Context) error
-	Generation uint64
-	Sender     platform.Sender
-	LLM        llm.Client
-	Retriever  searchcontract.Retriever
-	Tools      tooling.Executor
-	Policy     Policy
+	Hooks        *hooks.Chain
+	CloseHooks   func(context.Context) error
+	Generation   uint64
+	Sender       platform.Sender
+	LLM          llm.Client
+	Retriever    searchcontract.Retriever
+	Tools        tooling.Executor
+	Participants []modules.ParticipantRegistration
+	Policy       Policy
 }
 
 // Engine handles inbound messages for one immutable runtime generation.
@@ -115,11 +117,11 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 		return nil, fmt.Errorf("bot sender is required")
 	}
 	engine := &Engine{deps: deps, logger: logger, closed: make(chan struct{}), admission: admission.New(deps.Policy.Gate.DedupTTL, deps.Policy.Gate.DedupMax)}
-	engine.gate = gate.New(ctx, engine.gatePolicy, engine.onGateFlush, gate.Options{
-		DisableDedup:  true,
-		MaxConcurrent: deps.Policy.Gate.MaxConcurrent,
-		IdleBucketTTL: time.Minute,
-	})
+	if len(deps.Participants) == 0 {
+		engine.gate = gate.New(ctx, engine.gatePolicy, engine.onGateFlush, gate.Options{
+			DisableDedup: true, MaxConcurrent: deps.Policy.Gate.MaxConcurrent, IdleBucketTTL: time.Minute,
+		})
+	}
 	return engine, nil
 }
 
@@ -142,21 +144,36 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	if e.admission.Check(msg) == admission.Duplicate {
 		return platform.HandleResult{Accepted: false, Verdict: VerdictDuplicate.String()}, nil
 	}
-	verdict := Verdict(e.gate.Absorb(gate.Input{
-		ConversationID:   msg.ConversationID,
-		MsgID:            msg.MessageID,
-		UserID:           msg.UserID,
-		UserName:         msg.UserName,
-		Text:             msg.Text,
-		ReplyToMessageID: msg.ReplyToMessageID,
-		PromptSuffix:     msg.PromptSuffix,
-		Administrator:    msg.Administrator,
-		Addressed:        msg.Addressed(),
-		HasMedia:         msg.HasMedia(),
-		At:               msg.At,
-	}))
-	if verdict != VerdictPass {
-		return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
+	for _, participant := range e.deps.Participants {
+		result, err := participant.Handle(ctx, msg, e.respondDeferred)
+		if err != nil {
+			return platform.HandleResult{Accepted: false, Verdict: "participant_failed"}, err
+		}
+		if result.Consume {
+			return platform.HandleResult{Accepted: result.Accepted, Verdict: result.Verdict}, nil
+		}
+	}
+	if e.gate == nil {
+		if !msg.Addressed() {
+			return platform.HandleResult{Accepted: false, Verdict: VerdictIgnored.String()}, nil
+		}
+	} else {
+		verdict := Verdict(e.gate.Absorb(gate.Input{
+			ConversationID:   msg.ConversationID,
+			MsgID:            msg.MessageID,
+			UserID:           msg.UserID,
+			UserName:         msg.UserName,
+			Text:             msg.Text,
+			ReplyToMessageID: msg.ReplyToMessageID,
+			PromptSuffix:     msg.PromptSuffix,
+			Administrator:    msg.Administrator,
+			Addressed:        msg.Addressed(),
+			HasMedia:         msg.HasMedia(),
+			At:               msg.At,
+		}))
+		if verdict != VerdictPass {
+			return platform.HandleResult{Accepted: verdict == VerdictAbsorbed, Verdict: verdict.String()}, nil
+		}
 	}
 	reply, err := e.replyText(ctx, msg)
 	if err != nil {
@@ -180,7 +197,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 		e.logger.DebugContext(ctx, "bot reply delivery failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
-	return platform.HandleResult{Accepted: true, Verdict: verdict.String()}, nil
+	return platform.HandleResult{Accepted: true, Verdict: VerdictPass.String()}, nil
 }
 
 // Shutdown stops pending gate work and closes external tool executors.
@@ -191,7 +208,9 @@ func (e *Engine) Shutdown(grace time.Duration) {
 			e.lifetime.Lock()
 			defer e.lifetime.Unlock()
 			defer close(e.closed)
-			e.gate.Close(0)
+			if e.gate != nil {
+				e.gate.Close(0)
+			}
 			if e.deps.CloseHooks != nil {
 				closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				if err := e.deps.CloseHooks(closeCtx); err != nil {
@@ -221,9 +240,24 @@ func (e *Engine) Shutdown(grace time.Duration) {
 func (e *Engine) Done() <-chan struct{} { return e.closed }
 
 func (e *Engine) GateStats() gate.Stats {
-	stats := e.gate.Stats()
+	stats := gate.Stats{}
+	if e.gate != nil {
+		stats = e.gate.Stats()
+	}
 	stats.Deduped = e.admission.Duplicates()
 	return stats
+}
+
+func (e *Engine) respondDeferred(ctx context.Context, in messaging.InboundMessage) {
+	ctx = e.beginRun(ctx, in, "proactive")
+	reply, err := e.replyText(ctx, in)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "generate proactive reply failed", "err", err)
+		return
+	}
+	if err := e.reply(ctx, in, reply); err != nil && !errors.Is(err, errReplySuppressed) {
+		e.logger.ErrorContext(ctx, "send proactive reply failed", "err", err)
+	}
 }
 
 func (e *Engine) gatePolicy(conversationID string) gate.Policy {

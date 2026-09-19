@@ -153,6 +153,8 @@ type Pool struct {
 	ignored   atomic.Int64
 	dropped   atomic.Int64
 	flushed   atomic.Int64
+	startOnce sync.Once
+	idleTTL   time.Duration
 }
 
 type Options struct {
@@ -160,6 +162,7 @@ type Options struct {
 	DedupTTL      time.Duration
 	DedupMax      int
 	DisableDedup  bool
+	ManualStart   bool
 	MaxConcurrent int
 	IdleBucketTTL time.Duration
 }
@@ -189,11 +192,20 @@ func New(ctx context.Context, policy func(string) Policy, onFlush func(context.C
 	if !opts.DisableDedup {
 		dedup = newDedupTable(opts.DedupTTL, opts.DedupMax)
 	}
-	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, dedup: dedup, sem: make(chan struct{}, opts.MaxConcurrent)}
-	if opts.IdleBucketTTL > 0 {
-		go p.janitor(opts.IdleBucketTTL)
+	p := &Pool{clock: opts.clock, ctx: ctx, cancel: cancel, buckets: make(map[string]*bucket), policy: policy, onFlush: onFlush, dedup: dedup, sem: make(chan struct{}, opts.MaxConcurrent), idleTTL: opts.IdleBucketTTL}
+	if !opts.ManualStart {
+		p.Start()
 	}
 	return p
+}
+
+// Start activates optional background cleanup after the owning generation has
+// been published. It is safe to call more than once.
+func (p *Pool) Start() {
+	if p == nil || p.idleTTL <= 0 {
+		return
+	}
+	p.startOnce.Do(func() { go p.janitor(p.idleTTL) })
 }
 
 // Absorb records an input and returns the immediate handling verdict.

@@ -15,6 +15,7 @@ import (
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/logging"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
@@ -49,6 +50,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	}
 	moduleRegistry := modules.NewRegistry()
 	if err := moduleRegistry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
+		return nil, err
+	}
+	if err := moduleRegistry.Register(proactivereply.Factory{}, hooks.Native, 200, hooks.Continue); err != nil {
 		return nil, err
 	}
 	builder := runtimecfg.Builder{Modules: moduleRegistry, ConnectorFactory: connectorFactory(logger), SearchFactory: searchFactory, ApplyLog: func(logConfig config.LogConfig) {

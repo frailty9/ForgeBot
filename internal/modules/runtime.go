@@ -70,9 +70,11 @@ type ParticipantResult struct {
 	Verdict  string
 }
 
+type DeferredResponder func(context.Context, messaging.InboundMessage)
+
 type ParticipantRegistration struct {
 	ID     string
-	Handle func(context.Context, messaging.InboundMessage) (ParticipantResult, error)
+	Handle func(context.Context, messaging.InboundMessage, DeferredResponder) (ParticipantResult, error)
 }
 
 type BackgroundJob struct {
