@@ -3,6 +3,8 @@ package tooling
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 )
 
 type MultiExecutor struct{ executors []Executor }
@@ -15,6 +17,30 @@ func NewMultiExecutor(executors ...Executor) Executor {
 		}
 	}
 	return &multiExecutor{executors: filtered}
+}
+
+// NewStrictMultiExecutor rejects duplicate or empty tool names across all
+// sources so an MCP server cannot silently shadow a native module tool.
+func NewStrictMultiExecutor(executors ...Executor) (Executor, error) {
+	filtered := make([]Executor, 0, len(executors))
+	seen := make(map[string]struct{})
+	for _, executor := range executors {
+		if executor == nil {
+			continue
+		}
+		for _, definition := range executor.Definitions() {
+			name := strings.TrimSpace(definition.Name)
+			if name == "" {
+				return nil, errors.New("tool definition has empty name")
+			}
+			if _, exists := seen[name]; exists {
+				return nil, fmt.Errorf("tool %q is registered by more than one provider", name)
+			}
+			seen[name] = struct{}{}
+		}
+		filtered = append(filtered, executor)
+	}
+	return &multiExecutor{executors: filtered}, nil
 }
 
 type multiExecutor struct{ executors []Executor }

@@ -32,15 +32,15 @@
 
 ## 3. 将知识检索迁入内置 Tool 插件
 
-- [ ] 3.1 新增 native.structured_search 工厂和严格 options，索引构建与资源所有权
+- [x] 3.1 新增 native.structured_search 工厂和严格 options，索引构建与资源所有权
       迁入模块实例。
-- [ ] 3.2 将 search_docs 作为 Tool Registration 挂载到宿主通用 LLM Tool 目录；
+- [x] 3.2 将 search_docs 作为 Tool Registration 挂载到宿主通用 LLM Tool 目录；
       Engine 删除 Retriever、SearchPolicy 和工具名称特判。
-- [ ] 3.3 将 /search 作为内置模块 Command Registration，复用 Search capability；
+- [x] 3.3 将 /search 作为内置模块 Command Registration，复用 Search capability；
       关闭模块时不注册命令、工具或索引。
-- [ ] 3.4 提供 search.control 和 knowledge.publisher_factory capability，迁移
+- [x] 3.4 提供 search.control 和 knowledge.publisher_factory capability，迁移
       Reload、Status 和反思所需的受控文档发布入口。
-- [ ] 3.5 回归普通消息不预检索、工具预算、显式 /search、无 LLM 回退、重载失败保留
+- [x] 3.5 回归普通消息不预检索、工具预算、显式 /search、无 LLM 回退、重载失败保留
       旧索引及 Markdown/MDX/TXT 解析行为。
 - Requirement: R2, R4, R5, R7
 

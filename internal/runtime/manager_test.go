@@ -16,7 +16,6 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
-	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -150,20 +149,13 @@ func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *te
 }
 
 func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
-	snapshot := testSnapshot()
 	root := t.TempDir()
-	snapshot.Runtime.Search.Enabled = true
-	snapshot.Runtime.Search.DocumentRoot = root
+	snapshot := searchSnapshot(t, root)
 	snapshot.Runtime.Reflection.Enabled = true
 	snapshot.Runtime.Reflection.Mode = "auto"
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
 	snapshot.Runtime.Reflection.ConversationIDs = []string{"c"}
-	manager, err := NewManager(context.Background(), snapshot, Builder{
-		Sender: registeredSender(t).registry,
-		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) {
-			return &runtimeSearch{}, nil
-		},
-	})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,10 +169,8 @@ func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
 }
 
 func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
-	snapshot := testSnapshot()
 	root := t.TempDir()
-	snapshot.Runtime.Search.Enabled = true
-	snapshot.Runtime.Search.DocumentRoot = root
+	snapshot := searchSnapshot(t, root)
 	snapshot.Runtime.Reflection.Enabled = true
 	snapshot.Runtime.Reflection.Mode = "auto"
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
@@ -189,13 +179,11 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	snapshot.Runtime.Reflection.MaxSessionDuration = time.Second
 	snapshot.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "c", UserID: "admin"}}
 	store := configuredSecrets(t, "key")
-	search := &runtimeSearch{status: searchcontract.Status{Enabled: true, State: searchcontract.StateReady}}
 	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
 		return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":true,"title":"Key rotation","question":"How do I rotate a key?","answer":"Create a replacement key and revoke the old one.","tags":["api-key"],"confidence":0.98,"reason":"reusable"}`}, nil
 	}
 	manager, err := NewManager(context.Background(), snapshot, Builder{
-		Sender: registeredSender(t).registry, Secrets: store, ClientFactory: clientFactory,
-		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) { return search, nil },
+		Sender: registeredSender(t).registry, Secrets: store, ClientFactory: clientFactory, Modules: searchRegistry(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -216,12 +204,9 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("entries=%v err=%v", entries, err)
 	}
-	if search.reloads != 1 {
-		t.Fatalf("reloads=%d", search.reloads)
-	}
 	_, status := manager.Snapshot()
-	if !status.Reflection.Active || status.Reflection.Pipeline.Published != 1 {
-		t.Fatalf("reflection status=%+v", status.Reflection)
+	if !status.Reflection.Active || status.Reflection.Pipeline.Published != 1 || status.Search.Documents != 1 {
+		t.Fatalf("reflection status=%+v search status=%+v", status.Reflection, status.Search)
 	}
 }
 

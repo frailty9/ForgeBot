@@ -22,7 +22,6 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/platform"
-	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
@@ -32,16 +31,7 @@ type Policy struct {
 	SystemPrompt          string
 	Model                 string
 	Admission             AdmissionPolicy
-	Search                SearchPolicy
 	ExtensionInstructions string
-}
-
-type SearchPolicy struct {
-	Enabled           bool
-	DefaultResults    int
-	MaxResults        int
-	MaxQueriesPerTurn int
-	MaxContextChars   int
 }
 
 type AdmissionPolicy struct {
@@ -56,9 +46,9 @@ type Dependencies struct {
 	Generation   uint64
 	Sender       platform.Sender
 	LLM          llm.Client
-	Retriever    searchcontract.Retriever
 	Tools        tooling.Executor
 	ToolBudgets  map[string]int
+	Commands     []modules.CommandRegistration
 	Participants []modules.ParticipantRegistration
 	Policy       Policy
 }
@@ -129,6 +119,9 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	if e.admission.Check(msg) == admission.Duplicate {
 		return platform.HandleResult{Accepted: false, Verdict: VerdictDuplicate.String()}, nil
 	}
+	if result, handled, err := e.handleModuleCommand(ctx, msg); handled {
+		return result, err
+	}
 	for _, participant := range e.deps.Participants {
 		result, err := participant.Handle(ctx, msg, e.respondDeferred)
 		if err != nil {
@@ -164,6 +157,37 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
 	return platform.HandleResult{Accepted: true, Verdict: VerdictPass.String()}, nil
+}
+
+func (e *Engine) handleModuleCommand(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, bool, error) {
+	text := strings.TrimSpace(message.Text)
+	if !strings.HasPrefix(text, "/") {
+		return platform.HandleResult{}, false, nil
+	}
+	fields := strings.Fields(strings.TrimPrefix(text, "/"))
+	if len(fields) == 0 {
+		return platform.HandleResult{}, false, nil
+	}
+	name := strings.ToLower(fields[0])
+	if index := strings.IndexByte(name, '@'); index >= 0 {
+		name = name[:index]
+	}
+	for _, command := range e.deps.Commands {
+		if strings.ToLower(command.Name) != name {
+			continue
+		}
+		result, err := command.Handle(ctx, modules.CommandRequest{Name: name, Arguments: append([]string(nil), fields[1:]...), ConversationID: message.ConversationID, UserID: message.UserID, MessageID: message.MessageID, Administrator: message.Administrator, Instructions: e.instructions(message.PromptSuffix)})
+		if err != nil {
+			return platform.HandleResult{Verdict: "module_command_failed"}, true, err
+		}
+		if strings.TrimSpace(result.Reply) != "" {
+			if err := e.reply(ctx, message, result.Reply); err != nil {
+				return platform.HandleResult{Verdict: "send_failed"}, true, err
+			}
+		}
+		return platform.HandleResult{Accepted: true, Verdict: "module_command"}, true, nil
+	}
+	return platform.HandleResult{}, false, nil
 }
 
 // Shutdown waits for active work and closes module and tool resources.
@@ -247,9 +271,6 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	text := strings.TrimSpace(in.Text)
 	hadCurrentText := text != ""
 	instructions := e.instructions(in.PromptSuffix)
-	if query, explicit := explicitSearchQuery(text); explicit {
-		return e.explicitSearch(ctx, query, instructions)
-	}
 	images, mediaCount := usableMediaCounts(in)
 	hasQuotedText := in.Quoted != nil && strings.TrimSpace(in.Quoted.Text) != ""
 	prepared, err := e.deps.Hooks.Prepare(ctx, runFrom(ctx).info, hooks.Input{
@@ -309,9 +330,6 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	for _, call := range response.Message.ToolCalls {
 		result := tooling.Result{Code: "budget_exhausted"}
 		budget := e.deps.ToolBudgets[call.Name]
-		if budget <= 0 {
-			budget = e.deps.Policy.Search.MaxQueriesPerTurn
-		}
 		if budget <= 0 {
 			budget = 1
 		}
@@ -469,74 +487,9 @@ func (e *Engine) toolDefinitions() []llm.ToolDefinition {
 	definitions := e.deps.Tools.Definitions()
 	result := make([]llm.ToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
-		if definition.Name == "search_docs" && !e.deps.Policy.Search.Enabled {
-			continue
-		}
 		result = append(result, llm.ToolDefinition{Name: definition.Name, Description: definition.Description, InputSchema: definition.InputSchema})
 	}
 	return result
-}
-
-func (e *Engine) explicitSearch(ctx context.Context, query, instructions string) (string, error) {
-	if !e.deps.Policy.Search.Enabled || e.deps.Retriever == nil {
-		return "文档检索尚未启用。", nil
-	}
-	if query == "" {
-		return "用法：/search <关键词或问题>", nil
-	}
-	response, err := e.deps.Retriever.Search(ctx, searchcontract.Query{Text: query, Limit: e.deps.Policy.Search.DefaultResults})
-	if err != nil {
-		e.logger.WarnContext(ctx, "explicit document search failed", "err", err)
-		return "文档检索失败，请稍后重试。", nil
-	}
-	contextText, selected := searchcontract.BuildContext(response, e.deps.Policy.Search.MaxContextChars)
-	if contextText == "" {
-		return "未在文档库中找到可靠结果。", nil
-	}
-	if e.deps.LLM == nil {
-		return formatSearchResults(selected), nil
-	}
-	result, err := e.deps.LLM.Complete(ctx, llm.Request{
-		Model: e.deps.Policy.Model, Instructions: instructions,
-		Messages: []llm.Message{
-			llm.TextMessage(llm.RoleUser, query),
-			llm.TextMessage(llm.RoleUser, contextText+"\n\n请根据以上资料回答原问题，并引用 source 路径。"),
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	return result.Text, nil
-}
-
-func explicitSearchQuery(text string) (string, bool) {
-	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return "", false
-	}
-	command := strings.ToLower(fields[0])
-	if at := strings.IndexByte(command, '@'); at >= 0 {
-		command = command[:at]
-	}
-	if command != "/search" {
-		return "", false
-	}
-	return strings.TrimSpace(strings.TrimPrefix(text, fields[0])), true
-}
-
-func formatSearchResults(results []searchcontract.Result) string {
-	var builder strings.Builder
-	builder.WriteString("文档检索结果：")
-	for index, result := range results {
-		fmt.Fprintf(&builder, "\n%d. %s", index+1, result.Path)
-		if len(result.Headings) > 0 {
-			builder.WriteString(" - " + strings.Join(result.Headings, " > "))
-		}
-		if result.Snippet != "" {
-			builder.WriteString("\n" + result.Snippet)
-		}
-	}
-	return builder.String()
 }
 
 func validateInbound(msg messaging.InboundMessage) error {

@@ -71,7 +71,6 @@ func (c RuntimeConfig) Clone() RuntimeConfig {
 		entry.Options = slices.Clone(entry.Options)
 		c.Modules[id] = entry
 	}
-	c.Search.Extensions = slices.Clone(c.Search.Extensions)
 	c.Platforms.Connectors = slices.Clone(c.Platforms.Connectors)
 	for index := range c.Platforms.Connectors {
 		if connector := c.Platforms.Connectors[index].OneBot; connector != nil {

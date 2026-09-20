@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/soleapi/forgebot/internal/capability"
 )
 
 var (
@@ -77,4 +79,10 @@ type Retriever interface {
 	Search(context.Context, Query) (Response, error)
 	Reload(context.Context) (ReloadResult, error)
 	Status() Status
+}
+
+var ControlKey = capability.NewKey[Control]("search.control.v1")
+
+type Control interface {
+	Retriever
 }

@@ -171,9 +171,7 @@ func TestProgressFailureOncePerRunAndConcurrentIsolation(t *testing.T) {
 		}
 		return llm.Response{Text: "done"}, nil
 	})
-	policy := testPolicy()
-	policy.Search = SearchPolicy{Enabled: true, MaxQueriesPerTurn: 2}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: sender, LLM: client, Tools: tooling.NewRegistry(tool), Hooks: chain, CloseHooks: closeModules, Policy: policy}, nil)
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: sender, LLM: client, Tools: tooling.NewRegistry(tool), ToolBudgets: map[string]int{"search_docs": 2}, Hooks: chain, CloseHooks: closeModules, Policy: testPolicy()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,9 +208,7 @@ func TestToolHooksCannotExpandAllowlistAndDenyBeforeProgress(t *testing.T) {
 	}
 	fake := &fakeLLM{responses: []llm.Response{{Message: llm.Message{ToolCalls: []llm.ToolCall{{ID: "x", Name: "unknown", Arguments: `{}`}, {ID: "y", Name: "search_docs", Arguments: `{}`}, {ID: "z", Name: "search_docs", Arguments: `{}`}}}}, {Text: "final"}}}
 	tool := &countingTool{}
-	policy := testPolicy()
-	policy.Search = SearchPolicy{Enabled: true, MaxQueriesPerTurn: 2}
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: testSender(func(context.Context, messaging.OutboundMessage) error { deliveries.Add(1); return nil }), LLM: fake, Tools: tooling.NewRegistry(tool), Policy: policy, Hooks: chain}, nil)
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: testSender(func(context.Context, messaging.OutboundMessage) error { deliveries.Add(1); return nil }), LLM: fake, Tools: tooling.NewRegistry(tool), ToolBudgets: map[string]int{"search_docs": 2}, Policy: testPolicy(), Hooks: chain}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ external platform
 ```
 
 Runtime configuration flows through `settings.Store -> runtime.Manager`. A
-generation owns its Engine, LLM client, Retriever, restricted Tool Executor,
+generation owns its Engine, LLM client, native Module Set, restricted Tool Executor,
 Connector Set, and operator routing.
 Candidates are built before persistence; only a successful configuration commit
 is published. Platform changes stop the old Connector Set, start the candidate,
@@ -66,7 +66,7 @@ must not depend on or expose the complete Web administration service.
   deterministic ranking, and atomic index reload.
 - `internal/tooling`: explicit tool allow-list and normalized execution result.
 - `internal/tooling/searchdocs`: read-only adapter from the tool boundary to a
-  configured Retriever.
+  configured tool providers.
 - `internal/tooling/mcp`: configured MCP client with transport abstraction.
   Streamable HTTP and stdio subprocess transports discover only allow-listed
   tools and expose them under the `mcp.<server>.<tool>` namespace.
@@ -140,22 +140,21 @@ frontmatter, path, code, and body fields receive distinct weights. Query term
 coverage filters weak results, and ties are resolved by stable path and section
 identity ordering.
 
-Search configuration belongs to versioned runtime JSON. A configuration update
-builds its candidate index before persistence and generation publication. Other
-runtime changes and explicit Bot restart reuse the current Retriever. A document
-reload builds beside the active immutable index, then atomically swaps the index
-snapshot; failed reloads retain the old snapshot and publish a bounded
-operational event.
+`native.structured_search` owns the index and its runtime options. A configuration
+update builds the candidate module before persistence and generation publication.
+The module registers `search_docs` into the same LLM Tool directory used by MCP
+tools, registers the optional `/search` command, and provides typed reload/status
+capabilities. A document reload atomically swaps the index snapshot; failures
+retain the old snapshot and publish a bounded operational event.
 
 `search.Retriever` is independent of the structured implementation. Vector and
 hybrid retrieval may implement the same contract later, but their dependencies,
 configuration values, and index files are deliberately absent today.
 
-The reflection publisher writes Bot-promoted knowledge to the configured
-`reflection.extra_directory`. Relative paths are resolved from
-`search.document_root`; absolute paths are used as-is. The default remains
-`extra`. The search service itself remains read-only and indexes the directory
-through its normal recursive scan.
+The reflection pipeline obtains a bounded PublisherFactory capability from the
+active search module. Relative extra paths resolve from the module document root;
+absolute paths are used as-is. Search itself remains read-only and indexes the
+published directory through its normal recursive scan.
 
 ## MCP Transport Rules
 
@@ -188,8 +187,8 @@ ForgeBot protocol surface.
    streaming edit behavior.
 2. Personal QQ / OneBot adapter: reuse DTOs, HMAC-SHA1 verification, segment
    parsing, reply segment construction, and HTTP send API.
-3. Structured search: implemented as an isolated Retriever with no MuseBot
-   global configuration or runtime dependencies.
+3. Structured search: implemented as a native Tool module with an isolated
+   Retriever implementation and no platform-specific dependencies.
 4. LLM protocol clients: implemented behind `internal/llm.Client`, including
    non-streaming tool-call round trips; retry policy and streamed tool-call
    assembly remain follow-up work.

@@ -7,6 +7,43 @@
         "image_only_prompt": "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。",
         "search_progress_text": "正在检索相关文档，请稍候。"
       }
+    },
+    "native.proactive_reply": {
+      "enabled": false,
+      "options": {
+        "silence": "4s",
+        "max_window": "25s",
+        "max_buffered": 50,
+        "max_text_len": 500,
+        "max_concurrent": 4,
+        "groups": {
+          "support": {
+            "enabled": false
+          }
+        }
+      }
+    },
+    "native.structured_search": {
+      "enabled": false,
+      "options": {
+        "document_root": "D:/forgebot-docs",
+        "extensions": [
+          ".md",
+          ".mdx",
+          ".txt"
+        ],
+        "default_results": 5,
+        "max_results": 8,
+        "min_match_ratio": 0.35,
+        "query_timeout": "750ms",
+        "build_timeout": "20s",
+        "max_queries_per_turn": 1,
+        "max_context_chars": 12000,
+        "max_section_chars": 8000,
+        "max_file_bytes": 4194304,
+        "max_total_bytes": 268435456,
+        "max_files": 10000
+      }
     }
   },
   "log": {
@@ -14,8 +51,8 @@
     "format": "text"
   },
   "bot": {
-	"name": "ForgeBot",
-	"system_prompt": ""
+    "name": "ForgeBot",
+    "system_prompt": ""
   },
   "llm": {
     "protocol": "openai_responses",
@@ -28,24 +65,6 @@
   "admission": {
     "dedup_ttl": "60s",
     "dedup_max": 10000
-  },
-  "search": {
-    "enabled": false,
-    "policy": "on_demand",
-    "backend": "structured",
-    "document_root": "D:/forgebot-docs",
-    "extensions": [".md", ".mdx", ".txt"],
-    "default_results": 5,
-    "max_results": 8,
-    "min_match_ratio": 0.35,
-    "query_timeout": "750ms",
-    "build_timeout": "20s",
-    "max_queries_per_turn": 1,
-    "max_context_chars": 12000,
-    "max_section_chars": 8000,
-    "max_file_bytes": 4194304,
-    "max_total_bytes": 268435456,
-    "max_files": 10000
   },
   "platforms": {
     "connectors": [
@@ -73,8 +92,17 @@
       }
     ],
     "groups": [
-      {"id": "local", "connector_id": "echo-local", "target": "local" },
-      {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
+      {
+        "id": "local",
+        "connector_id": "echo-local",
+        "target": "local"
+      },
+      {
+        "id": "support",
+        "connector_id": "qq-main",
+        "target": "10001",
+        "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"
+      }
     ]
   },
   "operations": {
@@ -82,19 +110,31 @@
       {
         "conversation_id": "local",
         "notifications": true,
-        "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
+        "commands": [
+          "status",
+          "restart",
+          "pause",
+          "resume",
+          "proactive",
+          "reload_docs"
+        ]
       }
     ]
   },
   "administration": {
     "administrators": [
-      {"conversation_id": "local", "user_id": "replace-with-platform-user-id"}
+      {
+        "conversation_id": "local",
+        "user_id": "replace-with-platform-user-id"
+      }
     ]
   },
   "reflection": {
     "enabled": false,
     "mode": "off",
-    "conversation_ids": ["local"],
+    "conversation_ids": [
+      "local"
+    ],
     "scan_interval": "15m",
     "message_ttl": "24h",
     "quiet_window": "3m",
@@ -114,7 +154,11 @@
         "transport": "streamable_http",
         "endpoint": "http://127.0.0.1:9000/mcp",
         "api_key_ref": "mcp/platform",
-        "allowed_tools": ["list_models", "get_model_pricing", "get_group_multiplier"],
+        "allowed_tools": [
+          "list_models",
+          "get_model_pricing",
+          "get_group_multiplier"
+        ],
         "timeout": "10s",
         "max_response_bytes": 1048576
       },
@@ -123,18 +167,24 @@
         "enabled": false,
         "transport": "stdio",
         "command": "node",
-        "args": ["./extensions/local-tools/server.js"],
+        "args": [
+          "./extensions/local-tools/server.js"
+        ],
         "working_directory": "./extensions/local-tools",
         "environment": {
           "FORGEBOT_TOOL_MODE": "readonly"
         },
-        "allowed_tools": ["list_models"],
+        "allowed_tools": [
+          "list_models"
+        ],
         "timeout": "10s",
         "max_response_bytes": 1048576
       }
     ],
     "skills": {
-      "directories": ["skills"],
+      "directories": [
+        "skills"
+      ],
       "max_file_bytes": 131072,
       "max_total_bytes": 1048576,
       "max_files": 64

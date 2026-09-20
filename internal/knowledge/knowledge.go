@@ -2,7 +2,10 @@
 // reflection results.
 package knowledge
 
-import "time"
+import (
+	"github.com/soleapi/forgebot/internal/capability"
+	"time"
+)
 
 // Entry is the storage-neutral representation of an accepted reflection.
 // Source fields are identifiers only; message bodies and user identities are
@@ -30,3 +33,13 @@ type PublishResult struct {
 	Path        string
 	ContentHash string
 }
+
+type Publisher interface {
+	Publish(Entry) (PublishResult, error)
+}
+
+type PublisherFactory interface {
+	New(extraDirectory string) (Publisher, error)
+}
+
+var PublisherFactoryKey = capability.NewKey[PublisherFactory]("knowledge.publisher_factory.v1")

@@ -65,7 +65,6 @@ type RuntimeConfig struct {
 	Bot            BotConfig               `json:"bot"`
 	Admission      AdmissionConfig         `json:"admission"`
 	LLM            LLMConfig               `json:"llm"`
-	Search         SearchConfig            `json:"search"`
 	Platforms      PlatformConfig          `json:"platforms"`
 	Administration AdministrationConfig    `json:"administration"`
 	Reflection     ReflectionConfig        `json:"reflection"`
@@ -161,26 +160,6 @@ type AdmissionConfig struct {
 	DedupMax int           `json:"dedup_max" yaml:"dedup_max"`
 }
 
-// SearchConfig controls the structured local document index.
-type SearchConfig struct {
-	Enabled           bool          `json:"enabled" yaml:"enabled"`
-	Policy            string        `json:"policy" yaml:"policy"`
-	Backend           string        `json:"backend" yaml:"backend"`
-	DocumentRoot      string        `json:"document_root" yaml:"document_root"`
-	Extensions        []string      `json:"extensions" yaml:"extensions"`
-	DefaultResults    int           `json:"default_results" yaml:"default_results"`
-	MaxResults        int           `json:"max_results" yaml:"max_results"`
-	MinMatchRatio     float64       `json:"min_match_ratio" yaml:"min_match_ratio"`
-	QueryTimeout      time.Duration `json:"query_timeout" yaml:"query_timeout"`
-	BuildTimeout      time.Duration `json:"build_timeout" yaml:"build_timeout"`
-	MaxQueriesPerTurn int           `json:"max_queries_per_turn" yaml:"max_queries_per_turn"`
-	MaxContextChars   int           `json:"max_context_chars" yaml:"max_context_chars"`
-	MaxSectionChars   int           `json:"max_section_chars" yaml:"max_section_chars"`
-	MaxFileBytes      int64         `json:"max_file_bytes" yaml:"max_file_bytes"`
-	MaxTotalBytes     int64         `json:"max_total_bytes" yaml:"max_total_bytes"`
-	MaxFiles          int           `json:"max_files" yaml:"max_files"`
-}
-
 // PlatformConfig declares connectors and logical conversation bindings.
 type PlatformConfig struct {
 	Connectors []ConnectorConfig    `json:"connectors" yaml:"connectors"`
@@ -274,13 +253,6 @@ func DefaultRuntime() RuntimeConfig {
 		Bot:       BotConfig{Name: "ForgeBot"},
 		LLM:       LLMConfig{Protocol: llm.OpenAIResponses, APIKeyRef: defaultAPIKeyRef, Timeout: 60 * time.Second},
 		Admission: AdmissionConfig{DedupTTL: 60 * time.Second, DedupMax: 10000},
-		Search: SearchConfig{
-			Enabled: false, Policy: "on_demand", Backend: "structured",
-			Extensions: []string{".md", ".mdx", ".txt"}, DefaultResults: 5, MaxResults: 8,
-			MinMatchRatio: 0.35, QueryTimeout: 750 * time.Millisecond, BuildTimeout: 20 * time.Second,
-			MaxQueriesPerTurn: 1, MaxContextChars: 12000, MaxSectionChars: 8000,
-			MaxFileBytes: 4 << 20, MaxTotalBytes: 256 << 20, MaxFiles: 10000,
-		},
 		Platforms: PlatformConfig{
 			Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
 			Groups:     []GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}},
@@ -403,7 +375,6 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		if err := decodeStrictJSON(data, &runtime); err != nil {
 			return RuntimeDocument{}, err
 		}
-		normalizeSearchDefaults(&runtime)
 		normalizeExtensionsDefaults(&runtime)
 		if err := runtime.Validate(); err != nil {
 			return RuntimeDocument{}, err
@@ -414,7 +385,6 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 	if err := decodeStrictJSON(data, &document); err != nil {
 		return RuntimeDocument{}, err
 	}
-	normalizeSearchDefaults(&document.Runtime)
 	normalizeExtensionsDefaults(&document.Runtime)
 	if document.Version == 0 {
 		return RuntimeDocument{}, errors.New("runtime document version must be positive")
@@ -427,7 +397,6 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 	}
 	for index := range document.History {
 		revision := &document.History[index]
-		normalizeSearchDefaults(&revision.Runtime)
 		normalizeExtensionsDefaults(&revision.Runtime)
 		if revision.Version == 0 || revision.UpdatedAt.IsZero() {
 			return RuntimeDocument{}, errors.New("runtime history metadata is invalid")
@@ -437,16 +406,6 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		}
 	}
 	return document, nil
-}
-
-func normalizeSearchDefaults(runtime *RuntimeConfig) {
-	if runtime == nil {
-		return
-	}
-	search := runtime.Search
-	if !search.Enabled && search.Policy == "" && search.Backend == "" && len(search.Extensions) == 0 {
-		runtime.Search = DefaultRuntime().Search
-	}
 }
 
 func loadStaticYAML(path string, target *StaticConfig) error {
@@ -582,16 +541,13 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.LLM.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.Search.Validate(); err != nil {
-		problems = append(problems, err.Error())
-	}
 	if err := c.Platforms.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if err := c.Administration.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.Reflection.Validate(c.Search, c.Platforms); err != nil {
+	if err := c.Reflection.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if err := c.Operations.Validate(c.Platforms); err != nil {
@@ -689,7 +645,7 @@ func (c ExtensionsConfig) Validate() error {
 	return nil
 }
 
-func (c ReflectionConfig) Validate(search SearchConfig, platforms PlatformConfig) error {
+func (c ReflectionConfig) Validate(platforms PlatformConfig) error {
 	if !c.Enabled && c.Mode == "" {
 		return nil
 	}
@@ -700,23 +656,8 @@ func (c ReflectionConfig) Validate(search SearchConfig, platforms PlatformConfig
 	if c.Enabled && c.Mode == "off" {
 		problems = append(problems, "reflection.mode must be auto when reflection is enabled")
 	}
-	if c.Enabled && !search.Enabled {
-		problems = append(problems, "reflection requires search to be enabled")
-	}
 	if c.Enabled && strings.TrimSpace(c.ExtraDirectory) == "" {
 		problems = append(problems, "reflection.extra_directory is required when reflection is enabled")
-	}
-	if c.Enabled {
-		hasMarkdown := false
-		for _, extension := range search.Extensions {
-			if strings.EqualFold(strings.TrimSpace(extension), ".md") {
-				hasMarkdown = true
-				break
-			}
-		}
-		if !hasMarkdown {
-			problems = append(problems, "reflection requires search.extensions to include .md")
-		}
 	}
 	knownConversations := make(map[string]struct{}, len(platforms.Groups))
 	for _, group := range platforms.Groups {
@@ -796,83 +737,6 @@ func (c AdministrationConfig) Validate(platforms PlatformConfig) error {
 		} else {
 			seen[key] = struct{}{}
 		}
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-func (c SearchConfig) Validate() error {
-	// A zero value represents legacy runtime JSON written before Search existed.
-	if !c.Enabled && c.Policy == "" && c.Backend == "" && len(c.Extensions) == 0 {
-		return nil
-	}
-	var problems []string
-	if c.Policy != "on_demand" {
-		problems = append(problems, "search.policy must be on_demand")
-	}
-	if c.Backend != "structured" {
-		problems = append(problems, "search.backend must be structured")
-	}
-	if c.Enabled {
-		root := strings.TrimSpace(c.DocumentRoot)
-		if root == "" {
-			problems = append(problems, "search.document_root is required when search is enabled")
-		} else if !filepath.IsAbs(root) {
-			problems = append(problems, "search.document_root must be absolute")
-		}
-	}
-	if len(c.Extensions) == 0 {
-		problems = append(problems, "search.extensions must not be empty")
-	}
-	seenExtensions := make(map[string]struct{}, len(c.Extensions))
-	for index, extension := range c.Extensions {
-		extension = strings.ToLower(strings.TrimSpace(extension))
-		if extension != ".md" && extension != ".mdx" && extension != ".txt" {
-			problems = append(problems, fmt.Sprintf("search.extensions[%d] must be .md, .mdx, or .txt", index))
-		} else if _, exists := seenExtensions[extension]; exists {
-			problems = append(problems, fmt.Sprintf("search.extensions[%d] is duplicated", index))
-		} else {
-			seenExtensions[extension] = struct{}{}
-		}
-	}
-	if c.DefaultResults <= 0 {
-		problems = append(problems, "search.default_results must be positive")
-	}
-	if c.MaxResults <= 0 {
-		problems = append(problems, "search.max_results must be positive")
-	} else if c.DefaultResults > c.MaxResults {
-		problems = append(problems, "search.default_results must not exceed search.max_results")
-	}
-	if c.MinMatchRatio <= 0 || c.MinMatchRatio > 1 {
-		problems = append(problems, "search.min_match_ratio must be greater than 0 and at most 1")
-	}
-	if c.QueryTimeout <= 0 {
-		problems = append(problems, "search.query_timeout must be positive")
-	}
-	if c.BuildTimeout <= 0 {
-		problems = append(problems, "search.build_timeout must be positive")
-	}
-	if c.MaxQueriesPerTurn <= 0 {
-		problems = append(problems, "search.max_queries_per_turn must be positive")
-	}
-	if c.MaxContextChars <= 0 {
-		problems = append(problems, "search.max_context_chars must be positive")
-	}
-	if c.MaxSectionChars <= 0 {
-		problems = append(problems, "search.max_section_chars must be positive")
-	}
-	if c.MaxFileBytes <= 0 {
-		problems = append(problems, "search.max_file_bytes must be positive")
-	}
-	if c.MaxTotalBytes <= 0 {
-		problems = append(problems, "search.max_total_bytes must be positive")
-	} else if c.MaxFileBytes > c.MaxTotalBytes {
-		problems = append(problems, "search.max_file_bytes must not exceed search.max_total_bytes")
-	}
-	if c.MaxFiles <= 0 {
-		problems = append(problems, "search.max_files must be positive")
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -1086,7 +950,6 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"timeout": c.Runtime.LLM.Timeout.String(), "api_key_configured": apiKeyConfigured,
 			},
 			"admission":      c.Runtime.Admission,
-			"search":         c.Runtime.Search,
 			"platforms":      c.Runtime.Platforms.Public(),
 			"administration": c.Runtime.Administration,
 			"reflection":     c.Runtime.Reflection,

@@ -23,3 +23,11 @@ func TestRegistryOnlyExecutesRegisteredTools(t *testing.T) {
 		t.Fatalf("result=%+v calls=%d", result, tool.calls)
 	}
 }
+
+func TestStrictMultiExecutorRejectsDuplicateToolNames(t *testing.T) {
+	first := NewRegistry(&testTool{})
+	second := NewRegistry(&testTool{})
+	if _, err := NewStrictMultiExecutor(first, second); err == nil {
+		t.Fatal("duplicate tool providers were accepted")
+	}
+}

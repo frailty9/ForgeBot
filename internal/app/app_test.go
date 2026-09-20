@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -10,7 +11,10 @@ import (
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
@@ -35,8 +39,9 @@ func TestAppComposesStructuredSearchForExplicitQuery(t *testing.T) {
 	}
 	snapshot := config.DefaultSnapshot()
 	snapshot.Runtime.LLM.Model = ""
-	snapshot.Runtime.Search.Enabled = true
-	snapshot.Runtime.Search.DocumentRoot = documentRoot
+	enabled := true
+	options, _ := json.Marshal(map[string]any{"document_root": documentRoot})
+	snapshot.Runtime.Modules = map[string]config.ModuleConfig{structuredsearch.ID: {Enabled: &enabled, Options: options}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registry := platform.NewRegistry()
 	sender := memory.NewSender(logger)
@@ -46,7 +51,11 @@ func TestAppComposesStructuredSearchForExplicitQuery(t *testing.T) {
 	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "local", ConnectorID: "echo", Target: "local"}); err != nil {
 		t.Fatal(err)
 	}
-	runtimeManager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, SearchFactory: searchFactory})
+	moduleRegistry := modules.NewRegistry()
+	if err := moduleRegistry.Register(structuredsearch.Factory{}, hooks.Native, 300, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	runtimeManager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, Modules: moduleRegistry})
 	if err != nil {
 		t.Fatal(err)
 	}

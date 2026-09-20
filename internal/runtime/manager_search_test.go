@@ -2,112 +2,90 @@ package runtime
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/hooks"
+	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/notification"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 )
 
-type runtimeSearch struct {
-	id      string
-	reloads int
-	status  searchcontract.Status
-	err     error
-}
-
-type blockingRuntimeSearch struct {
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (*blockingRuntimeSearch) Search(context.Context, searchcontract.Query) (searchcontract.Response, error) {
-	return searchcontract.Response{}, nil
-}
-func (s *blockingRuntimeSearch) Reload(ctx context.Context) (searchcontract.ReloadResult, error) {
-	close(s.entered)
-	select {
-	case <-s.release:
-		return searchcontract.ReloadResult{}, nil
-	case <-ctx.Done():
-		return searchcontract.ReloadResult{}, ctx.Err()
+func searchRegistry(t *testing.T) *modules.Registry {
+	t.Helper()
+	registry := modules.NewRegistry()
+	if err := registry.Register(structuredsearch.Factory{}, hooks.Native, 300, hooks.Continue); err != nil {
+		t.Fatal(err)
 	}
-}
-func (*blockingRuntimeSearch) Status() searchcontract.Status {
-	return searchcontract.Status{Enabled: true, State: searchcontract.StateReady}
+	return registry
 }
 
-func (s *runtimeSearch) Search(context.Context, searchcontract.Query) (searchcontract.Response, error) {
-	return searchcontract.Response{}, nil
-}
-func (s *runtimeSearch) Reload(context.Context) (searchcontract.ReloadResult, error) {
-	s.reloads++
-	if s.err != nil {
-		return searchcontract.ReloadResult{}, s.err
-	}
-	return searchcontract.ReloadResult{Documents: 2, Sections: 5, Took: time.Millisecond, CompletedAt: time.Now().UTC()}, nil
-}
-func (s *runtimeSearch) Status() searchcontract.Status { return s.status }
-
-func TestManagerBuildsSearchOnlyWhenConfigurationChanges(t *testing.T) {
-	snapshot := searchSnapshot(t, "first")
-	var built []*runtimeSearch
-	factory := func(_ context.Context, cfg config.SearchConfig) (searchcontract.Retriever, error) {
-		search := &runtimeSearch{id: cfg.DocumentRoot, status: searchcontract.Status{Enabled: true, State: searchcontract.StateReady, Documents: 1, Sections: 2}}
-		built = append(built, search)
-		return search, nil
-	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, SearchFactory: factory})
+func searchSnapshot(t *testing.T, root string) config.Snapshot {
+	t.Helper()
+	snapshot := testSnapshot()
+	enabled := true
+	options, err := json.Marshal(map[string]any{"document_root": root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(built) != 1 {
-		t.Fatalf("initial builds = %d", len(built))
+	snapshot.Runtime.Modules = map[string]config.ModuleConfig{
+		structuredsearch.ID: {Enabled: &enabled, Options: options},
 	}
-	nextRuntime := snapshot.Runtime
-	nextRuntime.Bot.Name = "Updated"
-	if _, err := manager.CommitRuntime(context.Background(), nextRuntime, persistedSnapshot(snapshot, 2, nextRuntime)); err != nil {
+	return snapshot
+}
+
+func documentRoot(t *testing.T, name string) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if len(built) != 1 {
-		t.Fatalf("non-search update rebuilt index: %d", len(built))
-	}
-	if err := manager.Restart(context.Background(), "test"); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "guide.md"), []byte("# Guide\n\nAuthentication uses an API key."), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if len(built) != 1 {
-		t.Fatalf("restart rebuilt index: %d", len(built))
+	return root
+}
+
+func TestManagerBuildsSearchModuleAndClassifiesModuleChanges(t *testing.T) {
+	firstRoot := documentRoot(t, "first")
+	snapshot := searchSnapshot(t, firstRoot)
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, status := manager.Snapshot()
+	if !status.Search.Enabled || status.Search.State != searchcontract.StateReady {
+		t.Fatalf("search status = %+v", status.Search)
 	}
 	current, _ := manager.Snapshot()
-	nextRuntime = current.Runtime
-	nextRuntime.Search.DocumentRoot = filepath.Join(t.TempDir(), "second")
-	result, err := manager.CommitRuntime(context.Background(), nextRuntime, persistedSnapshot(current, 3, nextRuntime))
+	next := current.Runtime
+	secondRoot := documentRoot(t, "second")
+	enabled := true
+	options, _ := json.Marshal(map[string]any{"document_root": secondRoot})
+	next.Modules = map[string]config.ModuleConfig{structuredsearch.ID: {Enabled: &enabled, Options: options}}
+	result, err := manager.CommitRuntime(context.Background(), next, persistedSnapshot(current, 2, next))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Action != ActionReplaceSearch || len(built) != 2 {
-		t.Fatalf("result=%+v builds=%d", result, len(built))
+	if result.Action != ActionReplaceModules {
+		t.Fatalf("action = %s", result.Action)
 	}
 }
 
-func TestManagerSearchCandidateFailureDoesNotPersistOrPublish(t *testing.T) {
-	snapshot := searchSnapshot(t, "working")
-	working := &runtimeSearch{status: searchcontract.Status{Enabled: true, State: searchcontract.StateReady}}
-	factory := func(_ context.Context, cfg config.SearchConfig) (searchcontract.Retriever, error) {
-		if filepath.Base(cfg.DocumentRoot) == "broken" {
-			return nil, errors.New("index failed")
-		}
-		return working, nil
-	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, SearchFactory: factory})
+func TestManagerSearchCandidateFailureDoesNotPersist(t *testing.T) {
+	snapshot := searchSnapshot(t, documentRoot(t, "working"))
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	next := snapshot.Runtime
-	next.Search.DocumentRoot = filepath.Join(t.TempDir(), "broken")
+	enabled := true
+	options, _ := json.Marshal(map[string]any{"document_root": filepath.Join(t.TempDir(), "missing")})
+	next.Modules = map[string]config.ModuleConfig{structuredsearch.ID: {Enabled: &enabled, Options: options}}
 	persisted := false
 	_, err = manager.CommitRuntime(context.Background(), next, func() (config.Snapshot, error) {
 		persisted = true
@@ -116,71 +94,26 @@ func TestManagerSearchCandidateFailureDoesNotPersistOrPublish(t *testing.T) {
 	if err == nil || persisted {
 		t.Fatalf("err=%v persisted=%v", err, persisted)
 	}
-	current, _ := manager.Snapshot()
-	if current.Version != snapshot.Version {
-		t.Fatalf("current version = %d", current.Version)
-	}
-	if _, err := manager.ReloadSearch(context.Background(), ""); err != nil || working.reloads != 1 {
-		t.Fatalf("old search reload err=%v reloads=%d", err, working.reloads)
+	if _, reloadErr := manager.ReloadSearch(context.Background(), ""); reloadErr != nil {
+		t.Fatal(reloadErr)
 	}
 }
 
 func TestManagerReloadSearchPublishesSourceAwareEvent(t *testing.T) {
-	snapshot := searchSnapshot(t, "working")
-	search := &runtimeSearch{status: searchcontract.Status{Enabled: true, State: searchcontract.StateReady}}
+	snapshot := searchSnapshot(t, documentRoot(t, "working"))
 	publisher := &recordingPublisher{events: make(chan notification.Event, 2)}
-	manager, err := NewManager(context.Background(), snapshot, Builder{
-		Sender: registeredSender(t).registry, Notifications: publisher,
-		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) { return search, nil },
-	})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t), Notifications: publisher})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := manager.ReloadSearch(context.Background(), "ops")
-	if err != nil || result.Documents != 2 || search.reloads != 1 {
-		t.Fatalf("result=%+v err=%v reloads=%d", result, err, search.reloads)
+	if err != nil || result.Documents != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	event := <-publisher.events
 	if event.Component != "search" || event.Code != "reloaded" || event.ExcludeConversationID != "ops" {
 		t.Fatalf("event = %+v", event)
 	}
-	_, status := manager.Snapshot()
-	if status.Search.State != searchcontract.StateReady {
-		t.Fatalf("status = %+v", status)
-	}
-}
-
-func TestManagerRejectsConcurrentSearchReload(t *testing.T) {
-	snapshot := searchSnapshot(t, "working")
-	search := &blockingRuntimeSearch{entered: make(chan struct{}), release: make(chan struct{})}
-	manager, err := NewManager(context.Background(), snapshot, Builder{
-		Sender:        registeredSender(t).registry,
-		SearchFactory: func(context.Context, config.SearchConfig) (searchcontract.Retriever, error) { return search, nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, reloadErr := manager.ReloadSearch(context.Background(), "")
-		done <- reloadErr
-	}()
-	<-search.entered
-	if _, err := manager.ReloadSearch(context.Background(), ""); !errors.Is(err, searchcontract.ErrReloadInProgress) {
-		t.Fatalf("concurrent reload error = %v", err)
-	}
-	close(search.release)
-	if err := <-done; err != nil {
-		t.Fatalf("first reload error = %v", err)
-	}
-}
-
-func searchSnapshot(t *testing.T, suffix string) config.Snapshot {
-	t.Helper()
-	snapshot := testSnapshot()
-	snapshot.Runtime.Search.Enabled = true
-	snapshot.Runtime.Search.DocumentRoot = filepath.Join(t.TempDir(), suffix)
-	return snapshot
 }
 
 func persistedSnapshot(current config.Snapshot, version uint64, runtime config.RuntimeConfig) Persist {

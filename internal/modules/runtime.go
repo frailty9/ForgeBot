@@ -47,6 +47,7 @@ type CommandRequest struct {
 	UserID         string
 	MessageID      string
 	Administrator  bool
+	Instructions   string
 }
 
 type CommandResult struct {

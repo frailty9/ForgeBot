@@ -164,36 +164,38 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 消息合法性、身份解析、寻址判断和去重属于不可关闭的核心 Admission。未 @ 消息的
 缓存、静默窗口和主动介入由 `native.proactive_reply` 模块配置。
 
-### 5.5 `search`
+### 5.5 `modules.native.structured_search`
 
 ```json
 {
   "enabled": true,
-  "policy": "on_demand",
-  "backend": "structured",
-  "document_root": "D:/forgebot-docs",
-  "extensions": [".md", ".mdx", ".txt"],
-  "default_results": 5,
-  "max_results": 8,
-  "min_match_ratio": 0.35,
-  "query_timeout": "750ms",
-  "build_timeout": "20s",
-  "max_queries_per_turn": 1,
-  "max_context_chars": 12000,
-  "max_section_chars": 8000,
-  "max_file_bytes": 4194304,
-  "max_total_bytes": 268435456,
-  "max_files": 10000
+  "options": {
+    "document_root": "D:/forgebot-docs",
+    "extensions": [".md", ".mdx", ".txt"],
+    "default_results": 5,
+    "max_results": 8,
+    "min_match_ratio": 0.35,
+    "query_timeout": "750ms",
+    "build_timeout": "20s",
+    "max_queries_per_turn": 1,
+    "max_context_chars": 12000,
+    "max_section_chars": 8000,
+    "max_file_bytes": 4194304,
+    "max_total_bytes": 268435456,
+    "max_files": 10000
+  }
 }
 ```
 
-- 当前只支持 `policy: on_demand` 和 `backend: structured`。
 - 启用时 `document_root` 必须是绝对路径。
 - 扩展名只允许 `.md`、`.mdx`、`.txt`，且不能重复。
 - `default_results` 不得大于 `max_results`；`min_match_ratio` 范围为 `(0, 1]`。
 - `max_file_bytes` 不得大于 `max_total_bytes`；其余超时和资源上限必须为正数。
 
-普通消息不会自动预检索。模型可按需调用只读的 `search_docs` 工具，`max_queries_per_turn` 限制单轮调用次数；用户也可发送 `/search <query>` 直接检索。搜索配置更新时会先构建候选索引，成功后才切换；构建失败不会替换当前索引。
+该模块拥有索引生命周期，并通过通用 LLM Tool 目录注册只读的 `search_docs`。普通
+消息不会自动预检索；模型按需调用工具，`max_queries_per_turn` 限制单轮调用次数。
+模块还注册 `/search <query>` 命令，并提供索引状态与重载 capability。配置更新时会
+先构建候选索引，成功后才切换；构建失败不会替换当前 generation。
 
 ### 5.6 `platforms`
 
@@ -308,7 +310,8 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 - `enabled: true` 且 `mode: auto`；停用时使用 `mode: off`。
 - 搜索已启用，`extensions` 包含 `.md`。
 - `conversation_ids` 非空、无重复并引用已绑定群组。
-- `extra_directory` 可省略（默认 `extra`）。相对路径相对于 `search.document_root`，例如 `generated-knowledge` 会写入 `<document_root>/generated-knowledge/`；绝对路径直接作为输出目录。
+- `extra_directory` 可省略（默认 `extra`）。相对路径相对于
+  `modules.native.structured_search.options.document_root`；绝对路径直接作为输出目录。
 - LLM 模型及其 API Key 可用。
 - 所有 duration 和容量为正数，`min_confidence` 范围为 `(0, 1]`。
 

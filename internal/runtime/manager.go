@@ -18,7 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/knowledge/markdown"
+	"github.com/soleapi/forgebot/internal/knowledge"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -35,7 +35,6 @@ import (
 	"github.com/soleapi/forgebot/internal/skills"
 	"github.com/soleapi/forgebot/internal/tooling"
 	toolingmcp "github.com/soleapi/forgebot/internal/tooling/mcp"
-	"github.com/soleapi/forgebot/internal/tooling/searchdocs"
 )
 
 var (
@@ -64,7 +63,7 @@ const (
 	ActionUpdateLog         Action = "update_log"
 	ActionReplaceLLM        Action = "replace_llm"
 	ActionReplaceSecret     Action = "replace_secret"
-	ActionReplaceSearch     Action = "replace_search"
+	ActionReplaceModules    Action = "replace_modules"
 	ActionRestartEngine     Action = "restart_engine"
 	ActionRestartConnectors Action = "restart_connectors"
 	ActionRestartBot        Action = "restart_bot"
@@ -106,7 +105,6 @@ type ApplyResult struct {
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
 type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
-type SearchFactory func(context.Context, config.SearchConfig) (searchcontract.Retriever, error)
 type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
@@ -116,20 +114,15 @@ type Builder struct {
 	Secrets           secret.Store
 	ClientFactory     ClientFactory
 	ConnectorFactory  ConnectorFactory
-	SearchFactory     SearchFactory
 	ApplyLog          func(config.LogConfig)
 	Notifications     notification.Publisher
-	ReflectionFactory func(context.Context, config.Snapshot, llm.Client, searchcontract.Retriever) (*reflectionscanner.Scanner, error)
+	ReflectionFactory func(context.Context, config.Snapshot, llm.Client, searchcontract.Control) (*reflectionscanner.Scanner, error)
 }
 
 // Build constructs a complete bot engine and its configured dependencies.
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
 	snapshot = snapshot.Clone()
 	if err := b.Modules.Validate(snapshot.Runtime.Modules); err != nil {
-		return nil, err
-	}
-	retriever, err := b.buildSearch(ctx, snapshot.Runtime.Search, nil)
-	if err != nil {
 		return nil, err
 	}
 	client, err := b.buildClient(ctx, snapshot, "", "")
@@ -144,14 +137,14 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 	if err != nil {
 		return nil, err
 	}
-	engine, err := b.build(ctx, snapshot, b.Sender, retriever, client, moduleSet)
+	engine, err := b.build(ctx, snapshot, b.Sender, client, moduleSet)
 	if err == nil {
 		moduleSet.Start(ctx)
 	}
 	return engine, err
 }
 
-func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, retriever searchcontract.Retriever, client llm.Client, moduleSet *modules.Set) (built *bot.Engine, buildErr error) {
+func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender platform.Sender, client llm.Client, moduleSet *modules.Set) (built *bot.Engine, buildErr error) {
 	var executors []tooling.Executor
 	defer func() {
 		if built == nil {
@@ -167,10 +160,6 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}()
 	if sender == nil {
 		return nil, errors.New("runtime sender is required")
-	}
-	if snapshot.Runtime.Search.Enabled && retriever != nil {
-		searchConfig := snapshot.Runtime.Search
-		executors = append(executors, tooling.NewRegistry(searchdocs.New(retriever, searchConfig.DefaultResults, searchConfig.MaxResults, searchConfig.MaxContextChars)))
 	}
 	if len(moduleSet.Tools()) > 0 {
 		executors = append(executors, moduleSet.ToolExecutor())
@@ -216,31 +205,14 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	var executor tooling.Executor
 	if len(executors) > 0 {
-		executor = tooling.NewMultiExecutor(executors...)
+		executor, buildErr = tooling.NewStrictMultiExecutor(executors...)
+		if buildErr != nil {
+			return nil, buildErr
+		}
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Retriever: retriever, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
-}
-
-func (b Builder) buildSearch(ctx context.Context, cfg config.SearchConfig, current searchcontract.Retriever) (searchcontract.Retriever, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
-	if current != nil {
-		return current, nil
-	}
-	if b.SearchFactory == nil {
-		return nil, errors.New("search factory is required when search is enabled")
-	}
-	retriever, err := b.SearchFactory(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build search index: %w", err)
-	}
-	if retriever == nil {
-		return nil, errors.New("search factory returned nil retriever")
-	}
-	return retriever, nil
+	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
@@ -287,7 +259,7 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 		return activate()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, current.retriever, ref, value)
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, value)
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
@@ -319,7 +291,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 		return remove()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, current.retriever, ref, "")
+	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, "")
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
@@ -340,21 +312,20 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 // Manager owns the active generation and coordinates lifecycle, updates,
 // persistence, notifications, and administrative actions.
 type Manager struct {
-	retiring        <-chan struct{}
-	applyMu         sync.Mutex
-	routeMu         sync.RWMutex
-	statusMu        sync.RWMutex
-	current         atomic.Pointer[generation]
-	snapshot        atomic.Pointer[config.Snapshot]
-	builder         Builder
-	status          Status
-	started         bool
-	runCtx          context.Context
-	errors          chan error
-	operator        operations.Service
-	paused          atomic.Bool
-	reloadingSearch atomic.Bool
-	reflection      *reflectionbuffer.Buffer
+	retiring   <-chan struct{}
+	applyMu    sync.Mutex
+	routeMu    sync.RWMutex
+	statusMu   sync.RWMutex
+	current    atomic.Pointer[generation]
+	snapshot   atomic.Pointer[config.Snapshot]
+	builder    Builder
+	status     Status
+	started    bool
+	runCtx     context.Context
+	errors     chan error
+	operator   operations.Service
+	paused     atomic.Bool
+	reflection *reflectionbuffer.Buffer
 }
 
 type generation struct {
@@ -363,7 +334,6 @@ type generation struct {
 	engine             *bot.Engine
 	connectors         platform.ConnectorSet
 	handler            *operations.Router
-	retriever          searchcontract.Retriever
 	admins             administration.Resolver
 	reflection         *reflectionbuffer.Buffer
 	reflectionEnabled  bool
@@ -381,7 +351,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
-	generation, err := manager.buildGeneration(ctx, snapshot, nil, nil, "", "")
+	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +362,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	return manager, nil
 }
 
-func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, retriever searchcontract.Retriever, secretRef, secretValue string) (*generation, error) {
+func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot, connectors platform.ConnectorSet, secretRef, secretValue string) (*generation, error) {
 	if m.retiring != nil {
 		select {
 		case <-m.retiring:
@@ -416,10 +386,6 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if connectors != nil {
 		sender = connectors
 	}
-	retriever, err := m.builder.buildSearch(ctx, snapshot.Runtime.Search, retriever)
-	if err != nil {
-		return nil, err
-	}
 	client, err := m.builder.buildClient(ctx, snapshot, secretRef, secretValue)
 	if err != nil {
 		return nil, err
@@ -432,7 +398,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	engine, err := m.builder.build(ctx, snapshot, sender, retriever, client, moduleSet)
+	engine, err := m.builder.build(ctx, snapshot, sender, client, moduleSet)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +430,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	var reflectionPipeline *reflectionpipeline.Processor
 	if snapshot.Runtime.Reflection.Enabled && reflection != nil {
 		if client != nil {
-			reflectionScanner, reflectionPipeline, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, retriever)
+			reflectionScanner, reflectionPipeline, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, moduleSet)
 		}
 		if err != nil {
 			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
@@ -474,57 +440,41 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	return &generation{
 		modules:  moduleSet,
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
-		retriever: retriever, admins: administration.New(adminIdentities), reflection: reflection,
+		admins: administration.New(adminIdentities), reflection: reflection,
 		reflectionEnabled:  snapshot.Runtime.Reflection.Enabled,
 		reflectionScanner:  reflectionScanner,
 		reflectionPipeline: reflectionPipeline,
 	}, nil
 }
 
-func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, retriever searchcontract.Retriever) (*reflectionscanner.Scanner, *reflectionpipeline.Processor, error) {
-	if m.builder.ReflectionFactory != nil {
-		scanner, err := m.builder.ReflectionFactory(ctx, snapshot, client, retriever)
-		return scanner, nil, err
+func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, moduleSet *modules.Set) (*reflectionscanner.Scanner, *reflectionpipeline.Processor, error) {
+	capabilities := moduleSet.Capabilities()
+	searchControl, searchOK := capability.Resolve(capabilities, searchcontract.ControlKey)
+	publisherFactory, publisherOK := capability.Resolve(capabilities, knowledge.PublisherFactoryKey)
+	if !searchOK || searchControl == nil || !publisherOK || publisherFactory == nil {
+		return nil, nil, errors.New("reflection requires active search and knowledge publisher capabilities")
 	}
-	if retriever == nil || strings.TrimSpace(snapshot.Runtime.Search.DocumentRoot) == "" {
-		return nil, nil, errors.New("reflection requires an active search retriever")
+	if m.builder.ReflectionFactory != nil {
+		scanner, err := m.builder.ReflectionFactory(ctx, snapshot, client, searchControl)
+		return scanner, nil, err
 	}
 	r, err := reflectionreflector.New(client, snapshot.Runtime.LLM.Model)
 	if err != nil {
 		return nil, nil, err
 	}
-	publisher, err := markdown.New(markdown.Config{Root: snapshot.Runtime.Search.DocumentRoot, ExtraDirectory: snapshot.Runtime.Reflection.ExtraDirectory, MaxBytes: snapshot.Runtime.Search.MaxFileBytes})
+	publisher, err := publisherFactory.New(snapshot.Runtime.Reflection.ExtraDirectory)
 	if err != nil {
 		return nil, nil, err
 	}
-	processor, err := reflectionpipeline.New(reflectionpipeline.Config{Reflector: r, Publisher: publisher, MinConfidence: snapshot.Runtime.Reflection.MinConfidence, Reload: func(reloadCtx context.Context) error { _, reloadErr := m.ReloadSearch(reloadCtx, ""); return reloadErr }})
+	processor, err := reflectionpipeline.New(reflectionpipeline.Config{Reflector: r, Publisher: publisher, MinConfidence: snapshot.Runtime.Reflection.MinConfidence, Reload: func(reloadCtx context.Context) error {
+		_, reloadErr := searchControl.Reload(reloadCtx)
+		return reloadErr
+	}})
 	if err != nil {
 		return nil, nil, err
 	}
 	scanner, err := reflectionscanner.New(reflectionscanner.Config{Interval: snapshot.Runtime.Reflection.ScanInterval, MaxSessions: snapshot.Runtime.Reflection.MaxPairsPerScan, Buffer: b, ProcessBatch: processor.ProcessBatch})
 	return scanner, processor, err
-}
-
-func (m *Manager) buildReflectionClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
-	if strings.TrimSpace(snapshot.Runtime.LLM.Model) == "" {
-		return nil, nil
-	}
-	apiKey := secretValue
-	var err error
-	if secretRef != snapshot.Runtime.LLM.APIKeyRef && m.builder.Secrets != nil {
-		apiKey, err = m.builder.Secrets.Get(ctx, snapshot.Runtime.LLM.APIKeyRef)
-	}
-	if err != nil && !errors.Is(err, secret.ErrNotFound) {
-		return nil, err
-	}
-	if apiKey == "" {
-		return nil, nil
-	}
-	factory := m.builder.ClientFactory
-	if factory == nil {
-		factory = func(cfg llm.ClientConfig) (llm.Client, error) { return llm.NewClient(cfg) }
-	}
-	return factory(snapshot.Runtime.LLM.ClientConfig(apiKey))
 }
 
 func (m *Manager) ensureReflectionBuffer(cfg config.ReflectionConfig) (*reflectionbuffer.Buffer, error) {
@@ -581,8 +531,8 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	if generation.connectors != nil {
 		status.Connectors = generation.connectors.Status()
 	}
-	if generation.retriever != nil {
-		status.Search = generation.retriever.Status()
+	if control, ok := capability.Resolve(generation.modules.Capabilities(), searchcontract.ControlKey); ok && control != nil {
+		status.Search = control.Status()
 	} else {
 		status.Search = searchcontract.Status{Enabled: false, State: searchcontract.StateDisabled}
 	}
@@ -762,11 +712,7 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, snapshot.Runtime.Platforms) {
 		connectors = nil
 	}
-	retriever := current.retriever
-	if !reflect.DeepEqual(current.snapshot.Runtime.Search, snapshot.Runtime.Search) {
-		retriever = nil
-	}
-	next, err := m.buildGeneration(ctx, snapshot, connectors, retriever, "", "")
+	next, err := m.buildGeneration(ctx, snapshot, connectors, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
@@ -824,11 +770,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, runtimeConfig.Platforms) {
 		connectors = nil
 	}
-	retriever := current.retriever
-	if !reflect.DeepEqual(current.snapshot.Runtime.Search, runtimeConfig.Search) {
-		retriever = nil
-	}
-	next, err := m.buildGeneration(ctx, candidate, connectors, retriever, "", "")
+	next, err := m.buildGeneration(ctx, candidate, connectors, "", "")
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
@@ -863,7 +805,7 @@ func (m *Manager) Restart(ctx context.Context, reason string) error {
 		return errors.New("runtime is stopped")
 	}
 	m.setStatus(StateRestarting, ActionRestartBot, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, nil, current.retriever, "", "")
+	next, err := m.buildGeneration(ctx, current.snapshot, nil, "", "")
 	if err != nil {
 		m.setStatus(StateReady, ActionRestartBot, current.snapshot.Version, err.Error())
 		return fmt.Errorf("restart runtime (%s): %w", reason, err)
@@ -906,20 +848,17 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 // ReloadSearch rebuilds the active structured index without replacing other components.
 func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontract.ReloadResult, error) {
-	if !m.reloadingSearch.CompareAndSwap(false, true) {
-		return searchcontract.ReloadResult{}, searchcontract.ErrReloadInProgress
-	}
-	defer m.reloadingSearch.Store(false)
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	current := m.current.Load()
 	if current == nil {
 		return searchcontract.ReloadResult{}, errors.New("runtime is stopped")
 	}
-	if !current.snapshot.Runtime.Search.Enabled || current.retriever == nil {
+	control, ok := capability.Resolve(current.modules.Capabilities(), searchcontract.ControlKey)
+	if !ok || control == nil {
 		return searchcontract.ReloadResult{}, searchcontract.ErrDisabled
 	}
-	result, err := current.retriever.Reload(ctx)
+	result, err := control.Reload(ctx)
 	if err != nil {
 		m.notify(notification.Event{Level: notification.LevelError, Component: "search", Code: "reload_failed", Message: err.Error(), ExcludeConversationID: strings.TrimSpace(source)})
 		return searchcontract.ReloadResult{}, err
@@ -1139,8 +1078,8 @@ func classify(current, next config.RuntimeConfig) Action {
 	if !reflect.DeepEqual(current.Platforms, next.Platforms) {
 		return ActionRestartConnectors
 	}
-	if !reflect.DeepEqual(current.Search, next.Search) {
-		return ActionReplaceSearch
+	if !reflect.DeepEqual(current.Modules, next.Modules) {
+		return ActionReplaceModules
 	}
 	withoutLLMCurrent, withoutLLMNext := current, next
 	withoutLLMCurrent.LLM, withoutLLMNext.LLM = config.LLMConfig{}, config.LLMConfig{}
@@ -1151,11 +1090,7 @@ func classify(current, next config.RuntimeConfig) Action {
 }
 
 func policyFrom(runtime config.RuntimeConfig) bot.Policy {
-	s := runtime.Search
-	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Search: bot.SearchPolicy{
-		Enabled: s.Enabled, DefaultResults: s.DefaultResults, MaxResults: s.MaxResults,
-		MaxQueriesPerTurn: s.MaxQueriesPerTurn, MaxContextChars: s.MaxContextChars,
-	}, Admission: bot.AdmissionPolicy{
+	return bot.Policy{Name: runtime.Bot.Name, SystemPrompt: runtime.Bot.SystemPrompt, Model: runtime.LLM.Model, Admission: bot.AdmissionPolicy{
 		DedupTTL: runtime.Admission.DedupTTL, DedupMax: runtime.Admission.DedupMax,
 	}}
 }

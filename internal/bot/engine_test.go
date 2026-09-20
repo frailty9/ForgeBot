@@ -391,51 +391,6 @@ func TestEngineExecutesOneSearchToolAndStopsLoop(t *testing.T) {
 	}
 }
 
-func TestEngineExplicitSearchSkipsDecisionAndHandlesEmptyQuery(t *testing.T) {
-	engine, fake, retriever, sender := searchEngineFixture(t, []llm.Response{{Text: "cited answer", Message: llm.TextMessage(llm.RoleAssistant, "cited answer")}})
-	if _, err := engine.HandleInbound(context.Background(), testInbound("/search authentication")); err != nil {
-		t.Fatal(err)
-	}
-	if retriever.calls != 1 || len(fake.requests) != 1 || len(fake.requests[0].Tools) != 0 {
-		t.Fatalf("retriever calls=%d requests=%+v", retriever.calls, fake.requests)
-	}
-	if sender.Sent()[0].Text != "cited answer" {
-		t.Fatalf("sent = %+v", sender.Sent())
-	}
-	engine, fake, retriever, sender = searchEngineFixture(t, nil)
-	if _, err := engine.HandleInbound(context.Background(), testInbound("/search")); err != nil {
-		t.Fatal(err)
-	}
-	if retriever.calls != 0 || len(fake.requests) != 0 || sender.Sent()[0].Text != "用法：/search <关键词或问题>" {
-		t.Fatalf("empty search calls=%d requests=%d sent=%+v", retriever.calls, len(fake.requests), sender.Sent())
-	}
-}
-
-func TestEngineDisabledSearchDoesNotExposeTool(t *testing.T) {
-	engine, fake, retriever, sender := searchEngineFixture(t, []llm.Response{{Text: "direct", Message: llm.TextMessage(llm.RoleAssistant, "direct")}})
-	engine.deps.Policy.Search.Enabled = false
-	if _, err := engine.HandleInbound(context.Background(), testInbound("hello")); err != nil {
-		t.Fatal(err)
-	}
-	if retriever.calls != 0 || len(fake.requests[0].Tools) != 0 || sender.Sent()[0].Text != "direct" {
-		t.Fatalf("requests=%+v sent=%+v", fake.requests, sender.Sent())
-	}
-}
-
-func TestEngineExplicitSearchReportsRetrieverFailure(t *testing.T) {
-	engine, fake, retriever, sender := searchEngineFixture(t, nil)
-	retriever.err = context.DeadlineExceeded
-	if _, err := engine.HandleInbound(context.Background(), testInbound("/search authentication")); err != nil {
-		t.Fatal(err)
-	}
-	if retriever.calls != 1 || len(fake.requests) != 0 {
-		t.Fatalf("retriever calls=%d llm requests=%d", retriever.calls, len(fake.requests))
-	}
-	if sent := sender.Sent(); len(sent) != 1 || sent[0].Text != "文档检索失败，请稍后重试。" {
-		t.Fatalf("sent = %+v", sent)
-	}
-}
-
 type fakeLLM struct {
 	request   llm.Request
 	requests  []llm.Request
@@ -494,8 +449,7 @@ func searchEngineFixture(t *testing.T, responses []llm.Response) (*Engine, *fake
 	fake := &fakeLLM{responses: responses}
 	policy := testPolicy()
 	policy.Model = "test-model"
-	policy.Search = SearchPolicy{Enabled: true, DefaultResults: 5, MaxResults: 8, MaxQueriesPerTurn: 1, MaxContextChars: 12000}
-	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Retriever: retriever, Tools: tooling.NewRegistry(tool), Policy: policy}, slog.Default())
+	engine, err := newTestEngine(context.Background(), Dependencies{Sender: registry, LLM: fake, Tools: tooling.NewRegistry(tool), ToolBudgets: map[string]int{searchdocs.Name: 1}, Policy: policy}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

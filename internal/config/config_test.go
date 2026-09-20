@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,58 +35,6 @@ func TestLoadDefaults(t *testing.T) {
 	if snapshot.Runtime.LLM.APIKeyRef != defaultAPIKeyRef {
 		t.Fatalf("api key ref = %q", snapshot.Runtime.LLM.APIKeyRef)
 	}
-	if snapshot.Runtime.Search.Enabled || snapshot.Runtime.Search.Policy != "on_demand" || snapshot.Runtime.Search.QueryTimeout != 750*time.Millisecond {
-		t.Fatalf("search defaults = %+v", snapshot.Runtime.Search)
-	}
-	if !slices.Equal(snapshot.Runtime.Search.Extensions, []string{".md", ".mdx", ".txt"}) {
-		t.Fatalf("search extensions = %#v", snapshot.Runtime.Search.Extensions)
-	}
-}
-
-func TestSearchConfigJSONDefaultsAndValidation(t *testing.T) {
-	var cfg SearchConfig
-	if err := json.Unmarshal([]byte(`{"enabled":true,"document_root":"D:/docs"}`), &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Policy != "on_demand" || cfg.Backend != "structured" || cfg.BuildTimeout != 20*time.Second {
-		t.Fatalf("search defaults = %+v", cfg)
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"query_timeout":"750ms"`) || !strings.Contains(string(data), `"build_timeout":"20s"`) {
-		t.Fatalf("encoded search config = %s", data)
-	}
-}
-
-func TestSearchConfigRejectsUnsupportedModesAndBudgets(t *testing.T) {
-	cfg := DefaultRuntime().Search
-	cfg.Enabled = true
-	cfg.DocumentRoot = "relative/docs"
-	cfg.Policy = "always"
-	cfg.Backend = "vector"
-	cfg.DefaultResults = cfg.MaxResults + 1
-	cfg.MinMatchRatio = 0
-	cfg.QueryTimeout = 0
-	cfg.Extensions = []string{".md", ".rst", ".md"}
-	err := cfg.Validate()
-	for _, expected := range []string{"on_demand", "structured", "must be absolute", "must not exceed", "min_match_ratio", "query_timeout", "must be .md, .mdx, or .txt", "is duplicated"} {
-		if err == nil || !strings.Contains(err.Error(), expected) {
-			t.Fatalf("expected %q in validation error, got %v", expected, err)
-		}
-	}
-}
-
-func TestSearchConfigRejectsUnknownJSONField(t *testing.T) {
-	var cfg SearchConfig
-	err := json.Unmarshal([]byte(`{"enabled":false,"unknown":true}`), &cfg)
-	if err == nil || !strings.Contains(err.Error(), `unknown field "unknown"`) {
-		t.Fatalf("unexpected error: %v", err)
-	}
 }
 
 func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
@@ -106,9 +53,6 @@ func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
 	snapshot, _, err := Load(LoadOptions{RuntimePath: path})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if snapshot.Runtime.Search.Policy != "on_demand" || snapshot.Runtime.Search.Backend != "structured" {
-		t.Fatalf("search defaults = %+v", snapshot.Runtime.Search)
 	}
 	encoded, err := json.Marshal(snapshot.Runtime)
 	if err != nil {
@@ -192,9 +136,10 @@ func TestRuntimeConfigRejectsAPIKey(t *testing.T) {
 	}
 }
 
-func TestRuntimeConfigRejectsRemovedGateAndGroupSwitches(t *testing.T) {
+func TestRuntimeConfigRejectsRemovedFeatureFields(t *testing.T) {
 	for _, body := range []string{
 		"{\"gate\":{\"enabled\":false}}",
+		"{\"search\":{\"enabled\":false}}",
 		"{\"platforms\":{\"groups\":[{\"id\":\"local\",\"connector_id\":\"echo\",\"target\":\"local\",\"auto_reply_unmentioned\":true}]}}",
 	} {
 		path := filepath.Join(t.TempDir(), "runtime.json")
