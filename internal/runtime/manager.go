@@ -5,9 +5,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,17 +90,21 @@ type ApplyResult struct {
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
 type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
+type ConnectorOptions func(config.ConnectorConfig) (json.RawMessage, error)
 type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
-	Modules          *modules.Registry
-	Sender           platform.Sender
-	Secrets          secret.Store
-	ClientFactory    ClientFactory
-	ConnectorFactory ConnectorFactory
-	ApplyLog         func(config.LogConfig)
-	Notifications    notification.Publisher
+	Modules            *modules.Registry
+	Sender             platform.Sender
+	Secrets            secret.Store
+	ClientFactory      ClientFactory
+	Logger             *slog.Logger
+	ConnectorOptions   ConnectorOptions
+	ConnectorProviders []platform.ConnectorProvider
+	ConnectorFactory   ConnectorFactory
+	ApplyLog           func(config.LogConfig)
+	Notifications      notification.Publisher
 }
 
 // Build constructs a complete bot engine and its configured dependencies.
@@ -360,17 +367,6 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err := m.builder.Modules.Validate(snapshot.Runtime.Modules); err != nil {
 		return nil, err
 	}
-	if connectors == nil && m.builder.ConnectorFactory != nil {
-		var err error
-		connectors, err = m.builder.ConnectorFactory(snapshot.Runtime.Platforms)
-		if err != nil {
-			return nil, fmt.Errorf("build connectors: %w", err)
-		}
-	}
-	sender := m.builder.Sender
-	if connectors != nil {
-		sender = connectors
-	}
 	client, err := m.builder.buildClient(ctx, snapshot, secretRef, secretValue)
 	if err != nil {
 		return nil, err
@@ -379,6 +375,19 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	moduleSet, err := m.builder.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
+	}
+	if connectors == nil && (len(moduleSet.ConnectorProviderTypes()) > 0 || len(m.builder.ConnectorProviders) > 0 || m.builder.ConnectorFactory != nil) {
+		connectors, err = m.builder.buildConnectors(ctx, snapshot.Runtime.Platforms, moduleSet)
+		if err != nil {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = moduleSet.Close(closeCtx)
+			return nil, fmt.Errorf("build connectors: %w", err)
+		}
+	}
+	sender := m.builder.Sender
+	if connectors != nil {
+		sender = connectors
 	}
 	engine, err := m.builder.build(ctx, snapshot, sender, client, moduleSet)
 	if err != nil {
@@ -408,6 +417,76 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
 		admins: administration.New(adminIdentities),
 	}, nil
+}
+
+func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig, moduleSet *modules.Set) (platform.ConnectorSet, error) {
+	providers := make(map[string]modules.ProviderRegistration)
+	if moduleSet != nil {
+		for _, typeName := range moduleSet.ConnectorProviderTypes() {
+			registration, _ := moduleSet.ConnectorProvider(typeName)
+			providers[typeName] = registration
+		}
+	}
+	for _, provider := range b.ConnectorProviders {
+		if provider == nil || !platform.ValidConnectorType(provider.Type()) {
+			return nil, errors.New("invalid host connector provider")
+		}
+		if existing, exists := providers[provider.Type()]; exists {
+			return nil, fmt.Errorf("connector provider type %q registered by both %s and host", provider.Type(), existing.ModuleID)
+		}
+		providers[provider.Type()] = modules.ProviderRegistration{ModuleID: "host", Provider: provider}
+	}
+	if len(providers) == 0 && b.ConnectorFactory != nil {
+		return b.ConnectorFactory(cfg)
+	}
+	adapters := make([]platform.Adapter, 0, len(cfg.Connectors))
+	bindings := make([]platform.ConversationBinding, 0, len(cfg.Groups))
+	for _, binding := range cfg.Groups {
+		bindings = append(bindings, platform.ConversationBinding{ConversationID: binding.ID, ConnectorID: binding.ConnectorID, Target: binding.Target})
+	}
+	for _, connector := range cfg.Connectors {
+		if !connector.Enabled {
+			continue
+		}
+		registration, exists := providers[connector.Type]
+		if !exists {
+			return nil, fmt.Errorf("connector %s requires unavailable provider %q", connector.ID, connector.Type)
+		}
+		providerBindings := make([]platform.ConnectorBinding, 0)
+		for _, binding := range cfg.Groups {
+			if binding.ConnectorID == connector.ID {
+				providerBindings = append(providerBindings, platform.ConnectorBinding{ConversationID: binding.ID, Target: binding.Target, PromptSuffix: binding.PromptSuffix})
+			}
+		}
+		options, err := b.connectorOptions(connector)
+		if err != nil {
+			return nil, fmt.Errorf("connector %s options: %w", connector.ID, err)
+		}
+		if err := registration.Provider.ValidateOptions(registration.ModuleOptions, options, providerBindings); err != nil {
+			return nil, fmt.Errorf("connector %s: %w", connector.ID, err)
+		}
+		adapter, err := registration.Provider.Build(ctx, platform.ConnectorBuildRequest{
+			ConnectorID: connector.ID, PromptSuffix: connector.PromptSuffix,
+			ModuleOptions: registration.ModuleOptions, ConnectorOptions: options,
+			Bindings: providerBindings, Logger: b.Logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("connector %s: %w", connector.ID, err)
+		}
+		if adapter == nil {
+			return nil, fmt.Errorf("connector %s provider returned nil adapter", connector.ID)
+		}
+		adapters = append(adapters, adapter)
+	}
+	return platform.NewSet(adapters, bindings)
+}
+
+func (b Builder) connectorOptions(connector config.ConnectorConfig) (json.RawMessage, error) {
+	if b.ConnectorOptions == nil {
+		return nil, nil
+	}
+	options, err := b.ConnectorOptions(connector)
+	return slices.Clone(options), err
 }
 
 type pausedHandler struct {

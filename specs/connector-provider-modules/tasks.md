@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；第一阶段已完成，进入 Echo 迁移。
+状态：任务已于 2026-09-20 确认；前两阶段已完成，进入 OneBot 迁移。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -25,16 +25,16 @@
 
 ## 2. 迁移 Echo 并建立通用连接器构建链
 
-- [ ] 2.1 新增 `native.echo` 模块和 `echo` Provider；模块默认启用，严格接受空 options，
+- [x] 2.1 新增 `native.echo` 模块和 `echo` Provider；模块默认启用，严格接受空 options，
       Provider 构建现有 memory Adapter。
-- [ ] 2.2 在应用组合根注册 `native.echo`，使发行版原生能力仍由组合根显式决定。
-- [ ] 2.3 在 Runtime 中实现通用 ConnectorSet 构建器：查找 Provider、按 connector ID
+- [x] 2.2 在应用组合根注册 `native.echo`，使发行版原生能力仍由组合根显式决定。
+- [x] 2.3 在 Runtime 中实现通用 ConnectorSet 构建器：查找 Provider、按 connector ID
       筛选群组绑定、构建 Adapter、生成出站绑定并调用 `platform.NewSet`。
-- [ ] 2.4 调整 generation 准备顺序为 Client/Capabilities → Module Set → Connector Set
+- [x] 2.4 调整 generation 准备顺序为 Client/Capabilities → Module Set → Connector Set
       → Engine/Router，确保候选构建失败时逆序关闭已准备资源且不启动 Adapter。
-- [ ] 2.5 将 Echo 从 `app.connectorFactory` 类型分支迁出；暂时保留 OneBot 的窄适配
+- [x] 2.5 将 Echo 从 `app.connectorFactory` 类型分支迁出；暂时保留 OneBot 的窄适配
       Provider，使本提交结束时所有 connector 都经由同一通用构建链且现有配置可运行。
-- [ ] 2.6 增加 Echo Provider、绑定筛选、Provider 缺失、候选构建不启动 Adapter、
+- [x] 2.6 增加 Echo Provider、绑定筛选、Provider 缺失、候选构建不启动 Adapter、
       构建失败资源清理和默认 Snapshot 启动测试。
 - Requirements: 4.1, 4.2, 5.1, 5.3；Design: 4.1, 5
 

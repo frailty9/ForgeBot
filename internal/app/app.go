@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/admin"
+	"github.com/soleapi/forgebot/internal/app/legacyonebot"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/logging"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
 	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
@@ -22,8 +24,6 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
 	"github.com/soleapi/forgebot/internal/platform"
-	"github.com/soleapi/forgebot/internal/platform/memory"
-	"github.com/soleapi/forgebot/internal/platform/onebot"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/server"
@@ -52,6 +52,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err := moduleRegistry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
 		return nil, err
 	}
+	if err := moduleRegistry.Register(echo.Factory{}, hooks.Native, 50, hooks.Continue); err != nil {
+		return nil, err
+	}
 	if err := moduleRegistry.Register(proactivereply.Factory{}, hooks.Native, 200, hooks.Continue); err != nil {
 		return nil, err
 	}
@@ -61,7 +64,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err := moduleRegistry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{Modules: moduleRegistry, ConnectorFactory: connectorFactory(logger), ApplyLog: func(logConfig config.LogConfig) {
+	builder := runtimecfg.Builder{Modules: moduleRegistry, Logger: logger, ConnectorOptions: legacyonebot.Options, ConnectorProviders: []platform.ConnectorProvider{legacyonebot.Provider{}}, ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}
@@ -106,48 +109,6 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		server: server.New(cfg, logger, runtimeManager, adminService), notifier: notifier,
 	}, nil
-}
-
-func connectorFactory(logger *slog.Logger) runtimecfg.ConnectorFactory {
-	return func(cfg config.PlatformConfig) (platform.ConnectorSet, error) {
-		adapters := make([]platform.Adapter, 0, len(cfg.Connectors))
-		for _, connector := range cfg.Connectors {
-			if !connector.Enabled {
-				continue
-			}
-			switch connector.Type {
-			case "echo":
-				adapters = append(adapters, memory.NewAdapter(connector.ID, logger))
-			case "onebot":
-				groups := make(map[string]onebot.Group)
-				for _, binding := range cfg.Groups {
-					if binding.ConnectorID == connector.ID {
-						groups[binding.Target] = onebot.Group{ConversationID: binding.ID, PromptSuffix: binding.PromptSuffix}
-					}
-				}
-				onebotConfig := connector.OneBot
-				adapter, err := onebot.New(onebot.Config{
-					ID: connector.ID, APIURL: onebotConfig.APIURL, SendToken: onebotConfig.SendToken,
-					ReceiveSecret: onebotConfig.ReceiveSecret,
-					PromptSuffix:  connector.PromptSuffix,
-					WebhookAddr:   onebotConfig.WebhookAddr, WebhookPath: onebotConfig.WebhookPath,
-					RequestLimit: onebotConfig.RequestLimit, Timeout: onebotConfig.Timeout,
-					ReplayTTL: onebotConfig.ReplayTTL, ReplayMax: onebotConfig.ReplayMax, Groups: groups,
-				}, logger)
-				if err != nil {
-					return nil, err
-				}
-				adapters = append(adapters, adapter)
-			}
-		}
-		bindings := make([]platform.ConversationBinding, 0, len(cfg.Groups))
-		for _, binding := range cfg.Groups {
-			bindings = append(bindings, platform.ConversationBinding{
-				ConversationID: binding.ID, ConnectorID: binding.ConnectorID, Target: binding.Target,
-			})
-		}
-		return platform.NewSet(adapters, bindings)
-	}
 }
 
 func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
