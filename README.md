@@ -20,7 +20,8 @@ other product.
   The first module controls empty-mention/image hints and search progress replies;
   external FPP plugins are not implemented yet.
 - OneBot 11 HTTP webhook support with outbound `send_msg`, HMAC-SHA1 request
-  verification, replay protection, and bounded request handling.
+  verification, replay protection, bounded request handling, and a native
+  Connector Provider module.
 - A single logical conversation identity for the bot core, independent of the
   protocol, account, or external group ID.
 - Group message gating with mention requirements, buffering, deduplication, and
@@ -53,9 +54,10 @@ platform adapter
     -> platform sender
 ```
 
-The core only sees a logical `conversation_id`. Platform-specific details stay
-in connectors and bindings, so adding another protocol does not require changes
-to the bot engine.
+The core only sees a logical `conversation_id`. Native Connector Provider
+modules implement protocol types; runtime connector instances select one by
+`type`, and bindings map external targets to logical conversations. Adding a
+protocol therefore does not require changes to the bot engine.
 
 See [docs/architecture.md](docs/architecture.md) for package boundaries and
 lifecycle contracts.
@@ -130,9 +132,12 @@ Responses protocol; switch `protocol` to `openai_completions` or
     "model": "gpt-5",
     "timeout": "60s"
   },
+  "modules": {
+    "native.echo": {"enabled": true, "options": {}}
+  },
   "platforms": {
     "connectors": [
-      {"id": "echo-local", "type": "echo", "enabled": true}
+      {"id": "echo-local", "type": "echo", "enabled": true, "options": {}}
     ],
     "groups": [
       {"id": "local", "connector_id": "echo-local", "target": "local"}
@@ -163,6 +168,10 @@ configuration:
 
 Runtime updates are full replacements guarded by `expected_version`; validation
 and candidate component startup happen before the new generation is published.
+Provider module changes and connector/binding changes restart only the
+ConnectorSet transaction; other feature modules can be replaced without
+restarting active connectors. Protocol credentials are rendered by their
+Provider and are never returned as raw `options`.
 The management API supports configuration history, rollback, runtime restart,
 document reload, reflection scans, and write-only API key management.
 

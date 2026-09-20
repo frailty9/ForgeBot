@@ -4,6 +4,7 @@ ForgeBot is built around explicit boundaries:
 
 ```text
 external platform
+  -> native connector provider module
   -> platform adapter
   -> connector binding (external target -> logical group)
   -> messaging.InboundMessage
@@ -20,8 +21,9 @@ Runtime configuration flows through `settings.Store -> runtime.Manager`. A
 generation owns its Engine, LLM client, native Module Set, restricted Tool Executor,
 Connector Set, and operator routing.
 Candidates are built before persistence; only a successful configuration commit
-is published. Platform changes stop the old Connector Set, start the candidate,
-and restore the old set if startup or persistence fails. Existing Engine
+is published. Platform or connector-Provider changes stop the old Connector
+Set, start the candidate, and restore the old set if startup or persistence
+fails. Existing Engine
 requests finish on their previous generation while new requests use the
 replacement.
 
@@ -43,9 +45,15 @@ must not depend on or expose the complete Web administration service.
 - `internal/server`: HTTP health, runtime, and test ingress.
 - `internal/messaging`: platform-neutral message contracts.
 - `internal/platform`: adapter and sender interfaces.
+- `internal/platform/provider.go`: protocol-neutral Connector Provider contract,
+  filtered binding input, and adapter build request.
 - `internal/platform/memory`: in-memory/logging sender for local development.
+- `internal/modules/echo`: native `echo` Provider module for the in-memory
+  development adapter.
+- `internal/modules/onebot`: native `onebot` Provider module; owns OneBot
+  options, defaults, redaction, binding conversion, and adapter construction.
 - `internal/platform/onebot`: OneBot 11 HTTP webhook adapter and `send_msg`
-  sender, independently constructed behind the platform interfaces.
+  sender, without RuntimeConfig knowledge.
 - `internal/operations`: protocol-neutral operator-group command policy and
   routing contract; command implementations are introduced separately.
 - `internal/operator`: restricted runtime operations exposed to operator groups;
@@ -81,7 +89,9 @@ must not depend on or expose the complete Web administration service.
    native module and can be refreshed without importing config.
 4. Storage, retrieval, tools, and metrics are middleware around the engine, not
    hidden side effects inside providers.
-5. New platforms should not require edits to the core engine.
+5. New protocols should not require edits to the core engine: a Provider
+   validates opaque options, produces a redacted public view, and builds an
+   unstarted Adapter. `Adapter.Start` remains ConnectorSet-owned.
 6. The LLM boundary supports exactly three wire protocols:
    `anthropic_messages`, `openai_responses`, and `openai_completions`.
    Vendors are configuration targets, not new protocol abstractions.
@@ -217,3 +227,20 @@ external chat IDs remain in the platform layer. A connector can bind multiple
 external groups, and multiple connectors of the same protocol can run
 simultaneously. Each logical conversation has one outbound binding; changing
 its account or protocol does not change the core identity.
+
+### Connector Provider lifecycle
+
+`modules.native.<provider>` enables an implementation such as `native.onebot`.
+`platforms.connectors[]` selects it by `type` and carries opaque instance
+`options`; `platforms.groups[]` remains the protocol-neutral mapping from an
+external target to a logical conversation. During generation preparation,
+ForgeBot builds the Module Set first, reads its Provider catalog, builds an
+unstarted ConnectorSet, and then constructs the Engine.
+
+Provider module enablement or options changes are classified as
+`restart_connectors`: the old ConnectorSet stops, the candidate set starts, and
+the old generation retires only after publication. Non-provider module changes
+remain `replace_modules` updates and reuse the active ConnectorSet. Management
+validation and public configuration rendering build only Provider modules, so
+protocol options are validated and redacted without starting a listener,
+building an index, or starting background work.

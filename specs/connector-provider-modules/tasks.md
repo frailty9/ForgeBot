@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；前五阶段已完成，进入文档与迁移说明更新。
+状态：任务已于 2026-09-20 确认；前六阶段已完成，进入收尾审计。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -110,15 +110,15 @@
 
 ## 6. 更新配置示例、文档与迁移说明
 
-- [ ] 6.1 更新 `configs/runtime.example.json` 和测试/本地示例，加入 `native.echo`、
+- [x] 6.1 更新 `configs/runtime.example.json` 和测试/本地示例，加入 `native.echo`、
       `native.onebot`，将 OneBot 实例字段迁入 `options`。
-- [ ] 6.2 更新 README 与配置文档，说明协议模块、连接器实例、群组绑定三层关系，
+- [x] 6.2 更新 README 与配置文档，说明协议模块、连接器实例、群组绑定三层关系，
       提供单实例、多实例、模块默认值和实例覆盖示例。
-- [ ] 6.3 更新架构文档，记录 Provider 注册链、generation 构建顺序、生命周期所有权、
+- [x] 6.3 更新架构文档，记录 Provider 注册链、generation 构建顺序、生命周期所有权、
       管理视图脱敏责任和新增协议的最小实现步骤。
-- [ ] 6.4 明确破坏式迁移：删除 `connectors[].onebot`，启用 OneBot 实例前必须启用
+- [x] 6.4 明确破坏式迁移：删除 `connectors[].onebot`，启用 OneBot 实例前必须启用
       `modules.native.onebot`；列出旧字段到新字段的映射。
-- [ ] 6.5 检查文档和示例中不存在旧 OneBot 配置结构、Core 类型 switch 或将实例放入
+- [x] 6.5 检查文档和示例中不存在旧 OneBot 配置结构、Core 类型 switch 或将实例放入
       `modules.native.onebot.options` 的错误表述。
 - Requirements: 3, 4, 6；Design: 2, 8, 11
 

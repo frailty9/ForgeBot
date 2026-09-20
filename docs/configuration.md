@@ -199,16 +199,32 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 ### 5.6 `platforms`
 
+`modules` 决定协议实现是否装载；`platforms.connectors` 声明实际账号或端点实例；
+`platforms.groups` 将外部目标映射为 Bot 核心使用的逻辑会话。三者职责不同，不能把
+某个 QQ 账号或群号写进 `native.onebot.options`。
+
 ```json
 {
+  "modules": {
+    "native.echo": {"enabled": true, "options": {}},
+    "native.onebot": {
+      "enabled": true,
+      "options": {
+        "timeout": "15s",
+        "replay_ttl": "5m",
+        "replay_max": 10000
+      }
+    }
+  },
+  "platforms": {
   "connectors": [
-    {"id": "echo-local", "type": "echo", "enabled": true},
+    {"id": "echo-local", "type": "echo", "enabled": true, "options": {}},
     {
       "id": "qq-main",
       "type": "onebot",
       "enabled": true,
       "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
-      "onebot": {
+      "options": {
         "api_url": "http://127.0.0.1:5700",
         "send_token": "",
         "receive_secret": "",
@@ -225,16 +241,24 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
     {"id": "local", "connector_id": "echo-local", "target": "local"},
     {"id": "support", "connector_id": "qq-main", "target": "10001", "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"}
   ]
+  }
 }
 ```
 
-`connectors` 支持同时启用多个连接器，当前类型为 `echo` 和 `onebot`。ID 必须唯一。启用的 OneBot 连接器必须至少绑定一个群组。
+`connectors` 支持同时启用多个实例。`type` 是 Provider 的稳定查找键；当前内置
+`native.echo` 提供 `echo`，`native.onebot` 提供 `onebot`。连接器 ID 必须唯一。启用
+实例所需的 Provider 未启用或不存在时，配置校验会拒绝该配置；仅启用 Provider 而不
+创建实例是合法状态。启用的 OneBot 实例必须至少绑定一个群组。
 
 `groups[].id` 是 Bot 核心使用的协议无关会话 ID；`connector_id` 指向已启用的连接器；`target` 是平台群号。同一连接器与 target 的组合不能重复。未提及消息的主动介入不再由平台群组字段控制，而由 `modules.native.proactive_reply.options.groups` 按逻辑群组配置。模块关闭或群组未启用时，未提及 Bot 的普通消息和媒体均不会调用 LLM；明确提及 Bot 和命令仍正常处理。
 
 `connectors[].prompt_suffix` 和 `groups[].prompt_suffix` 都是可选的系统提示词追加内容。连接器级内容用于渠道通用约束（例如 QQ 使用纯文本），群组级内容用于该群组的语气、主题或行为约束。两者都存在时按“连接器后群组”的顺序拼接；都为空时不追加。它们属于运行时配置，可通过管理 API 热更新。
 
-OneBot 字段：
+OneBot 的模块 options 可作为多个 OneBot 实例的默认值；实例 `options` 中出现的字段
+逐字段覆盖模块默认值。建议将 `send_token` 和 `receive_secret` 放在实例层，以避免
+不同账号意外共享凭据。实例可显式写空字符串覆盖模块层的 Token 或 Secret。
+
+OneBot `options` 字段：
 
 - `api_url`：OneBot 11 HTTP API 根地址。
 - `send_token`：出站请求的 Bearer Token。
@@ -246,7 +270,23 @@ OneBot 字段：
 
 OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被引用消息，并将引用文字和图片作为独立上下文传给 LLM；引用内容不会并入当前消息文本，因此不会影响命令识别、消息准入或去重。
 
-注意：当前 `send_token` 和 `receive_secret` 仍以明文保存在运行时 JSON 中；管理 API 的公开配置响应只显示它们是否已配置。只有 LLM API Key 已接入加密 SecretStore。
+注意：当前 `send_token` 和 `receive_secret` 仍以明文保存在运行时 JSON 中；管理 API
+的公开配置响应只显示它们是否已配置。只有 LLM API Key 已接入加密 SecretStore。未知
+且禁用的未来 Provider 实例不会在公开响应中回显其原始 `options`。
+
+#### OneBot 配置迁移（破坏式）
+
+未发布版本不兼容旧字段。把每个 `connectors[].onebot` 对象原样移动为该连接器的
+`connectors[].options`，并在 `modules` 中启用 `native.onebot`。旧 `onebot` 字段会被
+严格拒绝，而不是静默兼容。
+
+```text
+旧：platforms.connectors[].onebot.api_url
+新：platforms.connectors[].options.api_url
+```
+
+同理适用于全部 OneBot 私有字段。迁移后通过 `POST /v1/admin/config/validate` 验证，再
+以完整 Runtime JSON 执行热更新。
 
 ### 5.7 `administration`
 
