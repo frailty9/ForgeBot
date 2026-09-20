@@ -1,5 +1,17 @@
 {
   "modules": {
+    "native.echo": {
+      "enabled": true,
+      "options": {}
+    },
+    "native.onebot": {
+      "enabled": false,
+      "options": {
+        "timeout": "15s",
+        "replay_ttl": "5m",
+        "replay_max": 10000
+      }
+    },
     "native.reply_experience": {
       "enabled": true,
       "options": {
@@ -89,14 +101,15 @@
       {
         "id": "echo-local",
         "type": "echo",
-        "enabled": true
+        "enabled": true,
+        "options": {}
       },
       {
         "id": "qq-main",
         "type": "onebot",
         "enabled": false,
         "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
-        "onebot": {
+        "options": {
           "api_url": "http://127.0.0.1:5700",
           "send_token": "",
           "webhook_addr": "127.0.0.1:8090",

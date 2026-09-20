@@ -11,19 +11,18 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/admin"
-	"github.com/soleapi/forgebot/internal/app/legacyonebot"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/logging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
+	"github.com/soleapi/forgebot/internal/modules/onebot"
 	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
-	"github.com/soleapi/forgebot/internal/platform"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/server"
@@ -55,6 +54,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err := moduleRegistry.Register(echo.Factory{}, hooks.Native, 50, hooks.Continue); err != nil {
 		return nil, err
 	}
+	if err := moduleRegistry.Register(onebot.Factory{}, hooks.Native, 60, hooks.Continue); err != nil {
+		return nil, err
+	}
 	if err := moduleRegistry.Register(proactivereply.Factory{}, hooks.Native, 200, hooks.Continue); err != nil {
 		return nil, err
 	}
@@ -64,7 +66,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err := moduleRegistry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{Modules: moduleRegistry, Logger: logger, ConnectorOptions: legacyonebot.Options, ConnectorProviders: []platform.ConnectorProvider{legacyonebot.Provider{}}, ApplyLog: func(logConfig config.LogConfig) {
+	builder := runtimecfg.Builder{Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}

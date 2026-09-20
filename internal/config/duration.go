@@ -85,61 +85,6 @@ func (l LLMConfig) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func (c OneBotConnectorConfig) MarshalJSON() ([]byte, error) {
-	type encoded struct {
-		APIURL        string `json:"api_url"`
-		SendToken     string `json:"send_token,omitempty"`
-		ReceiveSecret string `json:"receive_secret,omitempty"`
-		WebhookAddr   string `json:"webhook_addr"`
-		WebhookPath   string `json:"webhook_path"`
-		RequestLimit  int64  `json:"request_limit"`
-		Timeout       string `json:"timeout"`
-		ReplayTTL     string `json:"replay_ttl"`
-		ReplayMax     int    `json:"replay_max"`
-	}
-	return json.Marshal(encoded{
-		APIURL: c.APIURL, SendToken: c.SendToken, ReceiveSecret: c.ReceiveSecret,
-		WebhookAddr: c.WebhookAddr, WebhookPath: c.WebhookPath, RequestLimit: c.RequestLimit,
-		Timeout: c.Timeout.String(), ReplayTTL: c.ReplayTTL.String(), ReplayMax: c.ReplayMax,
-	})
-}
-
-func (c *OneBotConnectorConfig) UnmarshalJSON(data []byte) error {
-	type rawConfig struct {
-		APIURL        string          `json:"api_url"`
-		SendToken     string          `json:"send_token"`
-		ReceiveSecret string          `json:"receive_secret"`
-		WebhookAddr   string          `json:"webhook_addr"`
-		WebhookPath   string          `json:"webhook_path"`
-		RequestLimit  int64           `json:"request_limit"`
-		Timeout       json.RawMessage `json:"timeout"`
-		ReplayTTL     json.RawMessage `json:"replay_ttl"`
-		ReplayMax     int             `json:"replay_max"`
-	}
-	var raw rawConfig
-	if err := decodeStrictJSON(data, &raw); err != nil {
-		return err
-	}
-	timeout, err := decodeDuration(raw.Timeout, 15*time.Second)
-	if err != nil {
-		return fmt.Errorf("timeout: %w", err)
-	}
-	replayTTL, err := decodeDuration(raw.ReplayTTL, 5*time.Minute)
-	if err != nil {
-		return fmt.Errorf("replay_ttl: %w", err)
-	}
-	replayMax := raw.ReplayMax
-	if replayMax == 0 {
-		replayMax = 10000
-	}
-	*c = OneBotConnectorConfig{
-		APIURL: raw.APIURL, SendToken: raw.SendToken, ReceiveSecret: raw.ReceiveSecret,
-		WebhookAddr: raw.WebhookAddr, WebhookPath: raw.WebhookPath, RequestLimit: raw.RequestLimit,
-		Timeout: timeout, ReplayTTL: replayTTL, ReplayMax: replayMax,
-	}
-	return nil
-}
-
 func (d *ServerConfig) UnmarshalJSON(data []byte) error {
 	type rawServerConfig struct {
 		Addr            string          `json:"addr"`

@@ -5,7 +5,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -90,7 +89,6 @@ type ApplyResult struct {
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
 type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
-type ConnectorOptions func(config.ConnectorConfig) (json.RawMessage, error)
 type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
@@ -100,7 +98,6 @@ type Builder struct {
 	Secrets            secret.Store
 	ClientFactory      ClientFactory
 	Logger             *slog.Logger
-	ConnectorOptions   ConnectorOptions
 	ConnectorProviders []platform.ConnectorProvider
 	ConnectorFactory   ConnectorFactory
 	ApplyLog           func(config.LogConfig)
@@ -458,10 +455,7 @@ func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig,
 				providerBindings = append(providerBindings, platform.ConnectorBinding{ConversationID: binding.ID, Target: binding.Target, PromptSuffix: binding.PromptSuffix})
 			}
 		}
-		options, err := b.connectorOptions(connector)
-		if err != nil {
-			return nil, fmt.Errorf("connector %s options: %w", connector.ID, err)
-		}
+		options := slices.Clone(connector.Options)
 		if err := registration.Provider.ValidateOptions(registration.ModuleOptions, options, providerBindings); err != nil {
 			return nil, fmt.Errorf("connector %s: %w", connector.ID, err)
 		}
@@ -479,14 +473,6 @@ func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig,
 		adapters = append(adapters, adapter)
 	}
 	return platform.NewSet(adapters, bindings)
-}
-
-func (b Builder) connectorOptions(connector config.ConnectorConfig) (json.RawMessage, error) {
-	if b.ConnectorOptions == nil {
-		return nil, nil
-	}
-	options, err := b.ConnectorOptions(connector)
-	return slices.Clone(options), err
 }
 
 type pausedHandler struct {

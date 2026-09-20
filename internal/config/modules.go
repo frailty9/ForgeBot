@@ -73,10 +73,7 @@ func (c RuntimeConfig) Clone() RuntimeConfig {
 	}
 	c.Platforms.Connectors = slices.Clone(c.Platforms.Connectors)
 	for index := range c.Platforms.Connectors {
-		if connector := c.Platforms.Connectors[index].OneBot; connector != nil {
-			value := *connector
-			c.Platforms.Connectors[index].OneBot = &value
-		}
+		c.Platforms.Connectors[index].Options = slices.Clone(c.Platforms.Connectors[index].Options)
 	}
 	c.Platforms.Groups = slices.Clone(c.Platforms.Groups)
 	c.Administration.Administrators = slices.Clone(c.Administration.Administrators)

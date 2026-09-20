@@ -154,24 +154,16 @@ func TestRuntimeConfigRejectsRemovedFeatureFields(t *testing.T) {
 	}
 }
 
-func TestOneBotConfigDecodesDurationsAndReplayDefaults(t *testing.T) {
-	var connector OneBotConnectorConfig
-	err := json.Unmarshal([]byte(`{
-		"api_url":"http://127.0.0.1:5700","webhook_addr":"127.0.0.1:8090",
-		"webhook_path":"/onebot","request_limit":1024,"timeout":"15s"
-	}`), &connector)
-	if err != nil {
+func TestRuntimeConfigRejectsLegacyOneBotConnectorField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	body := `{
+		"platforms":{"connectors":[{"id":"qq","type":"onebot","enabled":true,"onebot":{}}],"groups":[]}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if connector.Timeout != 15*time.Second || connector.ReplayTTL != 5*time.Minute || connector.ReplayMax != 10000 {
-		t.Fatalf("connector = %+v", connector)
-	}
-	data, err := json.Marshal(connector)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"timeout":"15s"`) || !strings.Contains(string(data), `"replay_ttl":"5m0s"`) {
-		t.Fatalf("encoded = %s", data)
+	if _, _, err := Load(LoadOptions{RuntimePath: path}); err == nil || !strings.Contains(err.Error(), "unknown field \"onebot\"") {
+		t.Fatalf("legacy onebot field accepted: %v", err)
 	}
 }
 
@@ -275,13 +267,10 @@ func TestEnvironmentPathsAreNotRelativeToYAML(t *testing.T) {
 }
 
 func TestPlatformConfigSupportsMultipleConnectorInstancesAndGroups(t *testing.T) {
-	onebotConfig := func(port string) *OneBotConnectorConfig {
-		return &OneBotConnectorConfig{APIURL: "http://127.0.0.1:" + port, WebhookAddr: "127.0.0.1:8" + port, WebhookPath: "/onebot/" + port, RequestLimit: 1024, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100}
-	}
 	cfg := PlatformConfig{
 		Connectors: []ConnectorConfig{
-			{ID: "qq-main", Type: "onebot", Enabled: true, OneBot: onebotConfig("5700")},
-			{ID: "qq-secondary", Type: "onebot", Enabled: true, OneBot: onebotConfig("5701")},
+			{ID: "qq-main", Type: "onebot", Enabled: true, Options: json.RawMessage(`{"api_url":"http://127.0.0.1:5700"}`)},
+			{ID: "qq-secondary", Type: "onebot", Enabled: true, Options: json.RawMessage(`{"api_url":"http://127.0.0.1:5701"}`)},
 		},
 		Groups: []GroupBindingConfig{
 			{ID: "support", ConnectorID: "qq-main", Target: "10001"},
@@ -308,12 +297,13 @@ func TestPlatformConfigRejectsAmbiguousOrUnavailableBindings(t *testing.T) {
 	}
 }
 
-func TestPlatformConfigRejectsOneBotWithoutGroups(t *testing.T) {
-	cfg := PlatformConfig{Connectors: []ConnectorConfig{{
-		ID: "qq-main", Type: "onebot", Enabled: true,
-		OneBot: &OneBotConnectorConfig{APIURL: "http://127.0.0.1:5700", WebhookAddr: "127.0.0.1:8090", WebhookPath: "/onebot", RequestLimit: 1024, Timeout: time.Second, ReplayTTL: time.Minute, ReplayMax: 100},
-	}}}
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "must bind at least one group") {
+func TestPlatformConfigAcceptsProtocolSpecificOptionsAndRejectsMalformedOptions(t *testing.T) {
+	valid := PlatformConfig{Connectors: []ConnectorConfig{{ID: "custom", Type: "custom.protocol", Enabled: true, Options: json.RawMessage(`{"opaque":true}`)}}}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	invalid := PlatformConfig{Connectors: []ConnectorConfig{{ID: "bad", Type: "invalid type", Enabled: true, Options: json.RawMessage(`[]`)}}}
+	if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "type is invalid") || !strings.Contains(err.Error(), "options must be a JSON object") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

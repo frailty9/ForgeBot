@@ -3,6 +3,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/llm"
+	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -167,11 +169,11 @@ type PlatformConfig struct {
 
 // ConnectorConfig selects one platform adapter instance.
 type ConnectorConfig struct {
-	ID           string                 `json:"id" yaml:"id"`
-	Type         string                 `json:"type" yaml:"type"`
-	Enabled      bool                   `json:"enabled" yaml:"enabled"`
-	PromptSuffix string                 `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
-	OneBot       *OneBotConnectorConfig `json:"onebot,omitempty" yaml:"onebot,omitempty"`
+	ID           string          `json:"id" yaml:"id"`
+	Type         string          `json:"type" yaml:"type"`
+	Enabled      bool            `json:"enabled" yaml:"enabled"`
+	PromptSuffix string          `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
+	Options      json.RawMessage `json:"options,omitempty" yaml:"options,omitempty"`
 }
 
 // GroupBindingConfig maps an external target to a logical conversation.
@@ -205,21 +207,6 @@ type OperatorGroupConfig struct {
 	ConversationID string   `json:"conversation_id" yaml:"conversation_id"`
 	Notifications  bool     `json:"notifications" yaml:"notifications"`
 	Commands       []string `json:"commands" yaml:"commands"`
-}
-
-// OneBotConnectorConfig contains application-level connection settings. The
-// protocol credentials are runtime-configurable so a management service
-// can replace an adapter generation without changing startup configuration.
-type OneBotConnectorConfig struct {
-	APIURL        string        `json:"api_url" yaml:"api_url"`
-	SendToken     string        `json:"send_token,omitempty" yaml:"send_token,omitempty"`
-	ReceiveSecret string        `json:"receive_secret,omitempty" yaml:"receive_secret,omitempty"`
-	WebhookAddr   string        `json:"webhook_addr" yaml:"webhook_addr"`
-	WebhookPath   string        `json:"webhook_path" yaml:"webhook_path"`
-	RequestLimit  int64         `json:"request_limit" yaml:"request_limit"`
-	Timeout       time.Duration `json:"timeout" yaml:"timeout"`
-	ReplayTTL     time.Duration `json:"replay_ttl" yaml:"replay_ttl"`
-	ReplayMax     int           `json:"replay_max" yaml:"replay_max"`
 }
 
 func DefaultStatic() StaticConfig {
@@ -711,22 +698,15 @@ func (c PlatformConfig) Validate() error {
 			problems = append(problems, prefix+".id is duplicated")
 		}
 		connectors[connector.ID] = connector
-		if connector.Type != "echo" && connector.Type != "onebot" {
-			problems = append(problems, prefix+".type must be echo or onebot")
+		if !platform.ValidConnectorType(connector.Type) {
+			problems = append(problems, prefix+".type is invalid")
 		}
-		if connector.Type == "onebot" && connector.Enabled {
-			if connector.OneBot == nil {
-				problems = append(problems, prefix+".onebot is required")
-				continue
-			}
-			if err := connector.OneBot.Validate(prefix + ".onebot"); err != nil {
-				problems = append(problems, err.Error())
-			}
+		if value := bytes.TrimSpace(connector.Options); len(value) > 0 && (value[0] != '{' || !json.Valid(value)) {
+			problems = append(problems, prefix+".options must be a JSON object")
 		}
 	}
 	groups := make(map[string]struct{}, len(c.Groups))
 	targets := make(map[string]struct{}, len(c.Groups))
-	bindingsPerConnector := make(map[string]int, len(c.Connectors))
 	for index, group := range c.Groups {
 		group.ID, group.ConnectorID, group.Target = strings.TrimSpace(group.ID), strings.TrimSpace(group.ConnectorID), strings.TrimSpace(group.Target)
 		prefix := fmt.Sprintf("platforms.groups[%d]", index)
@@ -750,41 +730,6 @@ func (c PlatformConfig) Validate() error {
 		} else {
 			targets[key] = struct{}{}
 		}
-		bindingsPerConnector[group.ConnectorID]++
-	}
-	for _, connector := range c.Connectors {
-		if connector.Enabled && connector.Type == "onebot" && bindingsPerConnector[connector.ID] == 0 {
-			problems = append(problems, fmt.Sprintf("platforms connector %s must bind at least one group", connector.ID))
-		}
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-func (c OneBotConnectorConfig) Validate(prefix string) error {
-	var problems []string
-	if strings.TrimSpace(c.APIURL) == "" {
-		problems = append(problems, prefix+".api_url is required")
-	}
-	if strings.TrimSpace(c.WebhookAddr) == "" {
-		problems = append(problems, prefix+".webhook_addr is required")
-	}
-	if path := strings.TrimSpace(c.WebhookPath); path == "" || !strings.HasPrefix(path, "/") {
-		problems = append(problems, prefix+".webhook_path must start with /")
-	}
-	if c.RequestLimit <= 0 {
-		problems = append(problems, prefix+".request_limit must be positive")
-	}
-	if c.Timeout <= 0 {
-		problems = append(problems, prefix+".timeout must be positive")
-	}
-	if c.ReplayTTL <= 0 {
-		problems = append(problems, prefix+".replay_ttl must be positive")
-	}
-	if c.ReplayMax <= 0 {
-		problems = append(problems, prefix+".replay_max must be positive")
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -877,17 +822,6 @@ func (c PlatformConfig) Public() map[string]any {
 	for _, connector := range c.Connectors {
 		item := map[string]any{"id": connector.ID, "type": connector.Type, "enabled": connector.Enabled,
 			"prompt_suffix": connector.PromptSuffix}
-		if connector.OneBot != nil {
-			item["onebot"] = map[string]any{
-				"api_url": connector.OneBot.APIURL, "webhook_addr": connector.OneBot.WebhookAddr,
-				"webhook_path": connector.OneBot.WebhookPath, "request_limit": connector.OneBot.RequestLimit,
-				"timeout":                   connector.OneBot.Timeout.String(),
-				"replay_ttl":                connector.OneBot.ReplayTTL.String(),
-				"replay_max":                connector.OneBot.ReplayMax,
-				"send_token_configured":     strings.TrimSpace(connector.OneBot.SendToken) != "",
-				"receive_secret_configured": strings.TrimSpace(connector.OneBot.ReceiveSecret) != "",
-			}
-		}
 		connectors = append(connectors, item)
 	}
 	return map[string]any{"connectors": connectors, "groups": c.Groups}

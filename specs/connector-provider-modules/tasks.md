@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；前两阶段已完成，进入 OneBot 迁移。
+状态：任务已于 2026-09-20 确认；前三阶段已完成，进入公开视图与验证收口。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -45,20 +45,20 @@
 
 ## 3. 将 OneBot 配置与构造迁入原生协议模块
 
-- [ ] 3.1 将通用 `ConnectorConfig` 收口为 `id/type/enabled/prompt_suffix/options`，
+- [x] 3.1 将通用 `ConnectorConfig` 收口为 `id/type/enabled/prompt_suffix/options`，
       实现 RawMessage 深拷贝和空对象规范化；删除 Core 的 `OneBotConnectorConfig`、
       专用 duration 编解码及 `onebot` 嵌套字段。
-- [ ] 3.2 将 PlatformConfig 校验缩减为公共字段、数量、唯一性和绑定引用；移除
+- [x] 3.2 将 PlatformConfig 校验缩减为公共字段、数量、唯一性和绑定引用；移除
       `type == onebot`、OneBot 必须绑定群组等协议条件分支。
-- [ ] 3.3 新增 `native.onebot` Factory/Instance/Provider，严格解析模块默认 options 与
+- [x] 3.3 新增 `native.onebot` Factory/Instance/Provider，严格解析模块默认 options 与
       实例 options，定义字段级覆盖规则和默认时长/限制值。
-- [ ] 3.4 将 OneBot 私有校验、至少一个群组规则、绑定到 `onebot.Group` 的转换和
+- [x] 3.4 将 OneBot 私有校验、至少一个群组规则、绑定到 `onebot.Group` 的转换和
       `onebot.Config` 构造迁入 Provider，保持现有 Adapter 协议实现不变。
-- [ ] 3.5 在组合根注册 `native.onebot`，删除临时 OneBot 适配 Provider、
+- [x] 3.5 在组合根注册 `native.onebot`，删除临时 OneBot 适配 Provider、
       `app.connectorFactory` 以及 app/runtime 对 `platform/onebot` 的构造依赖。
-- [ ] 3.6 破坏式更新所有测试夹具和默认配置：Echo 使用 `options: {}`，OneBot 使用
+- [x] 3.6 破坏式更新所有测试夹具和默认配置：Echo 使用 `options: {}`，OneBot 使用
       `connectors[].options` 且必须显式启用 `native.onebot`；不保留旧字段兼容层。
-- [ ] 3.7 回归 OneBot 多实例、群组映射、实例覆盖模块默认值、必填项错误路径、Webhook
+- [x] 3.7 回归 OneBot 多实例、群组映射、实例覆盖模块默认值、必填项错误路径、Webhook
       构建不抢端口，以及现有认证、重放、引用、图片、空 @ 和出站回复测试。
 - Requirements: 3.1, 3.2, 5.2, 5.3, 5.4；Design: 2, 4.2, 5
 
