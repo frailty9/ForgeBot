@@ -138,7 +138,12 @@ func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		s.writeAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, publicApplyResult(result))
+	public, publicErr := s.admin.PublicSnapshot(r.Context(), result.Snapshot, false)
+	if publicErr != nil {
+		s.writeAdminError(w, publicErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, publicApplyResult(result, public))
 }
 
 func (s *Server) adminRollback(w http.ResponseWriter, r *http.Request) {
@@ -152,14 +157,19 @@ func (s *Server) adminRollback(w http.ResponseWriter, r *http.Request) {
 		s.writeAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, publicApplyResult(result))
+	public, publicErr := s.admin.PublicSnapshot(r.Context(), result.Snapshot, false)
+	if publicErr != nil {
+		s.writeAdminError(w, publicErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, publicApplyResult(result, public))
 }
 
-func publicApplyResult(result runtimecfg.ApplyResult) map[string]any {
+func publicApplyResult(result runtimecfg.ApplyResult, public map[string]any) map[string]any {
 	return map[string]any{
 		"action": result.Action,
 		"status": result.Status,
-		"config": result.Snapshot.Public(false),
+		"config": public,
 	}
 }
 

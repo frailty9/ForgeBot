@@ -475,6 +475,36 @@ func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig,
 	return platform.NewSet(adapters, bindings)
 }
 
+func (b Builder) validateConnectors(ctx context.Context, cfg config.PlatformConfig, moduleSet *modules.Set) error {
+	if moduleSet == nil {
+		return errors.New("connector provider catalog is required")
+	}
+	for _, connector := range cfg.Connectors {
+		if !connector.Enabled {
+			continue
+		}
+		registration, exists := moduleSet.ConnectorProvider(connector.Type)
+		if !exists {
+			return fmt.Errorf("platforms.connectors[%s]: provider %q is unavailable", connector.ID, connector.Type)
+		}
+		bindings := connectorBindings(cfg, connector.ID)
+		if err := registration.Provider.ValidateOptions(registration.ModuleOptions, connector.Options, bindings); err != nil {
+			return fmt.Errorf("platforms.connectors[%s].options: %w", connector.ID, err)
+		}
+	}
+	return nil
+}
+
+func connectorBindings(cfg config.PlatformConfig, connectorID string) []platform.ConnectorBinding {
+	bindings := make([]platform.ConnectorBinding, 0)
+	for _, binding := range cfg.Groups {
+		if binding.ConnectorID == connectorID {
+			bindings = append(bindings, platform.ConnectorBinding{ConversationID: binding.ID, Target: binding.Target, PromptSuffix: binding.PromptSuffix})
+		}
+	}
+	return bindings
+}
+
 type pausedHandler struct {
 	manager *Manager
 	next    platform.Handler
@@ -932,11 +962,44 @@ func (m *Manager) ValidateConfiguration(cfg config.RuntimeConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	return m.builder.Modules.Validate(cfg.Modules)
+	providers, err := m.builder.Modules.BuildConnectorProviders(context.Background(), cfg.Modules, m.builder.Logger)
+	if err != nil {
+		return err
+	}
+	defer providers.Close(context.Background())
+	return m.builder.validateConnectors(context.Background(), cfg.Platforms, providers)
 }
 
 func (m *Manager) PublicModules(cfg config.RuntimeConfig) (map[string]any, error) {
 	return m.builder.Modules.Public(cfg.Modules)
+}
+
+// PublicPlatforms renders protocol options through the provider that owns
+// them. Unknown disabled connectors never expose their raw opaque options.
+func (m *Manager) PublicPlatforms(ctx context.Context, cfg config.RuntimeConfig) (map[string]any, error) {
+	providers, err := m.builder.Modules.BuildConnectorProviders(ctx, cfg.Modules, m.builder.Logger)
+	if err != nil {
+		return nil, err
+	}
+	defer providers.Close(context.Background())
+	connectors := make([]any, 0, len(cfg.Platforms.Connectors))
+	for _, connector := range cfg.Platforms.Connectors {
+		item := map[string]any{"id": connector.ID, "type": connector.Type, "enabled": connector.Enabled, "prompt_suffix": connector.PromptSuffix}
+		registration, available := providers.ConnectorProvider(connector.Type)
+		if !available {
+			item["provider_available"] = false
+			connectors = append(connectors, item)
+			continue
+		}
+		options, publicErr := registration.Provider.PublicOptions(registration.ModuleOptions, connector.Options)
+		if publicErr != nil {
+			return nil, fmt.Errorf("platforms.connectors[%s].options: %w", connector.ID, publicErr)
+		}
+		item["options"] = options
+		item["provider_available"] = true
+		connectors = append(connectors, item)
+	}
+	return map[string]any{"connectors": connectors, "groups": cfg.Platforms.Groups}, nil
 }
 
 func (m *Manager) rollbackConnectors(current, next *generation, changed bool) {

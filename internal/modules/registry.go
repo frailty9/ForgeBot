@@ -309,6 +309,28 @@ func (r *Registry) Build(ctx context.Context, entries map[string]config.ModuleCo
 	return r.BuildWithCapabilities(ctx, entries, logger, capability.NewValues())
 }
 
+// BuildConnectorProviders prepares only modules that declare connector
+// providers. It is used by validation and public configuration rendering, so
+// those paths share provider rules without building unrelated indexes, jobs,
+// or message hooks.
+func (r *Registry) BuildConnectorProviders(ctx context.Context, entries map[string]config.ModuleConfig, logger *slog.Logger) (*Set, error) {
+	if err := r.Validate(entries); err != nil {
+		return nil, err
+	}
+	onlyProviders := make(map[string]config.ModuleConfig, len(r.entries))
+	for _, id := range r.ids() {
+		entry := r.entries[id]
+		cfg := entries[id]
+		cfg.Options = slices.Clone(cfg.Options)
+		if !slices.Contains(entry.descriptor.Registrations, RegistrationConnectorProviders) {
+			disabled := false
+			cfg.Enabled = &disabled
+		}
+		onlyProviders[id] = cfg
+	}
+	return r.BuildWithCapabilities(ctx, onlyProviders, logger, capability.NewValues())
+}
+
 func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string]config.ModuleConfig, logger *slog.Logger, initial capability.Values) (result *Set, err error) {
 	if err = ctx.Err(); err != nil {
 		return nil, err

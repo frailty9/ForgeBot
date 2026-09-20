@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；前三阶段已完成，进入公开视图与验证收口。
+状态：任务已于 2026-09-20 确认；前四阶段已完成，进入热更新事务收口。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -69,18 +69,18 @@
 
 ## 4. 收口 Provider 验证与安全公开视图
 
-- [ ] 4.1 实现 Provider Catalog 对 enabled connector 的依赖和私有 options 校验：
+- [x] 4.1 实现 Provider Catalog 对 enabled connector 的依赖和私有 options 校验：
       缺失 Provider 时报告 connector ID/type，disabled 未知实例保持合法。
-- [ ] 4.2 为管理 API 的纯验证路径准备仅包含 Provider 的临时目录，复用模块 Factory
+- [x] 4.2 为管理 API 的纯验证路径准备仅包含 Provider 的临时目录，复用模块 Factory
       与注册校验并立即关闭实例，不构建无关检索索引或启动后台任务。
-- [ ] 4.3 实现 Provider 感知的连接器公开视图；可用 Provider 负责渲染 options，
+- [x] 4.3 实现 Provider 感知的连接器公开视图；可用 Provider 负责渲染 options，
       disabled 且 Provider 不可用的实例仅显示公共字段和 `provider_available: false`。
-- [ ] 4.4 OneBot Provider 对实例 options 输出 `send_token_configured`、
+- [x] 4.4 OneBot Provider 对实例 options 输出 `send_token_configured`、
       `receive_secret_configured`，不返回原始凭据；模块 Factory 对模块默认 options
       使用相同脱敏原则。
-- [ ] 4.5 将 admin 读取、validate/apply 结果及相关 server 状态响应切换到统一安全渲染
+- [x] 4.5 将 admin 读取、validate/apply 结果及相关 server 状态响应切换到统一安全渲染
       入口，禁止任何路径直接序列化 connector RawMessage。
-- [ ] 4.6 增加未知 Provider、disabled 未知实例、重复 Provider、错误定位和管理 API
+- [x] 4.6 增加未知 Provider、disabled 未知实例、重复 Provider、错误定位和管理 API
       密钥不回显测试，并扫描日志/错误中是否出现完整私有 options。
 - Requirements: 5.1, 5.2；Design: 6, 9
 

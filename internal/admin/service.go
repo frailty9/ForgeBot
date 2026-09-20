@@ -58,18 +58,34 @@ func (s *Service) Config(ctx context.Context) (map[string]any, error) {
 		}
 		configured = secretStatus.Configured
 	}
-	result := snapshot.Public(configured)
-	publicModules, err := s.runtime.PublicModules(snapshot.Runtime)
+	result, err := s.PublicSnapshot(ctx, snapshot, configured)
 	if err != nil {
 		return nil, err
 	}
-	result["runtime"].(map[string]any)["modules"] = publicModules
 	result["runtime_status"] = status
 	if configured {
 		result["llm_api_key"] = secretStatus
 	} else {
 		result["llm_api_key"] = map[string]any{"configured": false}
 	}
+	return result, nil
+}
+
+// PublicSnapshot is the only management rendering path for a runtime snapshot.
+// It delegates opaque module and connector options to their owning modules.
+func (s *Service) PublicSnapshot(ctx context.Context, snapshot config.Snapshot, apiKeyConfigured bool) (map[string]any, error) {
+	result := snapshot.Public(apiKeyConfigured)
+	publicModules, err := s.runtime.PublicModules(snapshot.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	publicPlatforms, err := s.runtime.PublicPlatforms(ctx, snapshot.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	runtime := result["runtime"].(map[string]any)
+	runtime["modules"] = publicModules
+	runtime["platforms"] = publicPlatforms
 	return result, nil
 }
 
