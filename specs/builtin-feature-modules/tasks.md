@@ -64,11 +64,11 @@
       reflection 和群组级主动回复字段；严格拒绝旧字段。
 - [x] 5.2 删除 Search policy/backend、Reflection mode 和 Gate max_count，将模块 options
       的校验迁移到对应工厂。
-- [ ] 5.3 统一模块变更为 replace_modules 候选 generation，保留 JSON Store 的版本、
+- [x] 5.3 统一模块变更为 replace_modules 候选 generation，保留 JSON Store 的版本、
       回滚、热更新和失败保活语义；不实现 DBStore 或拆分 JSON 文件。
 - [x] 5.4 将管理 API、运行状态和 /status 改为模块状态详情；保留 Search Reload 和
       Reflection Scan HTTP 路径但改走 capability。
-- [ ] 5.5 更新示例 JSON、YAML、配置文档、架构文档、管理命令文档和测试夹具。
+- [x] 5.5 更新示例 JSON、YAML、配置文档、架构文档、管理命令文档和测试夹具。
 - Requirement: R5, R6, R7
 
 ## 6. 收尾验证与提交
