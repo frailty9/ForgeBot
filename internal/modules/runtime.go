@@ -6,6 +6,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
@@ -14,12 +15,13 @@ import (
 type RegistrationKind string
 
 const (
-	RegistrationTools        RegistrationKind = "tools"
-	RegistrationCommands     RegistrationKind = "commands"
-	RegistrationObservers    RegistrationKind = "observers"
-	RegistrationParticipants RegistrationKind = "participants"
-	RegistrationJobs         RegistrationKind = "jobs"
-	RegistrationStatus       RegistrationKind = "status"
+	RegistrationTools              RegistrationKind = "tools"
+	RegistrationCommands           RegistrationKind = "commands"
+	RegistrationObservers          RegistrationKind = "observers"
+	RegistrationParticipants       RegistrationKind = "participants"
+	RegistrationJobs               RegistrationKind = "jobs"
+	RegistrationStatus             RegistrationKind = "status"
+	RegistrationConnectorProviders RegistrationKind = "connector_providers"
 )
 
 // BuildContext exposes only capabilities prepared earlier in the same
@@ -88,14 +90,24 @@ type CapabilityRegistration struct {
 	Value any
 }
 
+// ProviderRegistration is the immutable host view of a connector provider.
+// ModuleOptions are captured by the registry rather than supplied by modules,
+// so providers always receive the options of their owning module generation.
+type ProviderRegistration struct {
+	ModuleID      string
+	Provider      platform.ConnectorProvider
+	ModuleOptions json.RawMessage
+}
+
 type ExtendedRegistrations struct {
-	Tools        []ToolRegistration
-	Commands     []CommandRegistration
-	Observers    []ObserverRegistration
-	Participants []ParticipantRegistration
-	Jobs         []BackgroundJob
-	Capabilities []CapabilityRegistration
-	Status       func() any
+	Tools              []ToolRegistration
+	Commands           []CommandRegistration
+	Observers          []ObserverRegistration
+	Participants       []ParticipantRegistration
+	Jobs               []BackgroundJob
+	Capabilities       []CapabilityRegistration
+	ConnectorProviders []platform.ConnectorProvider
+	Status             func() any
 }
 
 type ExtendedProvider interface {

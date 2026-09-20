@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
+	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
@@ -91,7 +93,8 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 	for _, kind := range descriptor.Registrations {
 		switch kind {
 		case RegistrationTools, RegistrationCommands, RegistrationObservers,
-			RegistrationParticipants, RegistrationJobs, RegistrationStatus:
+			RegistrationParticipants, RegistrationJobs, RegistrationStatus,
+			RegistrationConnectorProviders:
 		default:
 			return fmt.Errorf("unsupported registration kind %q", kind)
 		}
@@ -106,6 +109,29 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 	descriptor.Registrations = slices.Clone(descriptor.Registrations)
 	r.entries[descriptor.ID] = entry{descriptor, factory, source, order, failure}
 	return nil
+}
+
+// ConnectorProvidersChanged reports whether a configuration update changes a
+// module that contributes protocol implementations. Runtime uses this metadata
+// rather than hard-coding native module IDs when choosing a restart action.
+func (r *Registry) ConnectorProvidersChanged(current, next map[string]config.ModuleConfig) bool {
+	if r == nil {
+		return false
+	}
+	for _, id := range r.ids() {
+		entry := r.entries[id]
+		if !slices.Contains(entry.descriptor.Registrations, RegistrationConnectorProviders) {
+			continue
+		}
+		before, after := current[id], next[id]
+		if enabled(entry, before) != enabled(entry, after) {
+			return true
+		}
+		if enabled(entry, before) && !reflect.DeepEqual(before.Options, after.Options) {
+			return true
+		}
+	}
+	return false
 }
 
 // Clone freezes a private directory for a runtime. Factories must be immutable.
@@ -194,25 +220,26 @@ type Status struct {
 	Error   string              `json:"error,omitempty"`
 }
 type Set struct {
-	chain           *hooks.Chain
-	capabilities    capability.Values
-	tools           []ToolRegistration
-	commands        []CommandRegistration
-	observers       []ObserverRegistration
-	participants    []ParticipantRegistration
-	jobs            []BackgroundJob
-	statusProviders map[string]func() any
-	instances       []Instance
-	instanceIDs     []string
-	status          []Status
-	mu              sync.RWMutex
-	startOnce       sync.Once
-	retireOnce      sync.Once
-	jobCancel       context.CancelFunc
-	jobWG           sync.WaitGroup
-	jobErr          error
-	closeOnce       sync.Once
-	closeErr        error
+	chain              *hooks.Chain
+	capabilities       capability.Values
+	tools              []ToolRegistration
+	commands           []CommandRegistration
+	observers          []ObserverRegistration
+	participants       []ParticipantRegistration
+	jobs               []BackgroundJob
+	statusProviders    map[string]func() any
+	connectorProviders map[string]ProviderRegistration
+	instances          []Instance
+	instanceIDs        []string
+	status             []Status
+	mu                 sync.RWMutex
+	startOnce          sync.Once
+	retireOnce         sync.Once
+	jobCancel          context.CancelFunc
+	jobWG              sync.WaitGroup
+	jobErr             error
+	closeOnce          sync.Once
+	closeErr           error
 }
 
 func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig, initial capability.Values) ([]string, error) {
@@ -293,7 +320,10 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 	if err != nil {
 		return nil, err
 	}
-	set := &Set{status: []Status{}, capabilities: initial.Clone(), statusProviders: make(map[string]func() any)}
+	set := &Set{
+		status: []Status{}, capabilities: initial.Clone(), statusProviders: make(map[string]func() any),
+		connectorProviders: make(map[string]ProviderRegistration),
+	}
 	defer func() {
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -345,6 +375,21 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 				set.observers = append(set.observers, extra.Observers...)
 				set.participants = append(set.participants, extra.Participants...)
 				set.jobs = append(set.jobs, extra.Jobs...)
+				for _, provider := range extra.ConnectorProviders {
+					typeName := ""
+					if provider != nil {
+						typeName = provider.Type()
+					}
+					if provider == nil || !platform.ValidConnectorType(typeName) {
+						return nil, errors.New("invalid connector provider registration")
+					}
+					if previous, exists := set.connectorProviders[typeName]; exists {
+						return nil, fmt.Errorf("connector provider type %q registered by both %s and %s", typeName, previous.ModuleID, id)
+					}
+					set.connectorProviders[typeName] = ProviderRegistration{
+						ModuleID: id, Provider: provider, ModuleOptions: slices.Clone(cfg.Options),
+					}
+				}
 				if extra.Status != nil {
 					set.statusProviders[id] = extra.Status
 				}
@@ -398,6 +443,9 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 	}
 	if registrations.Status != nil && !allowed[RegistrationStatus] {
 		return errors.New("returned undeclared status registration")
+	}
+	if len(registrations.ConnectorProviders) > 0 && !allowed[RegistrationConnectorProviders] {
+		return errors.New("returned undeclared connector provider registrations")
 	}
 	declared := make(map[capability.ID]bool, len(descriptor.Provides))
 	for _, id := range descriptor.Provides {
@@ -465,6 +513,34 @@ func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.c
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
 func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
 func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }
+
+// ConnectorProvider returns an independently owned registration for one type.
+// The provider itself is immutable process code; only its option bytes are
+// copied to prevent callers from mutating a generation's configuration.
+func (s *Set) ConnectorProvider(typeName string) (ProviderRegistration, bool) {
+	if s == nil {
+		return ProviderRegistration{}, false
+	}
+	registration, ok := s.connectorProviders[typeName]
+	if !ok {
+		return ProviderRegistration{}, false
+	}
+	registration.ModuleOptions = slices.Clone(registration.ModuleOptions)
+	return registration, true
+}
+
+// ConnectorProviderTypes lists registered provider types in stable order.
+func (s *Set) ConnectorProviderTypes() []string {
+	if s == nil {
+		return nil
+	}
+	types := make([]string, 0, len(s.connectorProviders))
+	for typeName := range s.connectorProviders {
+		types = append(types, typeName)
+	}
+	sort.Strings(types)
+	return types
+}
 
 // Start activates optional module jobs after the Set has been published.
 func (s *Set) Start(ctx context.Context) {

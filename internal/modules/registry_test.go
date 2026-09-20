@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/capability"
@@ -14,6 +15,7 @@ import (
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
+	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
 )
 
@@ -184,14 +186,19 @@ func TestValidationDoesNotBuild(t *testing.T) {
 }
 
 type extendedFactory struct {
-	id       string
-	provides capability.ID
-	requires capability.ID
-	instance modules.Instance
+	id            string
+	provides      capability.ID
+	requires      capability.ID
+	registrations []modules.RegistrationKind
+	instance      modules.Instance
 }
 
 func (f *extendedFactory) Descriptor() modules.Descriptor {
-	descriptor := modules.Descriptor{ID: f.id, DefaultEnabled: true, Registrations: []modules.RegistrationKind{modules.RegistrationTools}}
+	registrations := f.registrations
+	if registrations == nil {
+		registrations = []modules.RegistrationKind{modules.RegistrationTools}
+	}
+	descriptor := modules.Descriptor{ID: f.id, DefaultEnabled: true, Registrations: registrations}
 	if f.provides != "" {
 		descriptor.Provides = []capability.ID{f.provides}
 	}
@@ -215,6 +222,7 @@ func (f *extendedFactory) BuildWithContext(_ context.Context, build modules.Buil
 type extendedInstance struct {
 	capabilityID capability.ID
 	tool         tooling.Tool
+	providers    []platform.ConnectorProvider
 	started      *int
 	retired      *int
 }
@@ -232,10 +240,27 @@ func (i *extendedInstance) Retire() {
 	}
 }
 func (i *extendedInstance) ExtendedRegistrations() modules.ExtendedRegistrations {
-	return modules.ExtendedRegistrations{
-		Tools:        []modules.ToolRegistration{{ID: "tool", Tool: i.tool, MaxCalls: 1}},
-		Capabilities: []modules.CapabilityRegistration{{ID: i.capabilityID, Value: struct{}{}}},
+	registrations := modules.ExtendedRegistrations{ConnectorProviders: i.providers}
+	if i.tool != nil {
+		registrations.Tools = []modules.ToolRegistration{{ID: "tool", Tool: i.tool, MaxCalls: 1}}
 	}
+	if i.capabilityID != "" {
+		registrations.Capabilities = []modules.CapabilityRegistration{{ID: i.capabilityID, Value: struct{}{}}}
+	}
+	return registrations
+}
+
+type testConnectorProvider struct{ typeName string }
+
+func (p testConnectorProvider) Type() string { return p.typeName }
+func (testConnectorProvider) ValidateOptions(json.RawMessage, json.RawMessage, []platform.ConnectorBinding) error {
+	return nil
+}
+func (testConnectorProvider) PublicOptions(json.RawMessage, json.RawMessage) (any, error) {
+	return map[string]any{}, nil
+}
+func (testConnectorProvider) Build(context.Context, platform.ConnectorBuildRequest) (platform.Adapter, error) {
+	return nil, nil
 }
 
 type testTool struct{ name string }
@@ -310,6 +335,104 @@ func TestRegistryLifecycleStartsAndRetiresInstances(t *testing.T) {
 	}
 	if retired != 1 {
 		t.Fatalf("close repeated retire = %d", retired)
+	}
+}
+
+func TestRegistryCollectsConnectorProvidersAndCopiesOptions(t *testing.T) {
+	registry := modules.NewRegistry()
+	provider := testConnectorProvider{typeName: "echo"}
+	factory := &extendedFactory{
+		id: "native.echo", registrations: []modules.RegistrationKind{modules.RegistrationConnectorProviders},
+		instance: &extendedInstance{providers: []platform.ConnectorProvider{provider}},
+	}
+	if err := registry.Register(factory, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	options := json.RawMessage(`{"label":"original"}`)
+	set, err := registry.Build(context.Background(), map[string]config.ModuleConfig{"native.echo": {Options: options}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+	if got := set.ConnectorProviderTypes(); !reflect.DeepEqual(got, []string{"echo"}) {
+		t.Fatalf("provider types = %v", got)
+	}
+	registration, ok := set.ConnectorProvider("echo")
+	if !ok || registration.ModuleID != "native.echo" || registration.Provider != provider {
+		t.Fatalf("provider registration = %#v, %v", registration, ok)
+	}
+	options[10] = 'X'
+	if string(registration.ModuleOptions) != `{"label":"original"}` {
+		t.Fatalf("module options aliased input: %s", registration.ModuleOptions)
+	}
+	registration.ModuleOptions[10] = 'Y'
+	again, ok := set.ConnectorProvider("echo")
+	if !ok || string(again.ModuleOptions) != `{"label":"original"}` {
+		t.Fatalf("module options aliased caller: %s", again.ModuleOptions)
+	}
+}
+
+func TestRegistryRejectsInvalidAndDuplicateConnectorProviders(t *testing.T) {
+	t.Run("undeclared", func(t *testing.T) {
+		registry := modules.NewRegistry()
+		factory := &extendedFactory{id: "undeclared", instance: &extendedInstance{providers: []platform.ConnectorProvider{testConnectorProvider{typeName: "echo"}}}}
+		if err := registry.Register(factory, hooks.Native, 0, hooks.Continue); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := registry.Build(context.Background(), nil, nil); err == nil || !strings.Contains(err.Error(), "undeclared connector provider") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("invalid type", func(t *testing.T) {
+		registry := modules.NewRegistry()
+		factory := &extendedFactory{id: "invalid", registrations: []modules.RegistrationKind{modules.RegistrationConnectorProviders}, instance: &extendedInstance{providers: []platform.ConnectorProvider{testConnectorProvider{typeName: "invalid type"}}}}
+		if err := registry.Register(factory, hooks.Native, 0, hooks.Continue); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := registry.Build(context.Background(), nil, nil); err == nil || !strings.Contains(err.Error(), "invalid connector provider") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		registry := modules.NewRegistry()
+		for _, id := range []string{"first", "second"} {
+			factory := &extendedFactory{id: id, registrations: []modules.RegistrationKind{modules.RegistrationConnectorProviders}, instance: &extendedInstance{providers: []platform.ConnectorProvider{testConnectorProvider{typeName: "echo"}}}}
+			if err := registry.Register(factory, hooks.Native, 0, hooks.Continue); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := registry.Build(context.Background(), nil, nil); err == nil || !strings.Contains(err.Error(), "both first and second") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestRegistryConnectorProviderChangeDetection(t *testing.T) {
+	registry := modules.NewRegistry()
+	providerFactory := &extendedFactory{id: "native.echo", registrations: []modules.RegistrationKind{modules.RegistrationConnectorProviders}, instance: &extendedInstance{}}
+	plainFactory := &extendedFactory{id: "native.plain", instance: &extendedInstance{tool: testTool{name: "plain"}}}
+	if err := registry.Register(providerFactory, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(plainFactory, hooks.Native, 0, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]config.ModuleConfig{"native.echo": {Options: json.RawMessage(`{"v":1}`)}}
+	if registry.ConnectorProvidersChanged(current, current) {
+		t.Fatal("unchanged configuration reported")
+	}
+	next := map[string]config.ModuleConfig{"native.echo": {Options: json.RawMessage(`{"v":2}`)}}
+	if !registry.ConnectorProvidersChanged(current, next) {
+		t.Fatal("provider options change not reported")
+	}
+	disabled := false
+	next["native.echo"] = config.ModuleConfig{Enabled: &disabled, Options: json.RawMessage(`{"v":1}`)}
+	if !registry.ConnectorProvidersChanged(current, next) {
+		t.Fatal("provider enablement change not reported")
+	}
+	plainNext := map[string]config.ModuleConfig{"native.echo": current["native.echo"], "native.plain": {Options: json.RawMessage(`{"v":2}`)}}
+	if registry.ConnectorProvidersChanged(current, plainNext) {
+		t.Fatal("plain module change reported as provider change")
 	}
 }
 

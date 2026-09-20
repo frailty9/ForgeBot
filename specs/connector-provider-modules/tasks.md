@@ -2,20 +2,20 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务草案，等待确认；确认后开始生产代码重构。
+状态：任务已于 2026-09-20 确认；第一阶段已完成，进入 Echo 迁移。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
-- [ ] 1.1 在 `internal/platform` 定义 `ConnectorProvider`、
+- [x] 1.1 在 `internal/platform` 定义 `ConnectorProvider`、
       `ConnectorBuildRequest` 和筛选后的 `ConnectorBinding`，明确 Build 无外部副作用、
       Adapter 才拥有运行期生命周期。
-- [ ] 1.2 为模块运行时新增 `connector_providers` 注册种类与注册结构，并在
+- [x] 1.2 为模块运行时新增 `connector_providers` 注册种类与注册结构，并在
       Descriptor/ExtendedRegistrations 校验中拒绝未声明注册、nil Provider 和非法类型。
-- [ ] 1.3 在 `modules.Set` 建立按 type 查询的不可变 Provider Catalog，保留提供者模块
+- [x] 1.3 在 `modules.Set` 建立按 type 查询的不可变 Provider Catalog，保留提供者模块
       ID 和模块 options，拒绝两个已启用模块注册相同 type。
-- [ ] 1.4 提供 Registry 查询“哪些模块影响连接器”的通用元数据能力，供后续热更新
+- [x] 1.4 提供 Registry 查询“哪些模块影响连接器”的通用元数据能力，供后续热更新
       分类使用，禁止 Runtime 写死 `native.onebot` 等模块 ID。
-- [ ] 1.5 增加 Provider 注册、禁用模块、重复 type、模块 options 隔离和目录只读行为测试。
+- [x] 1.5 增加 Provider 注册、禁用模块、重复 type、模块 options 隔离和目录只读行为测试。
 - Requirements: 5.1, 5.3；Design: 3.1, 3.2
 
 完成标准：新增抽象不改变现有 Echo/OneBot 构建路径；`go test ./internal/modules/...`
