@@ -664,13 +664,13 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 	if err := snapshot.Validate(); err != nil {
 		return ApplyResult{}, err
 	}
-	action := classify(current.snapshot.Runtime, snapshot.Runtime)
+	action := m.classify(current.snapshot.Runtime, snapshot.Runtime)
 	if action == ActionNone {
 		return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: current.snapshot.Clone()}, nil
 	}
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
 	connectors := current.connectors
-	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, snapshot.Runtime.Platforms) {
+	if action == ActionRestartConnectors {
 		connectors = nil
 	}
 	next, err := m.buildGeneration(ctx, snapshot, connectors, "", "")
@@ -705,7 +705,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	if current == nil {
 		return ApplyResult{}, errors.New("runtime is stopped")
 	}
-	action := classify(current.snapshot.Runtime, runtimeConfig)
+	action := m.classify(current.snapshot.Runtime, runtimeConfig)
 	if action == ActionNone || action == ActionUpdateLog {
 		persisted, err := persist()
 		if err != nil {
@@ -728,7 +728,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	candidate.Runtime = runtimeConfig
 	m.setStatus(StateApplying, action, current.snapshot.Version, "")
 	connectors := current.connectors
-	if !reflect.DeepEqual(current.snapshot.Runtime.Platforms, runtimeConfig.Platforms) {
+	if action == ActionRestartConnectors {
 		connectors = nil
 	}
 	next, err := m.buildGeneration(ctx, candidate, connectors, "", "")
@@ -1033,7 +1033,7 @@ func (m *Manager) readStatus() Status {
 	return m.status
 }
 
-func classify(current, next config.RuntimeConfig) Action {
+func (m *Manager) classify(current, next config.RuntimeConfig) Action {
 	if reflect.DeepEqual(current, next) {
 		return ActionNone
 	}
@@ -1043,6 +1043,9 @@ func classify(current, next config.RuntimeConfig) Action {
 		return ActionUpdateLog
 	}
 	if !reflect.DeepEqual(current.Platforms, next.Platforms) {
+		return ActionRestartConnectors
+	}
+	if m.builder.Modules.ConnectorProvidersChanged(current.Modules, next.Modules) {
 		return ActionRestartConnectors
 	}
 	if !reflect.DeepEqual(current.Modules, next.Modules) {

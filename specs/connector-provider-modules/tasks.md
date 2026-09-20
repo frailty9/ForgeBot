@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；前四阶段已完成，进入热更新事务收口。
+状态：任务已于 2026-09-20 确认；前五阶段已完成，进入文档与迁移说明更新。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -91,15 +91,15 @@
 
 ## 5. 完成 Provider 感知的热更新与生命周期事务
 
-- [ ] 5.1 扩展变更分类：Platforms 变化或声明 `connector_providers` 的模块 enabled/options
+- [x] 5.1 扩展变更分类：Platforms 变化或声明 `connector_providers` 的模块 enabled/options
       变化均返回 `restart_connectors`；普通模块变化仍为 `replace_modules`。
-- [ ] 5.2 调整重用旧 ConnectorSet 的条件，保证 Provider 配置发生变化时必建新集合，
+- [x] 5.2 调整重用旧 ConnectorSet 的条件，保证 Provider 配置发生变化时必建新集合，
       普通 Bot/LLM/业务模块更新仍可安全复用连接器。
-- [ ] 5.3 审计发布顺序，保证旧 ConnectorSet 在旧 Provider 模块退场前停止，新集合仅在
+- [x] 5.3 审计发布顺序，保证旧 ConnectorSet 在旧 Provider 模块退场前停止，新集合仅在
       publish 阶段启动，持久化或启动失败时恢复旧集合。
-- [ ] 5.4 覆盖 OneBot 模块启停、模块默认 options 更新、实例 options 更新、群组绑定更新、
+- [x] 5.4 覆盖 OneBot 模块启停、模块默认 options 更新、实例 options 更新、群组绑定更新、
       普通模块更新和混合更新的 action 分类与 generation 代际测试。
-- [ ] 5.5 增加新 ConnectorSet 启动失败、持久化失败、旧集合恢复失败和部分 Adapter
+- [x] 5.5 增加新 ConnectorSet 启动失败、持久化失败、旧集合恢复失败和部分 Adapter
       启动回滚测试；确保状态与通知包含 connector ID 但不泄密。
 - Requirements: 5.1, 5.3, 5.4；Design: 5, 7, 9
 
