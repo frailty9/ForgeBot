@@ -60,24 +60,24 @@
 
 ## 5. 收口 Runtime 配置、管理状态和存储流程
 
-- [ ] 5.1 将 RuntimeConfig 改为核心 admission 加 modules，删除顶层 gate、search、
+- [x] 5.1 将 RuntimeConfig 改为核心 admission 加 modules，删除顶层 gate、search、
       reflection 和群组级主动回复字段；严格拒绝旧字段。
-- [ ] 5.2 删除 Search policy/backend、Reflection mode 和 Gate max_count，将模块 options
+- [x] 5.2 删除 Search policy/backend、Reflection mode 和 Gate max_count，将模块 options
       的校验迁移到对应工厂。
 - [ ] 5.3 统一模块变更为 replace_modules 候选 generation，保留 JSON Store 的版本、
       回滚、热更新和失败保活语义；不实现 DBStore 或拆分 JSON 文件。
-- [ ] 5.4 将管理 API、运行状态和 /status 改为模块状态详情；保留 Search Reload 和
+- [x] 5.4 将管理 API、运行状态和 /status 改为模块状态详情；保留 Search Reload 和
       Reflection Scan HTTP 路径但改走 capability。
 - [ ] 5.5 更新示例 JSON、YAML、配置文档、架构文档、管理命令文档和测试夹具。
 - Requirement: R5, R6, R7
 
 ## 6. 收尾验证与提交
 
-- [ ] 6.1 每个阶段形成独立中文说明、英文类型前缀的 Git 提交，保证中间提交可编译。
-- [ ] 6.2 执行定向模块测试、go test ./...、go vet ./... 和竞态相关测试。
-- [ ] 6.3 检查旧配置字段、Gate/Search/Reflection 核心特判、重复实现和外部插件接口
+- [x] 6.1 每个阶段形成独立中文说明、英文类型前缀的 Git 提交，保证中间提交可编译。
+- [x] 6.2 执行定向模块测试、go test ./...、go vet ./... 和竞态相关测试。
+- [x] 6.3 检查旧配置字段、Gate/Search/Reflection 核心特判、重复实现和外部插件接口
       是否仍被意外保留。
-- [ ] 6.4 更新本规格 tasks 状态、架构交接记录和最终迁移说明。
+- [x] 6.4 更新本规格 tasks 状态、架构交接记录和最终迁移说明。
 - Requirement: R1–R7
 
 ## 提交建议

@@ -18,6 +18,8 @@ import (
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
+	reflectioncontract "github.com/soleapi/forgebot/internal/reflection"
+	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -167,8 +169,14 @@ func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, status := manager.Snapshot()
-	if status.Reflection.Buffer.Questions != 1 {
-		t.Fatalf("reflection stats = %+v", status.Reflection)
+	var reflectionStatus reflectioncontract.Status
+	for _, module := range status.Modules {
+		if module.ID == "native.knowledge_reflection" {
+			reflectionStatus, _ = module.Details.(reflectioncontract.Status)
+		}
+	}
+	if reflectionStatus.Buffer.Questions != 1 {
+		t.Fatalf("reflection stats = %+v", reflectionStatus)
 	}
 }
 
@@ -205,8 +213,18 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 		t.Fatalf("entries=%v err=%v", entries, err)
 	}
 	_, status := manager.Snapshot()
-	if !status.Reflection.Enabled || status.Reflection.Pipeline.Published != 1 || status.Search.Documents != 1 {
-		t.Fatalf("reflection status=%+v search status=%+v", status.Reflection, status.Search)
+	var reflectionStatus reflectioncontract.Status
+	var searchStatus searchcontract.Status
+	for _, module := range status.Modules {
+		switch module.ID {
+		case "native.knowledge_reflection":
+			reflectionStatus, _ = module.Details.(reflectioncontract.Status)
+		case "native.structured_search":
+			searchStatus, _ = module.Details.(searchcontract.Status)
+		}
+	}
+	if !reflectionStatus.Enabled || reflectionStatus.Pipeline.Published != 1 || searchStatus.Documents != 1 {
+		t.Fatalf("reflection status=%+v search status=%+v", reflectionStatus, searchStatus)
 	}
 }
 

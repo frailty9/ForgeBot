@@ -77,7 +77,8 @@ must not depend on or expose the complete Web administration service.
 
 1. Platform adapters do not call LLMs or write storage directly.
 2. LLM providers do not read global config or write records.
-3. Gate policy is injected and can be refreshed without importing config.
+3. Core Admission is always active; optional proactive buffering is injected as a
+   native module and can be refreshed without importing config.
 4. Storage, retrieval, tools, and metrics are middleware around the engine, not
    hidden side effects inside providers.
 5. New platforms should not require edits to the core engine.
@@ -147,9 +148,10 @@ tools, registers the optional `/search` command, and provides typed reload/statu
 capabilities. A document reload atomically swaps the index snapshot; failures
 retain the old snapshot and publish a bounded operational event.
 
-`search.Retriever` is independent of the structured implementation. Vector and
-hybrid retrieval may implement the same contract later, but their dependencies,
-configuration values, and index files are deliberately absent today.
+The `search.Retriever` contract remains implementation-neutral behind the native
+Tool module. Vector and hybrid retrieval may implement the same contract later,
+but their dependencies, configuration values, and index files are deliberately
+absent today.
 
 The reflection pipeline obtains a bounded PublisherFactory capability from the
 active search module. Relative extra paths resolve from the module document root;

@@ -101,8 +101,15 @@ func (s *Service) status() string {
 		connectorStates = append(connectorStates, "无")
 	}
 	searchState := "off"
-	if status.Search.Enabled {
-		searchState = fmt.Sprintf("%s (%d documents, %d sections)", status.Search.State, status.Search.Documents, status.Search.Sections)
+	for _, module := range status.Modules {
+		if module.ID != "native.structured_search" || !module.Enabled {
+			continue
+		}
+		if details, ok := module.Details.(searchcontract.Status); ok {
+			searchState = fmt.Sprintf("%s (%d documents, %d sections)", details.State, details.Documents, details.Sections)
+		} else {
+			searchState = module.State
+		}
 	}
 	proactiveEnabled := false
 	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {

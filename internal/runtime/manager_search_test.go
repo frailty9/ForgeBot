@@ -62,8 +62,14 @@ func TestManagerBuildsSearchModuleAndClassifiesModuleChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, status := manager.Snapshot()
-	if !status.Search.Enabled || status.Search.State != searchcontract.StateReady {
-		t.Fatalf("search status = %+v", status.Search)
+	var searchStatus searchcontract.Status
+	for _, module := range status.Modules {
+		if module.ID == structuredsearch.ID {
+			searchStatus, _ = module.Details.(searchcontract.Status)
+		}
+	}
+	if !searchStatus.Enabled || searchStatus.State != searchcontract.StateReady {
+		t.Fatalf("search status = %+v", searchStatus)
 	}
 	current, _ := manager.Snapshot()
 	next := current.Runtime

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -189,28 +190,29 @@ type Status struct {
 	Enabled bool                `json:"enabled"`
 	State   string              `json:"state"`
 	Hooks   []hooks.Description `json:"hooks"`
+	Details any                 `json:"details,omitempty"`
 	Error   string              `json:"error,omitempty"`
 }
 type Set struct {
-	chain        *hooks.Chain
-	capabilities capability.Values
-	tools        []ToolRegistration
-	commands     []CommandRegistration
-	observers    []ObserverRegistration
-	participants []ParticipantRegistration
-	jobs         []BackgroundJob
-	statuses     []func() any
-	instances    []Instance
-	instanceIDs  []string
-	status       []Status
-	mu           sync.RWMutex
-	startOnce    sync.Once
-	retireOnce   sync.Once
-	jobCancel    context.CancelFunc
-	jobWG        sync.WaitGroup
-	jobErr       error
-	closeOnce    sync.Once
-	closeErr     error
+	chain           *hooks.Chain
+	capabilities    capability.Values
+	tools           []ToolRegistration
+	commands        []CommandRegistration
+	observers       []ObserverRegistration
+	participants    []ParticipantRegistration
+	jobs            []BackgroundJob
+	statusProviders map[string]func() any
+	instances       []Instance
+	instanceIDs     []string
+	status          []Status
+	mu              sync.RWMutex
+	startOnce       sync.Once
+	retireOnce      sync.Once
+	jobCancel       context.CancelFunc
+	jobWG           sync.WaitGroup
+	jobErr          error
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 func (r *Registry) orderedIDs(entries map[string]config.ModuleConfig, initial capability.Values) ([]string, error) {
@@ -291,7 +293,7 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 	if err != nil {
 		return nil, err
 	}
-	set := &Set{status: []Status{}, capabilities: initial.Clone()}
+	set := &Set{status: []Status{}, capabilities: initial.Clone(), statusProviders: make(map[string]func() any)}
 	defer func() {
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -344,7 +346,7 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 				set.participants = append(set.participants, extra.Participants...)
 				set.jobs = append(set.jobs, extra.Jobs...)
 				if extra.Status != nil {
-					set.statuses = append(set.statuses, extra.Status)
+					set.statusProviders[id] = extra.Status
 				}
 				for _, provided := range extra.Capabilities {
 					if err := set.capabilities.Provide(provided.ID, provided.Value); err != nil {
@@ -463,15 +465,6 @@ func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.c
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
 func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
 func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }
-func (s *Set) StatusDetails() []any {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]any, 0, len(s.statuses))
-	for _, status := range s.statuses {
-		result = append(result, status())
-	}
-	return result
-}
 
 // Start activates optional module jobs after the Set has been published.
 func (s *Set) Start(ctx context.Context) {
@@ -529,10 +522,14 @@ func (s *Set) Mark(state string) {
 }
 func (s *Set) Status() []Status {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	result := slices.Clone(s.status)
+	providers := maps.Clone(s.statusProviders)
+	s.mu.RUnlock()
 	for index := range result {
 		result[index].Hooks = slices.Clone(result[index].Hooks)
+		if provider := providers[result[index].ID]; provider != nil && result[index].Enabled {
+			result[index].Details = provider()
+		}
 	}
 	return result
 }

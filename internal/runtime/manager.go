@@ -75,11 +75,8 @@ type Status struct {
 	Error      string                     `json:"error,omitempty"`
 	Paused     bool                       `json:"paused"`
 	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
-	Search     searchcontract.Status      `json:"search"`
-	Reflection reflectioncontract.Status  `json:"reflection"`
 }
 
-type ReflectionStatus = reflectioncontract.Status
 type ReflectionScanResult = reflectioncontract.ScanResult
 
 type ApplyResult struct {
@@ -439,21 +436,7 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 	if generation.connectors != nil {
 		status.Connectors = generation.connectors.Status()
 	}
-	if control, ok := capability.Resolve(generation.modules.Capabilities(), searchcontract.ControlKey); ok && control != nil {
-		status.Search = control.Status()
-	} else {
-		status.Search = searchcontract.Status{Enabled: false, State: searchcontract.StateDisabled}
-	}
-	status.Reflection = m.reflectionStatus(generation)
 	return snapshot, status
-}
-
-func (m *Manager) reflectionStatus(generation *generation) ReflectionStatus {
-	control, ok := capability.Resolve(generation.modules.Capabilities(), reflectioncontract.ControlKey)
-	if !ok || control == nil {
-		return ReflectionStatus{}
-	}
-	return control.Status()
 }
 
 func (m *Manager) ScanReflection(ctx context.Context) (ReflectionScanResult, error) {
