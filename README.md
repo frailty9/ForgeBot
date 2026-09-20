@@ -157,7 +157,7 @@ configuration:
 - YAML and documented environment variables configure the HTTP server, runtime
   JSON path, SecretStore path, and management token.
 - Runtime JSON configures the Bot, LLM, Admission, native modules, platforms,
-  administration, operations, and reflection.
+  administration, and operations. Search and reflection are native modules.
 - LLM API keys are stored separately and can be replaced without exposing their
   value in configuration reads or history.
 

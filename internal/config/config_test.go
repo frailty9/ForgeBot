@@ -140,6 +140,7 @@ func TestRuntimeConfigRejectsRemovedFeatureFields(t *testing.T) {
 	for _, body := range []string{
 		"{\"gate\":{\"enabled\":false}}",
 		"{\"search\":{\"enabled\":false}}",
+		"{\"reflection\":{\"enabled\":false}}",
 		"{\"platforms\":{\"groups\":[{\"id\":\"local\",\"connector_id\":\"echo\",\"target\":\"local\",\"auto_reply_unmentioned\":true}]}}",
 	} {
 		path := filepath.Join(t.TempDir(), "runtime.json")

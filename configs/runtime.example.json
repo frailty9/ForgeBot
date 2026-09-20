@@ -44,6 +44,24 @@
         "max_total_bytes": 268435456,
         "max_files": 10000
       }
+    },
+    "native.knowledge_reflection": {
+      "enabled": false,
+      "options": {
+        "conversation_ids": [
+          "local"
+        ],
+        "scan_interval": "15m",
+        "message_ttl": "24h",
+        "quiet_window": "3m",
+        "max_session_duration": "30m",
+        "max_messages_per_conversation": 1000,
+        "max_messages_total": 10000,
+        "max_message_chars": 4000,
+        "max_pairs_per_scan": 50,
+        "min_confidence": 0.9,
+        "extra_directory": "extra"
+      }
     }
   },
   "log": {
@@ -128,23 +146,6 @@
         "user_id": "replace-with-platform-user-id"
       }
     ]
-  },
-  "reflection": {
-    "enabled": false,
-    "mode": "off",
-    "conversation_ids": [
-      "local"
-    ],
-    "scan_interval": "15m",
-    "message_ttl": "24h",
-    "quiet_window": "3m",
-    "max_session_duration": "30m",
-    "max_messages_per_conversation": 1000,
-    "max_messages_total": 10000,
-    "max_message_chars": 4000,
-    "max_pairs_per_scan": 50,
-    "min_confidence": 0.9,
-    "extra_directory": "extra"
   },
   "extensions": {
     "mcp": [

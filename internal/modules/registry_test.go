@@ -308,7 +308,7 @@ func TestRegistryLifecycleStartsAndRetiresInstances(t *testing.T) {
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if retired != 2 {
+	if retired != 1 {
 		t.Fatalf("close repeated retire = %d", retired)
 	}
 }

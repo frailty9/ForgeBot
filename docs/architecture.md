@@ -156,6 +156,12 @@ active search module. Relative extra paths resolve from the module document root
 absolute paths are used as-is. Search itself remains read-only and indexes the
 published directory through its normal recursive scan.
 
+`native.knowledge_reflection` registers a read-only inbound Observer, a periodic
+Background Job, status, and `reflection.control`. It requires the host LLM
+completer, search control, publisher factory, and logical conversation catalog.
+Candidate construction prepares these resources without starting the job or
+creating the output directory; activation and retirement are owned by ModuleSet.
+
 ## MCP Transport Rules
 
 - `streamable_http` uses an explicitly configured HTTP(S) endpoint.

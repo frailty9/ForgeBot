@@ -18,7 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/knowledge"
+	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -26,10 +26,7 @@ import (
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/proactive"
-	reflectionbuffer "github.com/soleapi/forgebot/internal/reflection/buffer"
-	reflectionpipeline "github.com/soleapi/forgebot/internal/reflection/pipeline"
-	reflectionreflector "github.com/soleapi/forgebot/internal/reflection/reflector"
-	reflectionscanner "github.com/soleapi/forgebot/internal/reflection/scanner"
+	reflectioncontract "github.com/soleapi/forgebot/internal/reflection"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/skills"
@@ -79,23 +76,11 @@ type Status struct {
 	Paused     bool                       `json:"paused"`
 	Connectors []platform.ConnectorStatus `json:"connectors,omitempty"`
 	Search     searchcontract.Status      `json:"search"`
-	Reflection ReflectionStatus           `json:"reflection"`
+	Reflection reflectioncontract.Status  `json:"reflection"`
 }
 
-type ReflectionStatus struct {
-	Enabled  bool                     `json:"enabled"`
-	Active   bool                     `json:"active"`
-	Buffer   reflectionbuffer.Stats   `json:"buffer"`
-	Scanner  reflectionscanner.Stats  `json:"scanner"`
-	Pipeline reflectionpipeline.Stats `json:"pipeline"`
-}
-
-type ReflectionScanResult struct {
-	Processed int              `json:"processed"`
-	Retried   int              `json:"retried"`
-	Skipped   bool             `json:"skipped"`
-	Status    ReflectionStatus `json:"status"`
-}
+type ReflectionStatus = reflectioncontract.Status
+type ReflectionScanResult = reflectioncontract.ScanResult
 
 type ApplyResult struct {
 	Action   Action          `json:"action"`
@@ -109,14 +94,13 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
-	Modules           *modules.Registry
-	Sender            platform.Sender
-	Secrets           secret.Store
-	ClientFactory     ClientFactory
-	ConnectorFactory  ConnectorFactory
-	ApplyLog          func(config.LogConfig)
-	Notifications     notification.Publisher
-	ReflectionFactory func(context.Context, config.Snapshot, llm.Client, searchcontract.Control) (*reflectionscanner.Scanner, error)
+	Modules          *modules.Registry
+	Sender           platform.Sender
+	Secrets          secret.Store
+	ClientFactory    ClientFactory
+	ConnectorFactory ConnectorFactory
+	ApplyLog         func(config.LogConfig)
+	Notifications    notification.Publisher
 }
 
 // Build constructs a complete bot engine and its configured dependencies.
@@ -129,10 +113,7 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 	if err != nil {
 		return nil, err
 	}
-	initial := capability.NewValues()
-	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
-		_ = initial.Provide(agent.CompleterKey.ID(), completer)
-	}
+	initial := b.initialCapabilities(snapshot, client)
 	moduleSet, err := b.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
@@ -243,6 +224,19 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 	return client, nil
 }
 
+func (b Builder) initialCapabilities(snapshot config.Snapshot, client llm.Client) capability.Values {
+	values := capability.NewValues()
+	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
+		_ = values.Provide(agent.CompleterKey.ID(), completer)
+	}
+	conversations := make(conversation.Set, len(snapshot.Runtime.Platforms.Groups))
+	for _, group := range snapshot.Runtime.Platforms.Groups {
+		conversations[strings.TrimSpace(group.ID)] = struct{}{}
+	}
+	_ = values.Provide(conversation.CatalogKey.ID(), conversation.Catalog(conversations))
+	return values
+}
+
 // ReplaceSecret builds a complete candidate runtime before making the secret
 // durable, then publishes the already validated runtime without another fallible step.
 func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate func() error) error {
@@ -312,35 +306,30 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 // Manager owns the active generation and coordinates lifecycle, updates,
 // persistence, notifications, and administrative actions.
 type Manager struct {
-	retiring   <-chan struct{}
-	applyMu    sync.Mutex
-	routeMu    sync.RWMutex
-	statusMu   sync.RWMutex
-	current    atomic.Pointer[generation]
-	snapshot   atomic.Pointer[config.Snapshot]
-	builder    Builder
-	status     Status
-	started    bool
-	runCtx     context.Context
-	errors     chan error
-	operator   operations.Service
-	paused     atomic.Bool
-	reflection *reflectionbuffer.Buffer
+	retiring <-chan struct{}
+	applyMu  sync.Mutex
+	routeMu  sync.RWMutex
+	statusMu sync.RWMutex
+	current  atomic.Pointer[generation]
+	snapshot atomic.Pointer[config.Snapshot]
+	builder  Builder
+	status   Status
+	started  bool
+	runCtx   context.Context
+	errors   chan error
+	operator operations.Service
+	paused   atomic.Bool
 }
 
 type generation struct {
-	modules            *modules.Set
-	snapshot           config.Snapshot
-	engine             *bot.Engine
-	connectors         platform.ConnectorSet
-	handler            *operations.Router
-	admins             administration.Resolver
-	reflection         *reflectionbuffer.Buffer
-	reflectionEnabled  bool
-	reflectionScanner  *reflectionscanner.Scanner
-	reflectionPipeline *reflectionpipeline.Processor
-	watchCancel        context.CancelFunc
-	mu                 sync.RWMutex
+	modules     *modules.Set
+	snapshot    config.Snapshot
+	engine      *bot.Engine
+	connectors  platform.ConnectorSet
+	handler     *operations.Router
+	admins      administration.Resolver
+	watchCancel context.CancelFunc
+	mu          sync.RWMutex
 }
 
 // NewManager validates and publishes the initial runtime generation.
@@ -357,7 +346,6 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	}
 	manager.current.Store(generation)
 	generation.modules.Mark("active")
-	manager.reflection = generation.reflection
 	manager.storeSnapshot(snapshot)
 	return manager, nil
 }
@@ -390,10 +378,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	initial := capability.NewValues()
-	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
-		_ = initial.Provide(agent.CompleterKey.ID(), completer)
-	}
+	initial := m.builder.initialCapabilities(snapshot, client)
 	moduleSet, err := m.builder.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
@@ -421,88 +406,11 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 			ConversationID: administrator.ConversationID, UserID: administrator.UserID,
 		})
 	}
-	reflection, err := m.ensureReflectionBuffer(snapshot.Runtime.Reflection)
-	if err != nil {
-		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
-		return nil, fmt.Errorf("build reflection buffer: %w", err)
-	}
-	var reflectionScanner *reflectionscanner.Scanner
-	var reflectionPipeline *reflectionpipeline.Processor
-	if snapshot.Runtime.Reflection.Enabled && reflection != nil {
-		if client != nil {
-			reflectionScanner, reflectionPipeline, err = m.buildReflectionScanner(ctx, snapshot, reflection, client, moduleSet)
-		}
-		if err != nil {
-			engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
-			return nil, err
-		}
-	}
 	return &generation{
 		modules:  moduleSet,
 		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
-		admins: administration.New(adminIdentities), reflection: reflection,
-		reflectionEnabled:  snapshot.Runtime.Reflection.Enabled,
-		reflectionScanner:  reflectionScanner,
-		reflectionPipeline: reflectionPipeline,
+		admins: administration.New(adminIdentities),
 	}, nil
-}
-
-func (m *Manager) buildReflectionScanner(ctx context.Context, snapshot config.Snapshot, b *reflectionbuffer.Buffer, client llm.Client, moduleSet *modules.Set) (*reflectionscanner.Scanner, *reflectionpipeline.Processor, error) {
-	capabilities := moduleSet.Capabilities()
-	searchControl, searchOK := capability.Resolve(capabilities, searchcontract.ControlKey)
-	publisherFactory, publisherOK := capability.Resolve(capabilities, knowledge.PublisherFactoryKey)
-	if !searchOK || searchControl == nil || !publisherOK || publisherFactory == nil {
-		return nil, nil, errors.New("reflection requires active search and knowledge publisher capabilities")
-	}
-	if m.builder.ReflectionFactory != nil {
-		scanner, err := m.builder.ReflectionFactory(ctx, snapshot, client, searchControl)
-		return scanner, nil, err
-	}
-	r, err := reflectionreflector.New(client, snapshot.Runtime.LLM.Model)
-	if err != nil {
-		return nil, nil, err
-	}
-	publisher, err := publisherFactory.New(snapshot.Runtime.Reflection.ExtraDirectory)
-	if err != nil {
-		return nil, nil, err
-	}
-	processor, err := reflectionpipeline.New(reflectionpipeline.Config{Reflector: r, Publisher: publisher, MinConfidence: snapshot.Runtime.Reflection.MinConfidence, Reload: func(reloadCtx context.Context) error {
-		_, reloadErr := searchControl.Reload(reloadCtx)
-		return reloadErr
-	}})
-	if err != nil {
-		return nil, nil, err
-	}
-	scanner, err := reflectionscanner.New(reflectionscanner.Config{Interval: snapshot.Runtime.Reflection.ScanInterval, MaxSessions: snapshot.Runtime.Reflection.MaxPairsPerScan, Buffer: b, ProcessBatch: processor.ProcessBatch})
-	return scanner, processor, err
-}
-
-func (m *Manager) ensureReflectionBuffer(cfg config.ReflectionConfig) (*reflectionbuffer.Buffer, error) {
-	if m.reflection != nil {
-		return m.reflection, nil
-	}
-	if !cfg.Enabled {
-		return nil, nil
-	}
-	b, err := reflectionbuffer.New(reflectionbuffer.Config{
-		ConversationIDs: cfg.ConversationIDs, MessageTTL: cfg.MessageTTL,
-		QuietWindow: cfg.QuietWindow, MaxSessionDuration: cfg.MaxSessionDuration,
-		MaxMessagesPerConversation: cfg.MaxMessagesPerConversation,
-		MaxMessagesTotal:           cfg.MaxMessagesTotal, MaxMessageChars: cfg.MaxMessageChars,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
-}
-
-func reflectionBufferConfig(cfg config.ReflectionConfig) reflectionbuffer.Config {
-	return reflectionbuffer.Config{
-		ConversationIDs: cfg.ConversationIDs, MessageTTL: cfg.MessageTTL,
-		QuietWindow: cfg.QuietWindow, MaxSessionDuration: cfg.MaxSessionDuration,
-		MaxMessagesPerConversation: cfg.MaxMessagesPerConversation,
-		MaxMessagesTotal:           cfg.MaxMessagesTotal, MaxMessageChars: cfg.MaxMessageChars,
-	}
 }
 
 type pausedHandler struct {
@@ -541,17 +449,11 @@ func (m *Manager) Snapshot() (config.Snapshot, Status) {
 }
 
 func (m *Manager) reflectionStatus(generation *generation) ReflectionStatus {
-	status := ReflectionStatus{Enabled: generation.reflectionEnabled, Active: generation.reflectionEnabled && generation.reflectionScanner != nil}
-	if generation.reflection != nil {
-		status.Buffer = generation.reflection.Stats(time.Now().UTC())
+	control, ok := capability.Resolve(generation.modules.Capabilities(), reflectioncontract.ControlKey)
+	if !ok || control == nil {
+		return ReflectionStatus{}
 	}
-	if generation.reflectionScanner != nil {
-		status.Scanner = generation.reflectionScanner.Stats()
-	}
-	if generation.reflectionPipeline != nil {
-		status.Pipeline = generation.reflectionPipeline.Stats()
-	}
-	return status
+	return control.Status()
 }
 
 func (m *Manager) ScanReflection(ctx context.Context) (ReflectionScanResult, error) {
@@ -559,23 +461,12 @@ func (m *Manager) ScanReflection(ctx context.Context) (ReflectionScanResult, err
 	if generation == nil {
 		return ReflectionScanResult{}, errors.New("runtime is unavailable")
 	}
-	if !generation.reflectionEnabled {
-		generation.mu.RUnlock()
+	control, ok := capability.Resolve(generation.modules.Capabilities(), reflectioncontract.ControlKey)
+	generation.mu.RUnlock()
+	if !ok || control == nil {
 		return ReflectionScanResult{}, ErrReflectionDisabled
 	}
-	scanner := generation.reflectionScanner
-	generation.mu.RUnlock()
-	if scanner == nil {
-		return ReflectionScanResult{}, ErrReflectionUnavailable
-	}
-	processed, retried, skipped := scanner.ScanOnce(ctx)
-	current := m.acquire()
-	if current == nil {
-		return ReflectionScanResult{Processed: processed, Retried: retried, Skipped: skipped}, nil
-	}
-	status := m.reflectionStatus(current)
-	current.mu.RUnlock()
-	return ReflectionScanResult{Processed: processed, Retried: retried, Skipped: skipped, Status: status}, nil
+	return control.Scan(ctx)
 }
 
 func (m *Manager) storeSnapshot(snapshot config.Snapshot) {
@@ -600,14 +491,6 @@ func (m *Manager) Start(ctx context.Context) error {
 			return err
 		}
 		m.watchConnectorErrors(current)
-	}
-	if current.reflectionScanner != nil {
-		if err := current.reflectionScanner.Start(ctx); err != nil {
-			if current.connectors != nil {
-				_ = current.connectors.Stop(ctx)
-			}
-			return err
-		}
 	}
 	current.modules.Start(ctx)
 	m.started = true
@@ -833,9 +716,6 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			return err
 		}
 	}
-	if old.reflectionScanner != nil {
-		old.reflectionScanner.Cancel()
-	}
 	m.current.Store(nil)
 	if old.watchCancel != nil {
 		old.watchCancel()
@@ -876,8 +756,8 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 	}
 	defer generation.mu.RUnlock()
 	message = generation.admins.Mark(message)
-	if generation.reflectionEnabled && generation.reflection != nil {
-		generation.reflection.Observe(message)
+	for _, observer := range generation.modules.Observers() {
+		observer.Observe(message)
 	}
 	result, err := generation.handler.HandleInbound(ctx, message)
 	if err != nil {
@@ -947,7 +827,6 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 }
 
 func (m *Manager) publish(_ context.Context, current, next *generation, persist func() (config.Snapshot, error)) (config.Snapshot, error) {
-	previousReflection := m.reflection
 	connectorsChanged := current.connectors != next.connectors
 	if connectorsChanged && m.started {
 		m.routeMu.Lock()
@@ -956,7 +835,6 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		stopErr := current.connectors.Stop(stopCtx)
 		cancel()
 		if stopErr != nil {
-			m.reflection = previousReflection
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, stopErr
 		}
@@ -964,10 +842,8 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 			restoreErr := current.connectors.Start(m.runCtx, m)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			if restoreErr != nil {
-				m.reflection = previousReflection
 				return config.Snapshot{}, errors.Join(err, fmt.Errorf("restore previous connectors: %w", restoreErr))
 			}
-			m.reflection = previousReflection
 			return config.Snapshot{}, err
 		}
 	}
@@ -976,23 +852,11 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		var err error
 		published, err = persist()
 		if err != nil {
-			m.reflection = previousReflection
 			m.rollbackConnectors(current, next, connectorsChanged)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
 			return config.Snapshot{}, err
 		}
 		next.snapshot = published.Clone()
-	}
-	if next.reflectionEnabled && m.reflection != nil {
-		if err := next.reflection.UpdateConfig(reflectionBufferConfig(next.snapshot.Runtime.Reflection)); err != nil {
-			m.reflection = previousReflection
-			m.rollbackConnectors(current, next, connectorsChanged)
-			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
-			return config.Snapshot{}, err
-		}
-	}
-	if next.reflection != nil {
-		m.reflection = next.reflection
 	}
 	if m.started {
 		next.modules.Start(m.runCtx)
@@ -1002,14 +866,6 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {
-		if old.reflectionScanner != nil {
-			old.reflectionScanner.Cancel()
-		}
-		if next.reflectionScanner != nil {
-			if err := next.reflectionScanner.Start(m.runCtx); err != nil {
-				m.notify(notification.Event{Level: notification.LevelError, Component: "reflection", Code: "scanner_start_failed", Message: err.Error()})
-			}
-		}
 		if connectorsChanged {
 			if old.watchCancel != nil {
 				old.watchCancel()

@@ -48,6 +48,9 @@ func TestPublisherDoesNotOverwriteUnmanagedCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "extra", hash[:16]+".md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("# human document\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +60,17 @@ func TestPublisherDoesNotOverwriteUnmanagedCollision(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != "# human document\n" {
 		t.Fatal("human file was overwritten")
+	}
+}
+
+func TestPublisherConstructionDoesNotCreateOutputDirectory(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "extra")
+	if _, err := New(Config{Root: root, ExtraDirectory: "extra", MaxBytes: 100000}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("constructor created output directory: %v", err)
 	}
 }
 

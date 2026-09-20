@@ -67,7 +67,6 @@ type RuntimeConfig struct {
 	LLM            LLMConfig               `json:"llm"`
 	Platforms      PlatformConfig          `json:"platforms"`
 	Administration AdministrationConfig    `json:"administration"`
-	Reflection     ReflectionConfig        `json:"reflection"`
 	Operations     OperationsConfig        `json:"operations"`
 	Extensions     ExtensionsConfig        `json:"extensions"`
 }
@@ -193,23 +192,6 @@ type AdministrationConfig struct {
 	Administrators []AdministratorConfig `json:"administrators" yaml:"administrators"`
 }
 
-// ReflectionConfig controls periodic conversion of approved answers into documents.
-type ReflectionConfig struct {
-	Enabled                    bool          `json:"enabled" yaml:"enabled"`
-	Mode                       string        `json:"mode" yaml:"mode"`
-	ConversationIDs            []string      `json:"conversation_ids" yaml:"conversation_ids"`
-	ScanInterval               time.Duration `json:"scan_interval" yaml:"scan_interval"`
-	MessageTTL                 time.Duration `json:"message_ttl" yaml:"message_ttl"`
-	QuietWindow                time.Duration `json:"quiet_window" yaml:"quiet_window"`
-	MaxSessionDuration         time.Duration `json:"max_session_duration" yaml:"max_session_duration"`
-	MaxMessagesPerConversation int           `json:"max_messages_per_conversation" yaml:"max_messages_per_conversation"`
-	MaxMessagesTotal           int           `json:"max_messages_total" yaml:"max_messages_total"`
-	MaxMessageChars            int           `json:"max_message_chars" yaml:"max_message_chars"`
-	MaxPairsPerScan            int           `json:"max_pairs_per_scan" yaml:"max_pairs_per_scan"`
-	MinConfidence              float64       `json:"min_confidence" yaml:"min_confidence"`
-	ExtraDirectory             string        `json:"extra_directory" yaml:"extra_directory"`
-}
-
 // AdministratorConfig scopes a platform user ID to a logical conversation.
 // User IDs are not assumed to be globally unique across connectors or accounts.
 type AdministratorConfig struct {
@@ -256,13 +238,6 @@ func DefaultRuntime() RuntimeConfig {
 		Platforms: PlatformConfig{
 			Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
 			Groups:     []GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}},
-		},
-		Reflection: ReflectionConfig{
-			Enabled: false, Mode: "off", ScanInterval: 15 * time.Minute,
-			MessageTTL: 24 * time.Hour, QuietWindow: 3 * time.Minute,
-			MaxSessionDuration: 30 * time.Minute, MaxMessagesPerConversation: 1000,
-			MaxMessagesTotal: 10000, MaxMessageChars: 4000, MaxPairsPerScan: 50,
-			MinConfidence: 0.9, ExtraDirectory: "extra",
 		},
 		Operations: OperationsConfig{},
 		Extensions: ExtensionsConfig{Skills: SkillsConfig{MaxFileBytes: 128 << 10, MaxTotalBytes: 1 << 20, MaxFiles: 64}},
@@ -547,9 +522,6 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Administration.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.Reflection.Validate(c.Platforms); err != nil {
-		problems = append(problems, err.Error())
-	}
 	if err := c.Operations.Validate(c.Platforms); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -638,73 +610,6 @@ func (c ExtensionsConfig) Validate() error {
 	}
 	if s.MaxFileBytes > s.MaxTotalBytes {
 		problems = append(problems, "extensions.skills.max_file_bytes must not exceed max_total_bytes")
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-func (c ReflectionConfig) Validate(platforms PlatformConfig) error {
-	if !c.Enabled && c.Mode == "" {
-		return nil
-	}
-	var problems []string
-	if c.Mode != "off" && c.Mode != "auto" {
-		problems = append(problems, "reflection.mode must be off or auto")
-	}
-	if c.Enabled && c.Mode == "off" {
-		problems = append(problems, "reflection.mode must be auto when reflection is enabled")
-	}
-	if c.Enabled && strings.TrimSpace(c.ExtraDirectory) == "" {
-		problems = append(problems, "reflection.extra_directory is required when reflection is enabled")
-	}
-	knownConversations := make(map[string]struct{}, len(platforms.Groups))
-	for _, group := range platforms.Groups {
-		knownConversations[strings.TrimSpace(group.ID)] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(c.ConversationIDs))
-	for index, conversationID := range c.ConversationIDs {
-		conversationID = strings.TrimSpace(conversationID)
-		if conversationID == "" {
-			problems = append(problems, fmt.Sprintf("reflection.conversation_ids[%d] is required", index))
-		} else if _, ok := knownConversations[conversationID]; !ok {
-			problems = append(problems, fmt.Sprintf("reflection.conversation_ids[%d] must reference a bound conversation", index))
-		}
-		if _, ok := seen[conversationID]; ok {
-			problems = append(problems, fmt.Sprintf("reflection.conversation_ids[%d] is duplicated", index))
-		}
-		seen[conversationID] = struct{}{}
-	}
-	if c.Enabled && len(c.ConversationIDs) == 0 {
-		problems = append(problems, "reflection.conversation_ids must not be empty when reflection is enabled")
-	}
-	positiveDurations := []struct {
-		name  string
-		value time.Duration
-	}{
-		{"scan_interval", c.ScanInterval}, {"message_ttl", c.MessageTTL},
-		{"quiet_window", c.QuietWindow}, {"max_session_duration", c.MaxSessionDuration},
-	}
-	for _, item := range positiveDurations {
-		if item.value <= 0 {
-			problems = append(problems, "reflection."+item.name+" must be positive")
-		}
-	}
-	positiveInts := []struct {
-		name  string
-		value int
-	}{
-		{"max_messages_per_conversation", c.MaxMessagesPerConversation}, {"max_messages_total", c.MaxMessagesTotal},
-		{"max_message_chars", c.MaxMessageChars}, {"max_pairs_per_scan", c.MaxPairsPerScan},
-	}
-	for _, item := range positiveInts {
-		if item.value <= 0 {
-			problems = append(problems, "reflection."+item.name+" must be positive")
-		}
-	}
-	if c.MinConfidence <= 0 || c.MinConfidence > 1 {
-		problems = append(problems, "reflection.min_confidence must be greater than 0 and at most 1")
 	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -952,7 +857,6 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"admission":      c.Runtime.Admission,
 			"platforms":      c.Runtime.Platforms.Public(),
 			"administration": c.Runtime.Administration,
-			"reflection":     c.Runtime.Reflection,
 			"extensions": map[string]any{
 				"mcp": func() []map[string]any {
 					result := make([]map[string]any, 0, len(c.Runtime.Extensions.MCP))

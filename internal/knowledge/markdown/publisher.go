@@ -65,14 +65,14 @@ func New(cfg Config) (*Publisher, error) {
 	if info, statErr := os.Lstat(extra); statErr == nil && !info.IsDir() {
 		return nil, ErrInvalidConfig
 	}
-	if err := os.MkdirAll(extra, 0o755); err != nil {
-		return nil, fmt.Errorf("create extra directory: %w", err)
-	}
 	return &Publisher{root: root, extra: extra, maxBytes: cfg.MaxBytes}, nil
 }
 
 // Publish writes one entry, returning Duplicate when its content hash already exists.
 func (p *Publisher) Publish(entry knowledge.Entry) (knowledge.PublishResult, error) {
+	if err := p.ensureDirectory(); err != nil {
+		return knowledge.PublishResult{}, err
+	}
 	canonical, hash, err := canonicalEntry(entry)
 	if err != nil {
 		return knowledge.PublishResult{}, err
@@ -105,6 +105,21 @@ func (p *Publisher) Publish(entry knowledge.Entry) (knowledge.PublishResult, err
 		return knowledge.PublishResult{}, err
 	}
 	return knowledge.PublishResult{Status: knowledge.Published, Path: p.resultPath(path), ContentHash: hash}, nil
+}
+
+func (p *Publisher) ensureDirectory() error {
+	if info, err := os.Lstat(p.extra); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return ErrInvalidConfig
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(p.extra, 0o755); err != nil {
+		return fmt.Errorf("create extra directory: %w", err)
+	}
+	return nil
 }
 
 func (p *Publisher) findDuplicate(entry knowledge.Entry, hash string) (bool, string, error) {

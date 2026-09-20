@@ -32,12 +32,16 @@ type Result struct {
 }
 
 type Reflector struct {
-	client llm.Client
+	client Completer
 	model  string
 }
 
+type Completer interface {
+	Complete(context.Context, llm.Request) (llm.Response, error)
+}
+
 // New creates a reflector backed by the configured LLM client.
-func New(client llm.Client, model string) (*Reflector, error) {
+func New(client Completer, model string) (*Reflector, error) {
 	if client == nil || strings.TrimSpace(model) == "" {
 		return nil, ErrInvalidConfig
 	}

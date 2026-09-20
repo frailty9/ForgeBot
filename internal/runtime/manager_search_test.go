@@ -10,6 +10,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/notification"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
@@ -19,6 +20,9 @@ func searchRegistry(t *testing.T) *modules.Registry {
 	t.Helper()
 	registry := modules.NewRegistry()
 	if err := registry.Register(structuredsearch.Factory{}, hooks.Native, 300, hooks.Continue); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
 		t.Fatal(err)
 	}
 	return registry

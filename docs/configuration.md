@@ -283,23 +283,24 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 
 `notifications: true` 时，该群组接收 Runtime、Connector 和 LLM 故障通知。通讯侧运维能力刻意小于 Web 管理 API。
 
-### 5.9 `reflection`
+### 5.9 `modules.native.knowledge_reflection`
 
 ```json
 {
   "enabled": true,
-  "mode": "auto",
-  "conversation_ids": ["support"],
-  "scan_interval": "15m",
-  "message_ttl": "24h",
-  "quiet_window": "3m",
-  "max_session_duration": "30m",
-  "max_messages_per_conversation": 1000,
-  "max_messages_total": 10000,
-  "max_message_chars": 4000,
-  "max_pairs_per_scan": 50,
-  "min_confidence": 0.9,
-  "extra_directory": "extra"
+  "options": {
+    "conversation_ids": ["support"],
+    "scan_interval": "15m",
+    "message_ttl": "24h",
+    "quiet_window": "3m",
+    "max_session_duration": "30m",
+    "max_messages_per_conversation": 1000,
+    "max_messages_total": 10000,
+    "max_message_chars": 4000,
+    "max_pairs_per_scan": 50,
+    "min_confidence": 0.9,
+    "extra_directory": "extra"
+  }
 }
 ```
 
@@ -307,8 +308,8 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 
 启用条件：
 
-- `enabled: true` 且 `mode: auto`；停用时使用 `mode: off`。
-- 搜索已启用，`extensions` 包含 `.md`。
+- 模块 `enabled: true`，不再存在重复的 `mode` 开关。
+- `native.structured_search` 已启用，且 `extensions` 包含 `.md`。
 - `conversation_ids` 非空、无重复并引用已绑定群组。
 - `extra_directory` 可省略（默认 `extra`）。相对路径相对于
   `modules.native.structured_search.options.document_root`；绝对路径直接作为输出目录。

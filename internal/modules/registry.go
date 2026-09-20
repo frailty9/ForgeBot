@@ -204,6 +204,11 @@ type Set struct {
 	instanceIDs  []string
 	status       []Status
 	mu           sync.RWMutex
+	startOnce    sync.Once
+	retireOnce   sync.Once
+	jobCancel    context.CancelFunc
+	jobWG        sync.WaitGroup
+	jobErr       error
 	closeOnce    sync.Once
 	closeErr     error
 }
@@ -384,6 +389,11 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 	if len(registrations.Jobs) > 0 && !allowed[RegistrationJobs] {
 		return errors.New("returned undeclared job registrations")
 	}
+	for _, job := range registrations.Jobs {
+		if strings.TrimSpace(job.ID) == "" || job.Run == nil {
+			return errors.New("invalid background job registration")
+		}
+	}
 	if registrations.Status != nil && !allowed[RegistrationStatus] {
 		return errors.New("returned undeclared status registration")
 	}
@@ -465,21 +475,47 @@ func (s *Set) StatusDetails() []any {
 
 // Start activates optional module jobs after the Set has been published.
 func (s *Set) Start(ctx context.Context) {
-	for _, instance := range s.instances {
-		if starter, ok := instance.(Starter); ok {
-			starter.Start(ctx)
+	s.startOnce.Do(func() {
+		jobCtx, cancel := context.WithCancel(ctx)
+		s.mu.Lock()
+		s.jobCancel = cancel
+		s.mu.Unlock()
+		for _, instance := range s.instances {
+			if starter, ok := instance.(Starter); ok {
+				starter.Start(jobCtx)
+			}
 		}
-	}
+		for _, job := range s.jobs {
+			job := job
+			s.jobWG.Add(1)
+			go func() {
+				defer s.jobWG.Done()
+				if err := job.Run(jobCtx); err != nil && !errors.Is(err, context.Canceled) {
+					s.mu.Lock()
+					s.jobErr = errors.Join(s.jobErr, fmt.Errorf("job %s: %w", job.ID, err))
+					s.mu.Unlock()
+				}
+			}()
+		}
+	})
 	s.Mark("active")
 }
 
 // Retire asks optional modules to stop accepting new asynchronous work.
 func (s *Set) Retire() {
-	for index := len(s.instances) - 1; index >= 0; index-- {
-		if retirer, ok := s.instances[index].(Retirer); ok {
-			retirer.Retire()
+	s.retireOnce.Do(func() {
+		s.mu.Lock()
+		cancel := s.jobCancel
+		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
 		}
-	}
+		for index := len(s.instances) - 1; index >= 0; index-- {
+			if retirer, ok := s.instances[index].(Retirer); ok {
+				retirer.Retire()
+			}
+		}
+	})
 	s.Mark("retiring")
 }
 func (s *Set) Mark(state string) {
@@ -503,6 +539,13 @@ func (s *Set) Status() []Status {
 func (s *Set) Close(ctx context.Context) error {
 	s.closeOnce.Do(func() {
 		s.Retire()
+		jobsDone := make(chan struct{})
+		go func() { s.jobWG.Wait(); close(jobsDone) }()
+		select {
+		case <-jobsDone:
+		case <-ctx.Done():
+			s.closeErr = errors.Join(s.closeErr, ctx.Err())
+		}
 		for index := len(s.instances) - 1; index >= 0; index-- {
 			if err := s.instances[index].Close(ctx); err != nil {
 				s.closeErr = errors.Join(s.closeErr, fmt.Errorf("close module %s: %w", s.instanceIDs[index], err))
@@ -515,6 +558,10 @@ func (s *Set) Close(ctx context.Context) error {
 				s.mu.Unlock()
 			}
 		}
+		s.mu.RLock()
+		jobErr := s.jobErr
+		s.mu.RUnlock()
+		s.closeErr = errors.Join(s.closeErr, jobErr)
 		s.Mark("closed")
 	})
 	return s.closeErr

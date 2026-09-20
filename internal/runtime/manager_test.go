@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
@@ -151,32 +153,30 @@ func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *te
 func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
 	root := t.TempDir()
 	snapshot := searchSnapshot(t, root)
-	snapshot.Runtime.Reflection.Enabled = true
-	snapshot.Runtime.Reflection.Mode = "auto"
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
-	snapshot.Runtime.Reflection.ConversationIDs = []string{"c"}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t)})
+	enableReflectionModule(t, &snapshot, map[string]any{"conversation_ids": []string{"c"}})
+	store := configuredSecrets(t, "key")
+	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
+		return &reflectionResponseClient{protocol: cfg.Protocol, response: "{\"accept\":false,\"confidence\":0,\"reason\":\"test\"}"}, nil
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Modules: searchRegistry(t), Secrets: store, ClientFactory: clientFactory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "member", MessageID: "q1", Text: "Question"}); err != nil {
 		t.Fatal(err)
 	}
-	generation := manager.current.Load()
-	if generation.reflection == nil || generation.reflection.Stats(time.Now()).Questions != 1 {
-		t.Fatalf("reflection stats = %+v", generation.reflection.Stats(time.Now()))
+	_, status := manager.Snapshot()
+	if status.Reflection.Buffer.Questions != 1 {
+		t.Fatalf("reflection stats = %+v", status.Reflection)
 	}
 }
 
 func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	root := t.TempDir()
 	snapshot := searchSnapshot(t, root)
-	snapshot.Runtime.Reflection.Enabled = true
-	snapshot.Runtime.Reflection.Mode = "auto"
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
-	snapshot.Runtime.Reflection.ConversationIDs = []string{"c"}
-	snapshot.Runtime.Reflection.QuietWindow = time.Millisecond
-	snapshot.Runtime.Reflection.MaxSessionDuration = time.Second
+	enableReflectionModule(t, &snapshot, map[string]any{"conversation_ids": []string{"c"}, "quiet_window": "1ms", "max_session_duration": "1s"})
 	snapshot.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "c", UserID: "admin"}}
 	store := configuredSecrets(t, "key")
 	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
@@ -205,7 +205,7 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 		t.Fatalf("entries=%v err=%v", entries, err)
 	}
 	_, status := manager.Snapshot()
-	if !status.Reflection.Active || status.Reflection.Pipeline.Published != 1 || status.Search.Documents != 1 {
+	if !status.Reflection.Enabled || status.Reflection.Pipeline.Published != 1 || status.Search.Documents != 1 {
 		t.Fatalf("reflection status=%+v search status=%+v", status.Reflection, status.Search)
 	}
 }
@@ -531,6 +531,19 @@ func configuredSecrets(t *testing.T, value string) *secret.FileStore {
 		t.Fatal(err)
 	}
 	return store
+}
+
+func enableReflectionModule(t *testing.T, snapshot *config.Snapshot, overrides map[string]any) {
+	t.Helper()
+	enabled := true
+	options, err := json.Marshal(overrides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Runtime.Modules == nil {
+		snapshot.Runtime.Modules = make(map[string]config.ModuleConfig)
+	}
+	snapshot.Runtime.Modules[knowledgereflection.ID] = config.ModuleConfig{Enabled: &enabled, Options: options}
 }
 
 func testSnapshot() config.Snapshot {

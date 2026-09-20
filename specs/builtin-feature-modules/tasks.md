@@ -2,7 +2,7 @@
 
 依据：requirements.md 与 design.md。
 
-状态：任务已于 2026-09-19 确认；第 1 项基础运行时能力已完成，开始进入第 2 项。
+状态：任务已于 2026-09-19 确认；截至 2026-09-20，前四项模块迁移已完成，进入配置与状态收口。
 
 ## 1. 扩展内置模块运行时与能力注册
 
@@ -46,15 +46,15 @@
 
 ## 4. 将知识反思迁入观察器与后台任务模块
 
-- [ ] 4.1 新增 native.knowledge_reflection 工厂，迁移 buffer、scanner、reflector、
+- [x] 4.1 新增 native.knowledge_reflection 工厂，迁移 buffer、scanner、reflector、
       pipeline 的组装与配置校验。
-- [ ] 4.2 以只读 Observer 接收入站必要字段，以 Background Job 在激活后启动定时扫描；
+- [x] 4.2 以只读 Observer 接收入站必要字段，以 Background Job 在激活后启动定时扫描；
       准备阶段不得缓存、写文件或发送通知。
-- [ ] 4.3 通过 agent.completer、knowledge.publisher_factory 和 search.control
+- [x] 4.3 通过 agent.completer、knowledge.publisher_factory 和 search.control
       capability 解耦 LLM、文档发布和索引重载。
-- [ ] 4.4 通过 reflection.control 提供手动扫描和脱敏状态；关闭模块时完全停止观察、
+- [x] 4.4 通过 reflection.control 提供手动扫描和脱敏状态；关闭模块时完全停止观察、
       扫描、发布和重载。
-- [ ] 4.5 回归引用配对、置信度、去重、原子 Markdown、每批一次 Reload、扫描互斥和
+- [x] 4.5 回归引用配对、置信度、去重、原子 Markdown、每批一次 Reload、扫描互斥和
       退场取消。
 - Requirement: R3, R4, R5, R7
 

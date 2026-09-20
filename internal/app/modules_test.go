@@ -29,7 +29,7 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 			t.Fatal(result)
 		}
 		_, status := root.runtime.Snapshot()
-		if len(status.Modules) != 3 || status.Modules[0].Enabled == disabled || status.Modules[1].Enabled || status.Modules[2].Enabled {
+		if len(status.Modules) != 4 || status.Modules[0].Enabled == disabled || status.Modules[1].Enabled || status.Modules[2].Enabled || status.Modules[3].Enabled {
 			t.Fatal(status.Modules)
 		}
 		if err := root.runtime.Shutdown(context.Background()); err != nil {

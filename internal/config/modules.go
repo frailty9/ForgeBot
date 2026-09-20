@@ -80,7 +80,6 @@ func (c RuntimeConfig) Clone() RuntimeConfig {
 	}
 	c.Platforms.Groups = slices.Clone(c.Platforms.Groups)
 	c.Administration.Administrators = slices.Clone(c.Administration.Administrators)
-	c.Reflection.ConversationIDs = slices.Clone(c.Reflection.ConversationIDs)
 	c.Operations.Groups = slices.Clone(c.Operations.Groups)
 	for index := range c.Operations.Groups {
 		c.Operations.Groups[index].Commands = slices.Clone(c.Operations.Groups[index].Commands)
