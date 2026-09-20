@@ -2,7 +2,7 @@
 
 依据：[requirements.md](requirements.md) 与 [design.md](design.md)。
 
-状态：任务已于 2026-09-20 确认；前六阶段已完成，进入收尾审计。
+状态：任务已于 2026-09-20 完成；Connector Provider 模块化已通过代码、文档与测试收尾审计。
 
 ## 1. 建立 Provider 契约与模块注册目录
 
@@ -128,12 +128,12 @@
 
 ## 7. 收尾审计与全量验证
 
-- [ ] 7.1 使用 `rg` 审计 `OneBotConnectorConfig`、`ConnectorConfig.OneBot`、
+- [x] 7.1 使用 `rg` 审计 `OneBotConnectorConfig`、`ConnectorConfig.OneBot`、
       `switch connector.Type`、旧 `connectors[].onebot` 和直接序列化 options 的残留。
-- [ ] 7.2 运行 Provider/模块/Runtime/OneBot 定向测试，再运行 `go test ./...` 与
+- [x] 7.2 运行 Provider/模块/Runtime/OneBot 定向测试，再运行 `go test ./...` 与
       `go vet ./...`；如执行 race 测试，单独记录 Windows 二进制加载限制。
-- [ ] 7.3 审核每个提交均可编译、测试且职责单一；不得把格式化噪声或无关重构混入。
-- [ ] 7.4 更新本任务清单状态，记录实际提交、配置迁移影响、验证结果与剩余风险。
+- [x] 7.3 审核每个提交均可编译、测试且职责单一；不得把格式化噪声或无关重构混入。
+- [x] 7.4 更新本任务清单状态，记录实际提交、配置迁移影响、验证结果与剩余风险。
 - Requirements: 5, 7；Design: 10, 11
 
 完成标准：工作树干净，全量测试和 vet 通过，规格与代码一致，分支可供人工 OneBot
@@ -156,3 +156,27 @@ docs: 完成连接器Provider模块化任务清单
 实施中如某一阶段同时包含无法分离的配置破坏与调用方迁移，可在该阶段内部调整
 子任务顺序，但不得改变阶段验收边界，也不得留下需要下一提交才能恢复编译或运行的
 中间提交。
+
+## 完成记录（2026-09-20）
+
+实际实施提交与计划序列一致：
+
+```text
+30c7faa feat: 建立连接器Provider注册模型
+dc9e70f refactor: 将Echo迁入原生协议模块
+477608f refactor: 将OneBot迁入原生协议模块
+b733fa2 refactor: 收口连接器配置验证与公开视图
+0a55b4f refactor: 完善连接器Provider热更新事务
+aceea3c docs: 更新连接器Provider配置与架构说明
+```
+
+审计确认 Core 中不再存在 `OneBotConnectorConfig`、`ConnectorConfig.OneBot`、
+`connectorFactory`、`switch connector.Type` 或协议类型构造分支。旧
+`connectors[].onebot` 仅在用户迁移说明中出现，并由严格 JSON 解码拒绝。公开的基础
+Runtime 快照不含 connector options；管理面通过 Provider 产生脱敏 options，未知且禁用
+Provider 也不会泄漏其原始 options。
+
+验证结果：`go test ./...` 与 `go vet ./...` 均通过；配置示例已通过 JSON 解析检查。
+`go test -race ./...` 在当前 Windows 环境对全部 race 二进制一致失败，退出状态为
+`0xc0000139`，没有出现 Go 测试断言失败或竞态报告；该环境加载限制不作为本阶段代码
+失败结论。
