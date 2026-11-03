@@ -1,27 +1,34 @@
 # ForgeBot 计划入口
 
-更新日期：2026-09-17。
+更新日期：2026-11-03。
 
 本目录持久化需求、决策、阶段进度与交接信息，不代表所有建议都已实现或获准执行。
 
 ## 从哪里继续
 
-1. 阅读 [阶段路线图](roadmap.md)，确认当前阶段、范围与下一步。
-2. 阅读 [模块化 Hook 需求](modular-hooks/requirements.md)，以其中记录的最新用户决策为准。
-3. 检查当前 Git 分支、工作区和代码，不凭旧计划勾选或其他分支状态推断当前实现。
-4. 模块级 Hook 首版已在 feat/modular-hooks 实施，先读任务表的最终验证与交接；普通测试通过，race 受本地工具链阻塞。下一阶段先复核 Agent Loop 需求，不重复执行本阶段。
+1. 阅读 [v0.1.0 需求](v0.1.0/requirements.md)，这是当前用户选定版本范围及最新行为变更入口。
+2. 阅读 [实施设计](v0.1.0/design.md) 与 [任务顺序](v0.1.0/tasks.md)。设计和工作包已备齐，建议默认值与待定项有单独标记；代码实施尚未开始。
+3. 阅读 [功能与需求清单](../docs/feature-inventory.md)，区分当前代码、待实现目标与仅讨论事项。
+4. 检查当前 Git 分支、工作区和代码，不凭旧勾选或规划分支状态推断实现；主线基线为 master@c982e73。
+5. Hook、内置功能模块、Connector Provider 模块化已合入主线，不重复实施。FPP 与 WebUI 本版延后，MCP/Skill 保持 Core Agent 扩展入口。
 
 ## 当前计划
 
 | 计划 | 用途 | 状态 |
 | --- | --- | --- |
+| [v0.1.0/requirements.md](v0.1.0/requirements.md) | 首版目标、行为变更、五项应用待办、存储与开源交付 | 范围已选定，建议默认值仍有标记；无本版代码改造 |
+| [v0.1.0/design.md](v0.1.0/design.md) | 结果、存储、问答、决策、群操作与生命周期边界 | 实施准备草案，未以文档代替代码验收 |
+| [v0.1.0/tasks.md](v0.1.0/tasks.md) | 工作包 0–11、依赖、验收和提交拆分 | 已排顺序；执行确认后从新分支与测试基线开始 |
+| [功能清单](../docs/feature-inventory.md) | 运行时、运维、扩展与架构的当前状态及版本关联 | 代码核对记录，不等于发行验收 |
 | [roadmap.md](roadmap.md) | 全局优先级、阶段范围、交接说明 | 后续阶段需在前阶段完成后复核 |
 | [modular-hooks/requirements.md](modular-hooks/requirements.md) | 模块级挂载、开关、替代自由与配置存储 | 首期已落实，长期能力仍受设计范围约束 |
 | [modular-hooks/design.md](modular-hooks/design.md) | 首个迁移模块、强类型节点、配置、生命周期和验证矩阵 | 已确认并实施，含实现补充 |
 | [modular-hooks/tasks.md](modular-hooks/tasks.md) | 实施清单、验证结果与下一阶段建议 | 七项完成；竞态验证环境限制已记录 |
-| [agent-loop/requirements.md](agent-loop/requirements.md) | 多轮工具调用、预算、超时、取消与降级需求 | 需求规划中，待确认 |
+| [agent-loop/requirements.md](agent-loop/requirements.md) | 多轮工具调用、预算、超时、取消与降级需求 | 历史草案；本版以 v0.1.0 范围收口，/search 兼容要求不再沿用 |
+| [builtin-feature-modules/tasks.md](builtin-feature-modules/tasks.md) | 主动介入、检索与反思的模块化 | 已完成并合入主线 |
+| [connector-provider-modules/tasks.md](connector-provider-modules/tasks.md) | Echo/OneBot Provider 与配置模型 | 已完成并合入主线 |
 
-用户已授权本阶段连续实施；未授权提交、合并或自动执行后续功能阶段。
+旧阶段授权不自动扩展到后续版本；本次已形成 v0.1.0 需求、设计与任务草案，按确认后的顺序逐项执行。允许破坏式变更不等于允许丢弃本地数据或重写历史。
 
 ## 历史计划
 
