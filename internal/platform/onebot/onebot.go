@@ -619,7 +619,10 @@ func extractText(raw json.RawMessage) string {
 	var segments []struct {
 		Type string `json:"type"`
 		Data struct {
-			Text string `json:"text"`
+			Text        string `json:"text"`
+			Summary     string `json:"summary"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &segments); err != nil {
@@ -633,6 +636,8 @@ func extractText(raw json.RawMessage) string {
 	for _, segment := range segments {
 		if segment.Type == "text" {
 			b.WriteString(segment.Data.Text)
+		} else if segment.Type == "face" || segment.Type == "mface" {
+			b.WriteString(emojiText(segment.Data.Summary, segment.Data.Description, segment.Data.Text, segment.Data.Name))
 		}
 	}
 	return strings.TrimSpace(b.String())
@@ -681,6 +686,7 @@ func cqParameter(message, segmentType, parameter string) string {
 }
 
 func stripCQ(text string) string {
+	var output strings.Builder
 	for {
 		start := strings.Index(text, "[CQ:")
 		if start < 0 {
@@ -690,9 +696,38 @@ func stripCQ(text string) string {
 		if end < 0 {
 			break
 		}
-		text = text[:start] + text[start+end+1:]
+		output.WriteString(decodeCQText(text[:start]))
+		segment := text[start : start+end+1]
+		segmentType := strings.SplitN(strings.TrimPrefix(segment, "[CQ:"), ",", 2)[0]
+		if segmentType == "face" || segmentType == "mface" {
+			output.WriteString(emojiText(cqParameter(segment, segmentType, "summary"), cqParameter(segment, segmentType, "description"), cqParameter(segment, segmentType, "text"), cqParameter(segment, segmentType, "name")))
+		}
+		text = text[start+end+1:]
 	}
-	return strings.TrimSpace(text)
+	output.WriteString(decodeCQText(text))
+	return strings.TrimSpace(output.String())
+}
+
+// 表情意义属于适配器：只采用服务端附带的描述，不根据不稳定 ID 猜测。
+// 限制描述长度；不将描述转成指令，也不影响同条文字、媒体和引用解析。
+func emojiText(candidates ...string) string {
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(decodeCQText(candidate))
+		if candidate == "" {
+			continue
+		}
+		runes := []rune(candidate)
+		if len(runes) > 128 {
+			candidate = string(runes[:128])
+		}
+		return "【表情：" + candidate + "】"
+	}
+	return ""
+}
+
+// CQ 转义只还原一层，先解析真实段再解码，避免把转义的字面 CQ 重新执行。
+func decodeCQText(text string) string {
+	return strings.NewReplacer("&#91;", "[", "&#93;", "]", "&#44;", ",", "&amp;", "&").Replace(text)
 }
 
 func mentions(raw json.RawMessage, rawMessage, selfID string) bool {

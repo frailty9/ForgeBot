@@ -205,6 +205,8 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 ### 5.6 `platforms`
 
+OneBot 表情若附带 `summary`、`description`、`text` 或 `name`，适配器会保留为有界文字说明。没有可靠描述的表情继续忽略，不猜测 ID 对应含义；CQ 转义仅还原一层。文字、图片、引用和空 @ 的核心防护继续有效。
+
 `modules` 决定协议实现是否装载；`platforms.connectors` 声明实际账号或端点实例；
 `platforms.groups` 将外部目标映射为 Bot 核心使用的逻辑会话。三者职责不同，不能把
 某个 QQ 账号或群号写进 `native.onebot.options`。
