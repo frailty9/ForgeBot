@@ -142,6 +142,16 @@ func TestDefaultHTTPDeadlineAllowsFullAgentRun(t *testing.T) {
 	}
 }
 
+func TestCheckedInExampleLoadsWithCurrentConfigSchema(t *testing.T) {
+	cfg, _, err := Load(LoadOptions{Path: filepath.Join("..", "..", "configs", "forgebot.example.yaml"), LookupEnv: func(string) string { return "" }})
+	if err != nil {
+		t.Fatal("checked-in example no longer loads", err)
+	}
+	if cfg.Runtime.LLM.Model == "" || cfg.Runtime.LLM.ImageUnderstanding || cfg.Runtime.Agent.Defaults().MaxTurns != 6 {
+		t.Fatal("unexpected example behavior", cfg.Runtime.LLM, cfg.Runtime.Agent)
+	}
+}
+
 func TestRuntimeConfigRejectsRemovedFeatureFields(t *testing.T) {
 	for _, body := range []string{
 		"{\"gate\":{\"enabled\":false}}",

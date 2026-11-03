@@ -155,12 +155,6 @@
         "id": "local",
         "connector_id": "echo-local",
         "target": "local"
-      },
-      {
-        "id": "support",
-        "connector_id": "qq-main",
-        "target": "10001",
-        "prompt_suffix": "这是技术交流群，请优先给出简洁、可执行的步骤。"
       }
     ]
   },
@@ -224,9 +218,7 @@
       }
     ],
     "skills": {
-      "directories": [
-        "skills"
-      ],
+      "directories": [],
       "max_file_bytes": 131072,
       "max_total_bytes": 1048576,
       "max_files": 64
