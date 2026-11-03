@@ -464,6 +464,9 @@ func (f *fakeLLM) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, 
 }
 
 func newTestEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*Engine, error) {
+	if deps.LLM == nil {
+		deps.LLM = &fakeLLM{response: llm.Response{Text: "test reply"}}
+	}
 	registry := modules.NewRegistry()
 	if err := registry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
 		return nil, err
@@ -477,5 +480,5 @@ func newTestEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) 
 }
 
 func testPolicy() Policy {
-	return Policy{Name: "ForgeBot", Admission: AdmissionPolicy{DedupTTL: time.Minute, DedupMax: 10000}}
+	return Policy{Name: "ForgeBot", ImageUnderstanding: true, Admission: AdmissionPolicy{DedupTTL: time.Minute, DedupMax: 10000}}
 }

@@ -13,7 +13,7 @@ import (
 
 func TestAppRegistersDefaultNativeModule(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
-		snapshot := config.DefaultSnapshot()
+		snapshot := configuredAppSnapshot(t)
 		if disabled {
 			enabled := false
 			snapshot.Runtime.Modules = map[string]config.ModuleConfig{replyexperience.ID: {Enabled: &enabled}}

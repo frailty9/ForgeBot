@@ -72,16 +72,19 @@ func (a AdmissionConfig) MarshalJSON() ([]byte, error) {
 
 func (l LLMConfig) MarshalJSON() ([]byte, error) {
 	type encodedLLMConfig struct {
-		Protocol         llm.Protocol `json:"protocol"`
-		BaseURL          string       `json:"base_url"`
-		APIKeyRef        string       `json:"api_key_ref"`
-		Model            string       `json:"model"`
-		AnthropicVersion string       `json:"anthropic_version,omitempty"`
-		Timeout          string       `json:"timeout"`
+		Authentication     string       `json:"authentication,omitempty"`
+		Protocol           llm.Protocol `json:"protocol"`
+		BaseURL            string       `json:"base_url"`
+		APIKeyRef          string       `json:"api_key_ref"`
+		Model              string       `json:"model"`
+		AnthropicVersion   string       `json:"anthropic_version,omitempty"`
+		Timeout            string       `json:"timeout"`
+		ImageUnderstanding bool         `json:"image_understanding"`
 	}
 	return json.Marshal(encodedLLMConfig{
-		Protocol: l.Protocol, BaseURL: l.BaseURL, APIKeyRef: l.APIKeyRef, Model: l.Model,
-		AnthropicVersion: l.AnthropicVersion, Timeout: l.Timeout.String(),
+		Authentication: l.Authentication,
+		Protocol:       l.Protocol, BaseURL: l.BaseURL, APIKeyRef: l.APIKeyRef, Model: l.Model,
+		AnthropicVersion: l.AnthropicVersion, Timeout: l.Timeout.String(), ImageUnderstanding: l.ImageUnderstanding,
 	})
 }
 
@@ -136,12 +139,14 @@ func (a *AdmissionConfig) UnmarshalJSON(data []byte) error {
 
 func (l *LLMConfig) UnmarshalJSON(data []byte) error {
 	type rawLLMConfig struct {
-		Protocol         string          `json:"protocol"`
-		BaseURL          string          `json:"base_url"`
-		APIKeyRef        string          `json:"api_key_ref"`
-		Model            string          `json:"model"`
-		AnthropicVersion string          `json:"anthropic_version"`
-		Timeout          json.RawMessage `json:"timeout"`
+		Authentication     string          `json:"authentication"`
+		Protocol           string          `json:"protocol"`
+		BaseURL            string          `json:"base_url"`
+		APIKeyRef          string          `json:"api_key_ref"`
+		Model              string          `json:"model"`
+		AnthropicVersion   string          `json:"anthropic_version"`
+		Timeout            json.RawMessage `json:"timeout"`
+		ImageUnderstanding bool            `json:"image_understanding"`
 	}
 	defaults := DefaultRuntime().LLM
 	var raw rawLLMConfig
@@ -165,12 +170,14 @@ func (l *LLMConfig) UnmarshalJSON(data []byte) error {
 		apiKeyRef = defaults.APIKeyRef
 	}
 	*l = LLMConfig{
-		Protocol:         protocol,
-		BaseURL:          raw.BaseURL,
-		APIKeyRef:        apiKeyRef,
-		Model:            raw.Model,
-		AnthropicVersion: raw.AnthropicVersion,
-		Timeout:          timeout,
+		Authentication:     raw.Authentication,
+		Protocol:           protocol,
+		BaseURL:            raw.BaseURL,
+		APIKeyRef:          apiKeyRef,
+		Model:              raw.Model,
+		AnthropicVersion:   raw.AnthropicVersion,
+		Timeout:            timeout,
+		ImageUnderstanding: raw.ImageUnderstanding,
 	}
 	return nil
 }

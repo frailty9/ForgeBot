@@ -85,6 +85,8 @@
     "system_prompt": ""
   },
   "llm": {
+	"authentication": "api_key",
+	"image_understanding": false,
     "protocol": "openai_responses",
     "base_url": "https://api.openai.com/v1",
     "api_key_ref": "llm/default",

@@ -33,6 +33,7 @@ type Policy struct {
 	Model                 string
 	Admission             AdmissionPolicy
 	ExtensionInstructions string
+	ImageUnderstanding    bool
 }
 
 type AdmissionPolicy struct {
@@ -277,6 +278,10 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	hadCurrentText := text != ""
 	instructions := e.instructions(in.PromptSuffix)
 	images, mediaCount := usableMediaCounts(in)
+	// 能力声明在任何输入 Hook/决策/工具前处理；未寻址消息不会进入本路径。
+	if containsImage(in) && !e.deps.Policy.ImageUnderstanding {
+		return "当前暂不支持图片", nil
+	}
 	hasQuotedText := in.Quoted != nil && strings.TrimSpace(in.Quoted.Text) != ""
 	prepared, err := e.deps.Hooks.Prepare(ctx, runFrom(ctx).info, hooks.Input{
 		Text: text, Mentioned: in.Mentioned, HasQuotedText: hasQuotedText,
@@ -299,14 +304,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		return "", err
 	}
 	if e.deps.LLM == nil {
-		name := strings.TrimSpace(e.deps.Policy.Name)
-		if name == "" {
-			name = "ForgeBot"
-		}
-		if strings.TrimSpace(in.Text) == "" && images > 0 {
-			text = ""
-		}
-		return name + " received: " + user.Text(), nil
+		return "", operation.New(operation.NotConfigured, "answer LLM is not configured")
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
 	messages := []llm.Message{user}
@@ -425,6 +423,22 @@ func userMessage(in messaging.InboundMessage, currentText string, syntheticText 
 	return llm.Message{Role: llm.RoleUser, Content: parts}
 }
 
+func containsImage(in messaging.InboundMessage) bool {
+	for _, media := range in.Media {
+		if media.Kind == messaging.MediaImage {
+			return true
+		}
+	}
+	if in.Quoted != nil {
+		for _, media := range in.Quoted.Media {
+			if media.Kind == messaging.MediaImage {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func usableMediaCounts(in messaging.InboundMessage) (images, total int) {
 	total = len(in.Media)
 	for _, media := range in.Media {
@@ -507,7 +521,7 @@ func validateInbound(msg messaging.InboundMessage) error {
 	if strings.TrimSpace(msg.MessageID) == "" {
 		return fmt.Errorf("message_id is required")
 	}
-	if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.Mentioned {
+	if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.HasQuotedContent() && !msg.Mentioned {
 		return fmt.Errorf("text or media is required")
 	}
 	return nil

@@ -235,7 +235,9 @@ func TestNativeModuleDisableAndRollback(t *testing.T) {
 	registry := moduleRegistry(t, replyexperience.Factory{})
 	sender := registeredSender(t)
 	snapshot := testSnapshot()
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, Modules: registry})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, Modules: registry, Secrets: configuredSecrets(t, "test-key"), ClientFactory: func(cfg llm.ClientConfig) (llm.Client, error) {
+		return &responseClient{protocol: cfg.Protocol, text: "test reply"}, nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -150,6 +150,12 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 LLM 配置可热切换协议、供应商地址和模型。新配置初始化失败时，当前运行实例继续服务。
 
+正式运行必须配置非空 `model` 和可解析的 API Key，不再提供无模型回显。
+首次密钥通过 `-init-api-key` 在启动前写入；该初始化命令仍可在模型未配齐时运行。
+`authentication` 缺省或 `api_key` 要求凭据；只有明确设置为 `none` 才允许无认证本地服务，且不会向该服务发送已存凭据。
+
+`image_understanding` 为 boolean，缺省 `false`。当已经触发的问答包含当前或引用图片时，关闭状态直接回复“当前暂不支持图片”，不调用模型或检索；文字和图片混合时也不静默丢弃图片。设置 `true` 才继续多模态链路，供应商真实能力仍需验证。未 @ 消息的准入规则不因图片开关改变。这两项均随 LLM 配置热更新。
+
 ### 5.4 `admission`
 
 ```json
@@ -634,7 +640,7 @@ Copy-Item configs/forgebot.example.yaml configs/forgebot.local.yaml
 Copy-Item configs/runtime.example.json configs/runtime.json
 ```
 
-将 `forgebot.local.yaml` 中的 `runtime_config_path` 改为 `runtime.json`。若暂时不调用 LLM，可保持 API Key 未配置并先验证健康检查和管理接口；消息处理会进入 LLM 流程，要测试完整 echo 链路需先按第 6 节初始化 SecretStore。
+将 `forgebot.local.yaml` 中的 `runtime_config_path` 改为 `runtime.json`。正式启动前先按第 6 节初始化 SecretStore，并配置回答模型；无认证本地服务需显式设置 `llm.authentication=none`。缺少必需配置会在启动时报告错误，不再以回显伪装模型问答。
 
 ```powershell
 go test ./...

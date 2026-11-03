@@ -88,14 +88,19 @@ Run the test suite:
 go test ./...
 ```
 
-Start the local example:
+Copy the example configuration, configure an answer model, and initialize its
+encrypted credential using the [configuration guide](docs/configuration.md).
+Normal startup requires a model and its credential. For an explicitly
+unauthenticated local endpoint, set `llm.authentication` to `none`.
+
+Start the configured local instance:
 
 ```powershell
-go run ./cmd/forgebot -config configs/forgebot.example.yaml
+go run ./cmd/forgebot -config configs/forgebot.local.yaml
 ```
 
-The example starts the local echo connector and listens on `127.0.0.1:8080`.
-Check the process without an LLM key:
+The example uses the local echo connector and listens on `127.0.0.1:8080`.
+Check the running process:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/healthz

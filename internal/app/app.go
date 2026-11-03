@@ -86,7 +86,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		if logController != nil {
 			logController.Apply(logConfig)
 		}
-	}}
+	}, RequireLLM: true}
 	if secretStore != nil {
 		builder.Secrets = secretStore
 	}

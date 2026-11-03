@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,21 +18,48 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
+	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/platform/memory"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
+	"github.com/soleapi/forgebot/internal/secret"
 )
 
 func TestNewWithoutSecretStore(t *testing.T) {
 	snapshot := config.DefaultSnapshot()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	root, err := New(snapshot, logger, nil)
+	_, err := New(snapshot, logger, nil)
+	if err == nil || operation.Describe(err).Code != operation.NotConfigured {
+		t.Fatalf("missing LLM accepted: %v", err)
+	}
+}
+
+// 使用本地受控模型与临时凭据验证正式应用入口，不再依靠无模型回显。
+func configuredAppSnapshot(t *testing.T) config.Snapshot {
+	t.Helper()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"test answer"}]}]}`)
+	}))
+	t.Cleanup(api.Close)
+	snapshot := config.DefaultSnapshot()
+	snapshot.Runtime.LLM.Model = "test-model"
+	snapshot.Runtime.LLM.BaseURL = api.URL
+	snapshot.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
+	key := make([]byte, 32)
+	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	store, err := secret.NewFileStore(snapshot.Static.SecretStorePath, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root.runtime == nil || root.server == nil {
-		t.Fatal("app dependencies were not initialized")
+	candidate, err := store.Stage(context.Background(), snapshot.Runtime.LLM.APIKeyRef, "test-key")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err = store.Activate(context.Background(), candidate); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func TestAppComposesStructuredSearchForExplicitQuery(t *testing.T) {

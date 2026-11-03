@@ -162,12 +162,14 @@ type BotConfig struct {
 
 // LLMConfig selects one supported protocol family and model settings.
 type LLMConfig struct {
-	Protocol         llm.Protocol  `json:"protocol" yaml:"protocol"`
-	BaseURL          string        `json:"base_url" yaml:"base_url"`
-	APIKeyRef        string        `json:"api_key_ref" yaml:"api_key_ref"`
-	Model            string        `json:"model" yaml:"model"`
-	AnthropicVersion string        `json:"anthropic_version,omitempty" yaml:"anthropic_version,omitempty"`
-	Timeout          time.Duration `json:"timeout" yaml:"timeout"`
+	Authentication     string        `json:"authentication,omitempty" yaml:"authentication,omitempty"`
+	Protocol           llm.Protocol  `json:"protocol" yaml:"protocol"`
+	BaseURL            string        `json:"base_url" yaml:"base_url"`
+	APIKeyRef          string        `json:"api_key_ref" yaml:"api_key_ref"`
+	Model              string        `json:"model" yaml:"model"`
+	AnthropicVersion   string        `json:"anthropic_version,omitempty" yaml:"anthropic_version,omitempty"`
+	Timeout            time.Duration `json:"timeout" yaml:"timeout"`
+	ImageUnderstanding bool          `json:"image_understanding" yaml:"image_understanding"`
 }
 
 // ClientConfig keeps secret resolution outside the configuration model.
@@ -795,6 +797,9 @@ func (c PlatformConfig) Validate() error {
 func (c Snapshot) Validate() error { return errors.Join(c.Static.Validate(), c.Runtime.Validate()) }
 
 func (c LLMConfig) Validate() error {
+	if c.Authentication != "" && c.Authentication != "api_key" && c.Authentication != "none" {
+		return errors.New("llm.authentication must be api_key or none")
+	}
 	if !c.Protocol.Valid() {
 		return fmt.Errorf("llm.protocol must be one of %s, %s, %s", llm.AnthropicMessages, llm.OpenAIResponses, llm.OpenAICompletions)
 	}
@@ -852,7 +857,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"log": c.Runtime.Log, "bot": c.Runtime.Bot,
 			"llm": map[string]any{
 				"protocol": c.Runtime.LLM.Protocol, "base_url": c.Runtime.LLM.BaseURL,
-				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion,
+				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion, "image_understanding": c.Runtime.LLM.ImageUnderstanding, "authentication": c.Runtime.LLM.Authentication,
 				"timeout": c.Runtime.LLM.Timeout.String(), "api_key_configured": apiKeyConfigured,
 			},
 			"admission":      c.Runtime.Admission,

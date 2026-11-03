@@ -103,6 +103,9 @@ type Builder struct {
 	ConnectorFactory   ConnectorFactory
 	ApplyLog           func(config.LogConfig)
 	Notifications      notification.Publisher
+	// 正式应用必须配置回答模型；诊断与边界测试可显式构建无模型实例，
+	// 但 Engine 不会将该实例伪装为成功问答或本地回显。
+	RequireLLM bool
 }
 
 // Build constructs a complete bot engine and its configured dependencies.
@@ -194,17 +197,23 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 		}
 	}
 	policy := policyFrom(snapshot.Runtime)
+	policy.ImageUnderstanding = snapshot.Runtime.LLM.ImageUnderstanding
 	policy.ExtensionInstructions = extensionInstructions
 	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
 	if strings.TrimSpace(snapshot.Runtime.LLM.Model) == "" {
+		if b.RequireLLM {
+			return nil, operation.New(operation.NotConfigured, "llm.model is required for normal runtime")
+		}
 		return nil, nil
 	}
 	apiKey := ""
 	var err error
-	if secretRef == snapshot.Runtime.LLM.APIKeyRef {
+	if snapshot.Runtime.LLM.Authentication == "none" {
+		// 无认证必须显式声明；不能将丢失 API Key 自动解释为匿名服务。
+	} else if secretRef == snapshot.Runtime.LLM.APIKeyRef {
 		apiKey = secretValue
 	} else if b.Secrets != nil {
 		apiKey, err = b.Secrets.Get(ctx, snapshot.Runtime.LLM.APIKeyRef)
@@ -212,7 +221,10 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 	if err != nil && !errors.Is(err, secret.ErrNotFound) {
 		return nil, fmt.Errorf("resolve LLM API key: %w", err)
 	}
-	if apiKey == "" {
+	if apiKey == "" && snapshot.Runtime.LLM.Authentication != "none" {
+		if b.RequireLLM {
+			return nil, operation.New(operation.NotConfigured, "llm API key is not configured")
+		}
 		return nil, nil
 	}
 	factory := b.ClientFactory
@@ -222,6 +234,9 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 	client, err := factory(snapshot.Runtime.LLM.ClientConfig(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+	if b.RequireLLM && client == nil {
+		return nil, operation.New(operation.NotConfigured, "LLM factory returned no client")
 	}
 	return client, nil
 }
