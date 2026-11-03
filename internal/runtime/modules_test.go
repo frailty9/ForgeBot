@@ -125,7 +125,8 @@ func TestModulesGenerationPinningAndRetirementLimit(t *testing.T) {
 	defer unblock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: "old", Text: "hello", Mentioned: true})
+		// 新旧 generation 的不同用户仍并行；同用户顺序由短期会话专项测试覆盖。
+		_, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "blocked-user", MessageID: "old", Text: "hello", Mentioned: true})
 		done <- err
 	}()
 	select {

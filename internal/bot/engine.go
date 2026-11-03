@@ -17,6 +17,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/admission"
 	"github.com/soleapi/forgebot/internal/agent"
+	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -44,6 +45,7 @@ type AdmissionPolicy struct {
 
 // Dependencies are the replaceable boundaries required by Engine.
 type Dependencies struct {
+	Memory       *conversation.Memory
 	Hooks        *hooks.Chain
 	CloseHooks   func(context.Context) error
 	Generation   uint64
@@ -73,6 +75,8 @@ type runKey struct{}
 type execution struct {
 	info              hooks.Info
 	progressAttempted bool
+	lease             *conversation.Lease
+	finalText         string
 }
 
 var errEmptyInput = errors.New("empty_input")
@@ -139,6 +143,14 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	if !msg.Addressed() {
 		return platform.HandleResult{Accepted: false, Verdict: VerdictIgnored.String()}, nil
 	}
+	if e.deps.Memory != nil && (!containsImage(msg) || e.deps.Policy.ImageUnderstanding) {
+		lease, err := e.deps.Memory.Acquire(ctx, msg.ConversationID, msg.UserID)
+		if err != nil {
+			return platform.HandleResult{Verdict: "conversation_unavailable"}, operation.Wrap("conversation.acquire", operation.Busy, operation.NotStarted, err)
+		}
+		defer lease.Release()
+		runFrom(ctx).lease = lease
+	}
 	reply, err := e.replyText(ctx, msg)
 	if err != nil {
 		if errors.Is(err, errEmptyInput) || errors.Is(err, errModuleStopped) {
@@ -161,6 +173,8 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 		e.logger.DebugContext(ctx, "bot reply delivery failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
 		return platform.HandleResult{Accepted: false, Verdict: "send_failed"}, err
 	}
+	run := runFrom(ctx)
+	run.lease.Commit(userMessage(msg, msg.Text, false), run.finalText)
 	return platform.HandleResult{Accepted: true, Verdict: VerdictPass.String()}, nil
 }
 
@@ -273,6 +287,9 @@ func (e *Engine) deliver(ctx context.Context, in messaging.InboundMessage, text,
 	}
 	err = e.deps.Sender.Send(ctx, message)
 	if err == nil {
+		if kind == "final" {
+			runFrom(ctx).finalText = text
+		}
 		return nil
 	}
 	return operation.Wrap("message.send", operation.Unknown, operation.Describe(err).Effect, err)
@@ -313,12 +330,22 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
 	startedAt := time.Now()
+	history := runFrom(ctx).lease.History()
+	if !e.deps.Policy.ImageUnderstanding {
+		for i := range history {
+			for j := range history[i].Content {
+				if history[i].Content[j].Type == "image" {
+					history[i].Content[j] = llm.ContentPart{Type: "text", Text: "[此前图片当前不可用]"}
+				}
+			}
+		}
+	}
 	response, err := (agent.Loop{Client: e.deps.LLM, Limits: e.deps.Policy.Loop, ToolBudgets: e.deps.ToolBudgets, Execute: func(ctx context.Context, call tooling.Call) (tooling.Result, error) {
 		return e.executeTool(ctx, in, call)
 	}}).Run(ctx, llm.Request{
 		Model:        e.deps.Policy.Model,
 		Instructions: instructions,
-		Messages:     []llm.Message{user},
+		Messages:     append(history, user),
 		Tools:        e.toolDefinitions(),
 	})
 	if err != nil {

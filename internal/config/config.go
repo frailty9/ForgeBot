@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/agent"
+	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
@@ -79,16 +80,17 @@ func (c StorageConfig) Kind() string {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
-	Agent          agent.Limits            `json:"agent"`
-	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
-	Log            LogConfig               `json:"log"`
-	Bot            BotConfig               `json:"bot"`
-	Admission      AdmissionConfig         `json:"admission"`
-	LLM            LLMConfig               `json:"llm"`
-	Platforms      PlatformConfig          `json:"platforms"`
-	Administration AdministrationConfig    `json:"administration"`
-	Operations     OperationsConfig        `json:"operations"`
-	Extensions     ExtensionsConfig        `json:"extensions"`
+	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
+	Agent              agent.Limits              `json:"agent"`
+	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
+	Log                LogConfig                 `json:"log"`
+	Bot                BotConfig                 `json:"bot"`
+	Admission          AdmissionConfig           `json:"admission"`
+	LLM                LLMConfig                 `json:"llm"`
+	Platforms          PlatformConfig            `json:"platforms"`
+	Administration     AdministrationConfig      `json:"administration"`
+	Operations         OperationsConfig          `json:"operations"`
+	Extensions         ExtensionsConfig          `json:"extensions"`
 }
 
 // ExtensionsConfig configures MCP servers and text-only skills.
@@ -550,6 +552,9 @@ func (c StaticConfig) Validate() error {
 
 func (c RuntimeConfig) Validate() error {
 	var problems []string
+	if err := c.ConversationMemory.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if err := c.Agent.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -859,8 +864,9 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"runtime_config_path": c.Static.RuntimeConfigPath,
 		},
 		"runtime": map[string]any{
-			"agent": c.Runtime.Agent.Defaults(),
-			"log":   c.Runtime.Log, "bot": c.Runtime.Bot,
+			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
+			"agent":               c.Runtime.Agent.Defaults(),
+			"log":                 c.Runtime.Log, "bot": c.Runtime.Bot,
 			"llm": map[string]any{
 				"protocol": c.Runtime.LLM.Protocol, "base_url": c.Runtime.LLM.BaseURL,
 				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion, "image_understanding": c.Runtime.LLM.ImageUnderstanding, "authentication": c.Runtime.LLM.Authentication,

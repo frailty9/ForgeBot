@@ -94,6 +94,7 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	Memory             *conversation.Memory
 	Modules            *modules.Registry
 	Sender             platform.Sender
 	Secrets            secret.Reader
@@ -200,7 +201,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	policy.Loop = snapshot.Runtime.Agent.Defaults()
 	policy.ImageUnderstanding = snapshot.Runtime.LLM.ImageUnderstanding
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Memory: b.Memory, Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
@@ -356,6 +357,9 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	builder.Modules = builder.Modules.Clone()
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
+	}
+	if builder.Memory == nil {
+		builder.Memory = conversation.NewMemory(snapshot.Runtime.ConversationMemory)
 	}
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
 	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
@@ -958,6 +962,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	} else {
 		next.modules.Mark("active")
 	}
+	m.builder.Memory.Configure(next.snapshot.Runtime.ConversationMemory)
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {

@@ -1,4 +1,13 @@
 {
+  "conversation_memory": {
+    "disabled": false,
+    "ttl": "20m",
+    "max_pairs": 6,
+    "max_sessions": 1000,
+    "max_pending": 8,
+    "max_session_bytes": 65536,
+    "max_total_bytes": 8388608
+  },
   "agent": {
     "timeout": "90s",
     "max_turns": 6,
