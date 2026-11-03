@@ -246,7 +246,7 @@ type OperatorGroupConfig struct {
 func DefaultStatic() StaticConfig {
 	return StaticConfig{Storage: StorageConfig{Backend: FileBackend}, Server: ServerConfig{
 		Addr: "127.0.0.1:8080", ReadTimeout: 10 * time.Second,
-		WriteTimeout: 30 * time.Second, ShutdownTimeout: 15 * time.Second,
+		WriteTimeout: 100 * time.Second, ShutdownTimeout: 15 * time.Second,
 	}}
 }
 

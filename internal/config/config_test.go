@@ -136,6 +136,12 @@ func TestRuntimeConfigRejectsAPIKey(t *testing.T) {
 	}
 }
 
+func TestDefaultHTTPDeadlineAllowsFullAgentRun(t *testing.T) {
+	if DefaultStatic().Server.WriteTimeout <= DefaultRuntime().Agent.Defaults().Timeout {
+		t.Fatal("default HTTP deadline truncates default agent budget")
+	}
+}
+
 func TestRuntimeConfigRejectsRemovedFeatureFields(t *testing.T) {
 	for _, body := range []string{
 		"{\"gate\":{\"enabled\":false}}",

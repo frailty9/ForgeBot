@@ -218,6 +218,9 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		}
 	}
 	add("storage_backend", cfg.Static.Validate(), cfg.Static.Storage.Kind())
+	if cfg.Static.Server.WriteTimeout <= cfg.Runtime.Agent.Defaults().Timeout {
+		add("http_answer_deadline", operation.New(operation.Invalid, "HTTP write timeout is shorter than the agent run budget"), "server.write_timeout应大于agent.timeout，避免测试入站在回答完成前断开")
+	}
 	paths := map[string]bool{}
 	for _, path := range []string{cfg.Static.RuntimeConfigPath, cfg.Static.SecretStorePath, cfg.Static.GroupStorePath} {
 		if path != "" {
