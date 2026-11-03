@@ -244,3 +244,31 @@ func (s *Service) execute(ctx context.Context, r Record, call func() error) (Rec
 	}
 	return saved.Public(), err
 }
+
+// DeliverEvent 的发送作用域只限当前已验证事件；模块不接收全局 Sender。
+func (s *Service) DeliverEvent(ctx context.Context, event Event, handlerID string, reply EventReply, send func(context.Context, string) error) (EventResult, error) {
+	if s.store == nil {
+		return EventResult{}, operation.New(operation.NotConfigured, "group event delivery requires operation store")
+	}
+	if event.Kind != MemberJoined || event.Self || event.Historical {
+		return EventResult{Verdict: "ignored"}, nil
+	}
+	if strings.TrimSpace(reply.Text) == "" || len(reply.Text) > 8192 || event.ID == "" {
+		return EventResult{}, operation.New(operation.Invalid, "invalid event reply")
+	}
+	if event.At.IsZero() || event.At.Before(s.now().Add(-5*time.Minute)) || event.At.After(s.now().Add(time.Minute)) {
+		return EventResult{Verdict: "expired"}, nil
+	}
+	r, created, err := s.store.Create(ctx, Record{ID: ID("event_reply", handlerID, event.ConnectorID, event.ConversationID, event.ID), Kind: "event_reply", ConversationID: event.ConversationID, ConnectorID: event.ConnectorID, UserID: event.UserID, CreatedAt: event.At, Status: Pending})
+	if err != nil {
+		return EventResult{}, err
+	}
+	if !created {
+		return EventResult{Verdict: "duplicate"}, nil
+	}
+	_, err = s.execute(ctx, r, func() error { return send(ctx, reply.Text) })
+	if err != nil {
+		return EventResult{Accepted: true, Verdict: "send_failed"}, err
+	}
+	return EventResult{Accepted: true, Verdict: "sent"}, nil
+}

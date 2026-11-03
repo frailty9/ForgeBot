@@ -21,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
+	"github.com/soleapi/forgebot/internal/modules/welcome"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
 	"github.com/soleapi/forgebot/internal/persistence"
@@ -80,6 +81,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		return nil, err
 	}
 	if err := moduleRegistry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
+		return nil, err
+	}
+	if err := moduleRegistry.Register(welcome.Factory{}, hooks.Native, 500, hooks.Continue); err != nil {
 		return nil, err
 	}
 	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {

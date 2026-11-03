@@ -33,6 +33,8 @@ type EventResult struct {
 	Accepted bool   `json:"accepted"`
 	Verdict  string `json:"verdict"`
 }
+
+type EventReply struct{ Text string }
 type EventHandler interface {
 	HandleGroupEvent(context.Context, Event) (EventResult, error)
 }

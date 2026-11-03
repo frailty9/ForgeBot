@@ -1,5 +1,28 @@
 # 群事件与管理操作
 
+## 新人欢迎
+
+启用 `native.welcome` 模块并按逻辑群设置模板：
+
+```json
+{
+  "modules": {
+    "native.welcome": {
+      "enabled": true,
+      "options": {
+        "groups": {
+          "support": {"enabled": true, "text": "欢迎 {user} 加入！请先阅读群公告。"}
+        }
+      }
+    }
+  }
+}
+```
+
+支持 `{user}`、`{user_id}`、`{conversation_id}`，仅做一次确定性替换，不调用模型。OneBot 入群事件缺少显示名时用用户 ID。欢迎只基于实际 MemberJoined，申请批准不触发；Bot 自己、历史快照和超过 5 分钟的旧事件不欢迎。默认纯文本，不自动 @ 新人。
+
+欢迎使用同一个 `group_store_path` 运营仓储防重，经模块群事件接口返回受限回复意图，宿主投递。关闭模块或群开关不发送；管理员接答让位不影响欢迎，全局 pause 则抑制。发送失败或未知不自动补发。OneBot 以结构化文本段发送，模板或显示名内的 CQ 字面量不会转换成控制段。
+
 群操作是协议无关的可选接口。连接器可以分别实现申请审核、公告发布和消息撤回；未实现时返回 unsupported。接口支持不代表当前账号具备权限，支持查询目前返回 `permission=unknown`，实际请求结果单独分类。
 
 首次使用需在静态 YAML 设置文件后端的运营仓储（路径相对 YAML）：

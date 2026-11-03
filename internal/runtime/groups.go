@@ -36,6 +36,32 @@ func (m *Manager) HandleGroupEvent(ctx context.Context, event group.Event) (grou
 			break
 		}
 	}
+	if event.Kind == group.MemberJoined && bound {
+		defer g.mu.RUnlock()
+		if m.Paused() {
+			return group.EventResult{Verdict: "paused"}, nil
+		}
+		result := group.EventResult{Verdict: "ignored"}
+		for _, registration := range g.modules.GroupEvents() {
+			reply, err := registration.Handle(ctx, event)
+			if err != nil {
+				return result, err
+			}
+			if reply == nil {
+				continue
+			}
+			result, err = m.groups.DeliverEvent(ctx, event, registration.ID, *reply, func(ctx context.Context, text string) error {
+				if m.Paused() {
+					return operation.New(operation.Disabled, "runtime is paused")
+				}
+				return g.engine.SendEventReply(ctx, event.ConversationID, text)
+			})
+			if err != nil {
+				return result, err
+			}
+		}
+		return result, nil
+	}
 	g.mu.RUnlock()
 	if !bound {
 		return group.EventResult{}, operation.New(operation.NotFound, "event does not match a bound connector and conversation")

@@ -94,7 +94,7 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 		switch kind {
 		case RegistrationTools, RegistrationCommands, RegistrationObservers,
 			RegistrationParticipants, RegistrationJobs, RegistrationStatus,
-			RegistrationConnectorProviders:
+			RegistrationConnectorProviders, RegistrationGroupEvents:
 		default:
 			return fmt.Errorf("unsupported registration kind %q", kind)
 		}
@@ -220,6 +220,7 @@ type Status struct {
 	Error   string              `json:"error,omitempty"`
 }
 type Set struct {
+	groupEvents        []GroupEventRegistration
 	chain              *hooks.Chain
 	capabilities       capability.Values
 	tools              []ToolRegistration
@@ -396,6 +397,10 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 				set.commands = append(set.commands, extra.Commands...)
 				set.observers = append(set.observers, extra.Observers...)
 				set.participants = append(set.participants, extra.Participants...)
+				for _, registration := range extra.GroupEvents {
+					registration.ID = id + "/" + registration.ID
+					set.groupEvents = append(set.groupEvents, registration)
+				}
 				set.jobs = append(set.jobs, extra.Jobs...)
 				for _, provider := range extra.ConnectorProviders {
 					typeName := ""
@@ -442,6 +447,16 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 	allowed := make(map[RegistrationKind]bool, len(descriptor.Registrations))
 	for _, kind := range descriptor.Registrations {
 		allowed[kind] = true
+	}
+	if len(registrations.GroupEvents) > 0 && !allowed[RegistrationGroupEvents] {
+		return errors.New("returned undeclared group event registrations")
+	}
+	seenEvents := map[string]bool{}
+	for _, event := range registrations.GroupEvents {
+		if strings.TrimSpace(event.ID) == "" || event.Handle == nil || seenEvents[event.ID] {
+			return errors.New("invalid or duplicate group event registration")
+		}
+		seenEvents[event.ID] = true
 	}
 	if len(registrations.Tools) > 0 && !allowed[RegistrationTools] {
 		return errors.New("returned undeclared tool registrations")
@@ -532,6 +547,7 @@ func (s *Set) ToolBudgets() map[string]int {
 	return result
 }
 func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.commands) }
+func (s *Set) GroupEvents() []GroupEventRegistration   { return slices.Clone(s.groupEvents) }
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
 func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
 func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }

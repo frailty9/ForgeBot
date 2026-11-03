@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/soleapi/forgebot/internal/capability"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -22,6 +23,7 @@ const (
 	RegistrationJobs               RegistrationKind = "jobs"
 	RegistrationStatus             RegistrationKind = "status"
 	RegistrationConnectorProviders RegistrationKind = "connector_providers"
+	RegistrationGroupEvents        RegistrationKind = "group_events"
 )
 
 // BuildContext exposes only capabilities prepared earlier in the same
@@ -100,6 +102,7 @@ type ProviderRegistration struct {
 }
 
 type ExtendedRegistrations struct {
+	GroupEvents        []GroupEventRegistration
 	Tools              []ToolRegistration
 	Commands           []CommandRegistration
 	Observers          []ObserverRegistration
@@ -108,6 +111,12 @@ type ExtendedRegistrations struct {
 	Capabilities       []CapabilityRegistration
 	ConnectorProviders []platform.ConnectorProvider
 	Status             func() any
+}
+
+// GroupEventRegistration 只返回当前事件对应的回复意图，不获得任意群发送权限。
+type GroupEventRegistration struct {
+	ID     string
+	Handle func(context.Context, group.Event) (*group.EventReply, error)
 }
 
 type ExtendedProvider interface {

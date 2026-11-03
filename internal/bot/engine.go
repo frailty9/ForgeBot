@@ -256,6 +256,16 @@ func (e *Engine) Shutdown(grace time.Duration) {
 
 func (e *Engine) Done() <-chan struct{} { return e.closed }
 
+// SendEventReply 由宿主在已验证的群事件作用域调用，不向模块或模型暴露 Sender。
+func (e *Engine) SendEventReply(ctx context.Context, id, text string) error {
+	e.lifetime.RLock()
+	defer e.lifetime.RUnlock()
+	if e.closing.Load() {
+		return operation.New(operation.Unavailable, "engine is stopped")
+	}
+	return e.deps.Sender.Send(ctx, messaging.OutboundMessage{ConversationID: id, Text: text})
+}
+
 func (e *Engine) respondDeferred(ctx context.Context, in messaging.InboundMessage) {
 	ctx, cancel := context.WithTimeout(ctx, e.deps.Policy.Loop.Defaults().Timeout)
 	defer cancel()

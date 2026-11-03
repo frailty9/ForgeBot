@@ -410,7 +410,8 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	if len(msg.Media) > 0 {
 		return operation.Wrap("onebot.send", operation.Unsupported, operation.NotStarted, ErrUnsupported)
 	}
-	payload := map[string]any{"message": msg.Text}
+	// 文本始终使用结构化段，避免成员名/模型输出内的 CQ 字面量变成平台动作。
+	payload := map[string]any{"message": []map[string]any{{"type": "text", "data": map[string]string{"text": msg.Text}}}}
 	payload["message_type"] = "group"
 	payload["group_id"] = numericOrString(target)
 	if msg.ReplyToMessageID != "" {
