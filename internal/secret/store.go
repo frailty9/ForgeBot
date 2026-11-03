@@ -34,14 +34,29 @@ type Candidate struct {
 	UpdatedAt time.Time
 }
 
-// Store is the encrypted secret lifecycle boundary.
-type Store interface {
+// StatusReader 只暴露是否配置与版本，不能读取明文。
+type StatusReader interface {
 	Status(context.Context, string) (Status, error)
+}
+
+// Reader 仅供运行时解析凭据，不交给管理界面。
+type Reader interface {
 	Get(context.Context, string) (string, error)
+}
+
+// Lifecycle 供管理端暂存、激活与删除凭据，不包含明文读取接口。
+type Lifecycle interface {
+	StatusReader
 	Stage(context.Context, string, string) (Candidate, error)
 	Activate(context.Context, Candidate) (Status, error)
 	Discard(context.Context, Candidate) error
 	Delete(context.Context, string) error
+}
+
+// Store 聚合后端的凭据职责；消费者应选择 Reader 或 Lifecycle。
+type Store interface {
+	Reader
+	Lifecycle
 }
 
 // Crypter encrypts and authenticates secret values with AES-256-GCM.

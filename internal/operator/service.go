@@ -19,7 +19,12 @@ var ErrCapabilityUnavailable = errors.New("该能力尚未就绪")
 
 type Service struct {
 	runtime  Runtime
-	settings settings.Store
+	settings ConfigWriter
+}
+
+// ConfigWriter 仅允许此运维功能提交新配置，不授予历史查询和回滚能力。
+type ConfigWriter interface {
+	Update(context.Context, settings.UpdateRequest) (config.Snapshot, error)
 }
 
 type Runtime interface {
@@ -31,7 +36,7 @@ type Runtime interface {
 	ReloadSearch(context.Context, string) (searchcontract.ReloadResult, error)
 }
 
-func New(runtime Runtime, store settings.Store) (*Service, error) {
+func New(runtime Runtime, store ConfigWriter) (*Service, error) {
 	if runtime == nil {
 		return nil, errors.New("runtime manager is required")
 	}

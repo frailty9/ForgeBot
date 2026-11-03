@@ -96,7 +96,7 @@ type Persist func() (config.Snapshot, error)
 type Builder struct {
 	Modules            *modules.Registry
 	Sender             platform.Sender
-	Secrets            secret.Store
+	Secrets            secret.Reader
 	ClientFactory      ClientFactory
 	Logger             *slog.Logger
 	ConnectorProviders []platform.ConnectorProvider

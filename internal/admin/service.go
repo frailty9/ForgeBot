@@ -20,8 +20,14 @@ var ErrUnavailable = operation.New(operation.Unavailable, "management capability
 // Service is the management facade used by the HTTP server.
 type Service struct {
 	runtime  *runtimecfg.Manager
-	settings settings.Store
+	settings Configuration
 	secrets  *secret.Manager
+}
+
+// Configuration 是管理端实际使用的配置职责，不包含未使用的 Current。
+type Configuration interface {
+	settings.HistoryReader
+	settings.Writer
 }
 
 // UpdateRequest is a complete runtime replacement guarded by expected_version.
@@ -40,7 +46,7 @@ type RollbackRequest struct {
 }
 
 // New validates management dependencies and creates the facade.
-func New(runtime *runtimecfg.Manager, store settings.Store, secrets *secret.Manager) (*Service, error) {
+func New(runtime *runtimecfg.Manager, store Configuration, secrets *secret.Manager) (*Service, error) {
 	if runtime == nil {
 		return nil, errors.New("runtime manager is required")
 	}

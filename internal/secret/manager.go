@@ -14,13 +14,13 @@ type Deleter func(context.Context, string, func() error) error
 // Reading plaintext remains an internal runtime concern through Store.Get.
 type Manager struct {
 	mu       sync.Mutex
-	store    Store
+	store    Lifecycle
 	validate Validator
 	commit   Committer
 	remove   Deleter
 }
 
-func NewManagedWriter(store Store, commit Committer, remove Deleter) (*Manager, error) {
+func NewManagedWriter(store Lifecycle, commit Committer, remove Deleter) (*Manager, error) {
 	if store == nil {
 		return nil, errors.New("secret store is required")
 	}
@@ -33,7 +33,7 @@ func NewManagedWriter(store Store, commit Committer, remove Deleter) (*Manager, 
 	return &Manager{store: store, commit: commit, remove: remove}, nil
 }
 
-func NewManager(store Store, validate Validator) (*Manager, error) {
+func NewManager(store Lifecycle, validate Validator) (*Manager, error) {
 	if store == nil {
 		return nil, errors.New("secret store is required")
 	}
