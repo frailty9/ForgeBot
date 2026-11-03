@@ -85,6 +85,8 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 可直接从 [`configs/runtime.example.json`](../configs/runtime.example.json) 复制。首次启动允许使用不带元数据的普通对象：
 
+完整示例显式列出全部内置模块及其参数；只启用本地 Echo 渠道，可选功能（包括回复体验、短期记忆、主动介入、检索、反思、欢迎和群管理）明确关闭。需要的功能直接在对应位置启用；这属于完整示例的取值，不改变程序缺省行为或 `init` 生成的最小配置。
+
 ```json
 {
   "log": {"level": "info", "format": "text"},

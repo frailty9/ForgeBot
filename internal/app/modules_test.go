@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/config"
@@ -10,6 +11,35 @@ import (
 	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 )
+
+// 示例必须显式列出全部注册的原生模块，防止新增功能只能从文档中发现。
+func TestExampleDeclaresEveryNativeModule(t *testing.T) {
+	cfg, _, err := config.Load(config.LoadOptions{Path: filepath.Join("..", "..", "configs", "forgebot.example.yaml"), LookupEnv: func(string) string { return "" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NativeModules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Validate(cfg.Runtime.Modules); err != nil {
+		t.Fatal(err)
+	}
+	declared, err := registry.Public(cfg.Runtime.Modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id := range declared {
+		entry, exists := cfg.Runtime.Modules[id]
+		if !exists || entry.Enabled == nil || len(entry.Options) == 0 {
+			t.Errorf("example must explicitly declare %s enabled/options", id)
+			continue
+		}
+		if id != echo.ID && *entry.Enabled {
+			t.Errorf("optional example module %s should be disabled", id)
+		}
+	}
+}
 
 func TestAppRegistersDefaultNativeModule(t *testing.T) {
 	for _, disabled := range []bool{false, true} {

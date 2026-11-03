@@ -6,10 +6,21 @@
   },
   "answer_policy": {
     "scope": "",
-    "allow_daily": true
+    "allow_daily": true,
+    "refusal_text": "这个专业问题不在当前支持范围内，请咨询对应领域的支持。",
+    "clarification_text": "请说明这个问题与当前服务的关系，或补充必要信息。"
+  },
+  "group_management": {
+    "local": {
+      "review_enabled": false,
+      "auto_review": false,
+      "review_rule": "",
+      "announcements": false,
+      "recall": false
+    }
   },
   "conversation_memory": {
-    "disabled": false,
+    "disabled": true,
     "ttl": "20m",
     "max_pairs": 6,
     "max_sessions": 1000,
@@ -39,7 +50,7 @@
       }
     },
     "native.reply_experience": {
-      "enabled": true,
+      "enabled": false,
       "options": {
         "empty_mention_prompt": "请简单介绍一下你自己。",
         "image_only_prompt": "请读取图片中的文字、界面和错误信息，将其视为用户本次输入，并直接处理图片中提出的问题。",
@@ -49,13 +60,14 @@
     "native.proactive_reply": {
       "enabled": false,
       "options": {
+        "yield_duration": "5m",
         "silence": "4s",
         "max_window": "25s",
         "max_buffered": 50,
         "max_text_len": 500,
         "max_concurrent": 4,
         "groups": {
-          "support": {
+          "local": {
             "enabled": false
           }
         }
@@ -81,6 +93,17 @@
         "max_file_bytes": 4194304,
         "max_total_bytes": 268435456,
         "max_files": 10000
+      }
+    },
+    "native.welcome": {
+      "enabled": false,
+      "options": {
+        "groups": {
+          "local": {
+            "enabled": false,
+            "text": "欢迎 {user}（{user_id}）加入 {conversation_id}！请先阅读群公告。"
+          }
+        }
       }
     },
     "native.knowledge_reflection": {
@@ -111,8 +134,8 @@
     "system_prompt": ""
   },
   "llm": {
-	"authentication": "api_key",
-	"image_understanding": false,
+    "authentication": "api_key",
+    "image_understanding": false,
     "protocol": "openai_responses",
     "base_url": "https://api.openai.com/v1",
     "api_key_ref": "llm/default",
