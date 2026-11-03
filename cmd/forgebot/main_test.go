@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +27,7 @@ func TestInitializeAPIKeyCreatesEncryptedSecret(t *testing.T) {
 	cfg := config.DefaultSnapshot()
 	cfg.Static.SecretStorePath = storePath
 	cfg.Runtime.LLM.APIKeyRef = "llm/default"
-	if err := initializeAPIKey(cfg, "llm/default"); err != nil {
+	if err := initializeAPIKey(cfg, "llm/default", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,7 +47,7 @@ func TestInitializeAPIKeyCreatesEncryptedSecret(t *testing.T) {
 		t.Fatalf("stored API key = %q, err = %v", value, err)
 	}
 
-	if err := initializeAPIKey(cfg, "llm/default"); err == nil || !strings.Contains(err.Error(), "already configured") {
+	if err := initializeAPIKey(cfg, "llm/default", ""); err == nil || !strings.Contains(err.Error(), "already configured") {
 		t.Fatalf("second initialization error = %v", err)
 	}
 }
@@ -57,7 +59,7 @@ func TestInitializeAPIKeySupportsIndependentReferences(t *testing.T) {
 	cfg.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
 	for _, ref := range []string{"decision/default", "mcp/custom", "llm/replacement"} {
 		t.Setenv("FORGEBOT_LLM_API_KEY", "value-for-"+ref)
-		if err := initializeAPIKey(cfg, ref); err != nil {
+		if err := initializeAPIKey(cfg, ref, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -74,16 +76,75 @@ func TestInitializeAPIKeySupportsIndependentReferences(t *testing.T) {
 		t.Fatal("explicit target also changed default credential", err)
 	}
 	t.Setenv("FORGEBOT_LLM_API_KEY", "must-not-overwrite")
-	if err := initializeAPIKey(cfg, "decision/default"); err == nil {
+	if err := initializeAPIKey(cfg, "decision/default", ""); err == nil {
 		t.Fatal("existing explicit reference overwritten")
 	}
 	for _, ref := range []string{"", "   ", "../invalid", "/absolute"} {
-		if err := initializeAPIKey(cfg, ref); err == nil {
+		if err := initializeAPIKey(cfg, ref, ""); err == nil {
 			t.Fatal("invalid reference accepted", ref)
 		}
 	}
 	ref, err := initialKeyRef("  mcp/custom  ")
 	if err != nil || ref != "mcp/custom" {
 		t.Fatal("reference normalization failed", ref, err)
+	}
+}
+
+func TestInlineAPIKeyTakesPriorityAndStaysEncrypted(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Setenv("FORGEBOT_LLM_API_KEY", "environment-value")
+	cfg := config.DefaultSnapshot()
+	cfg.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	ref := flags.String("init-api-key", "", "")
+	if err := flags.Parse([]string{"-init-api-key", "decision/default", "inline-value"}); err != nil {
+		t.Fatal(err)
+	}
+	value, err := apiKeyArgument(true, flags.Args())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = initializeAPIKey(cfg, *ref, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := secret.NewFileStore(cfg.Static.SecretStorePath, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := store.Get(context.Background(), *ref); err != nil || stored != "inline-value" {
+		t.Fatal("inline value did not override environment", err)
+	}
+	data, err := os.ReadFile(cfg.Static.SecretStorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "inline-value") || strings.Contains(string(data), "environment-value") {
+		t.Fatal("plaintext value persisted")
+	}
+	t.Setenv("FORGEBOT_LLM_API_KEY", "")
+	if err = initializeAPIKey(cfg, "mcp/custom", "another-inline-value"); err != nil {
+		t.Fatal("inline initialization required environment", err)
+	}
+}
+
+func TestAPIKeyArgumentsRejectExtraOrBlankValuesWithoutEcho(t *testing.T) {
+	for _, tc := range []struct {
+		initialize bool
+		args       []string
+	}{
+		{false, []string{"private-value"}},
+		{true, []string{"private-value", "extra"}},
+		{true, []string{" "}},
+	} {
+		if _, err := apiKeyArgument(tc.initialize, tc.args); err == nil {
+			t.Fatal("invalid arguments accepted")
+		} else if strings.Contains(err.Error(), "private-value") {
+			t.Fatal("error exposed key")
+		}
+	}
+	if value, err := apiKeyArgument(true, nil); err != nil || value != "" {
+		t.Fatal("environment fallback unavailable", err)
 	}
 }

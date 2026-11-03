@@ -25,7 +25,13 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key decision
 Remove-Item Env:FORGEBOT_LLM_API_KEY
 ```
 
-引用参数必填，可指定 `llm/default`、`decision/default`、`mcp/custom` 等任意合法引用；不再隐式采用 `llm.api_key_ref`。该参数只选择加密仓储写入目标，不修改 JSON 配置；对应功能的 `api_key_ref` 需指向相同引用。密钥值仍通过 `FORGEBOT_LLM_API_KEY` 传入，不放到命令参数中。已有引用拒绝覆盖。
+也可以直接在引用后写 API Key，无需设置临时环境变量：
+
+```powershell
+go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key decision/default 'YOUR_DECISION_API_KEY'
+```
+
+格式为 `-init-api-key <key_ref> [api_key]`。引用参数必填，可指定 `llm/default`、`decision/default`、`mcp/custom` 等任意合法引用；不再隐式采用 `llm.api_key_ref`。原值参数优先，省略时读取 `FORGEBOT_LLM_API_KEY`，两者都没有则报错。所有配置开关放在原值之前，原值建议用单引号包裹。该命令只写入加密仓储，不修改 JSON 配置；对应功能的 `api_key_ref` 需指向相同引用。已有引用拒绝覆盖，成功提示不回显原值。
 
 主密钥文件应单独备份，不提交 Git；迁移部署时应连同加密凭据一起保留。正式启动仍通过环境变量读取主密钥，不会自行读取任意 key 文件。
 

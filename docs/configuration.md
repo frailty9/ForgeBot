@@ -445,7 +445,7 @@ Remove-Item Env:FORGEBOT_LLM_API_KEY
 ```
 
 命令读取 YAML/环境变量中的 `secret_store_path`，将 `-init-api-key` 后的参数作为目标引用。
-例如 `-init-api-key decision/default`、`-init-api-key mcp/custom`；引用参数必填，不再从 `llm.api_key_ref` 隐式选择。加密写入后立即退出，不改写运行配置。密钥值仍从 `FORGEBOT_LLM_API_KEY` 读取。若该引用已经存在，命令
+例如 `-init-api-key decision/default 'YOUR_KEY'`、`-init-api-key mcp/custom 'YOUR_KEY'`；引用参数必填，不再从 `llm.api_key_ref` 隐式选择。原值可直接跟在引用后，省略时从 `FORGEBOT_LLM_API_KEY` 读取；所有配置开关应放在原值之前。加密写入后立即退出，不改写运行配置。若该引用已经存在，命令
 会拒绝覆盖，避免误操作；替换已有 Key 请使用下面的认证管理 API。
 
 ### 6.2 运行中替换

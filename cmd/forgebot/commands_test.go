@@ -58,7 +58,7 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if err = doctor(cfg, false, false, &output); err == nil {
 		t.Fatal("uninitialized credential marked ready")
 	}
-	if err = initializeAPIKey(cfg, cfg.Runtime.LLM.APIKeyRef); err != nil {
+	if err = initializeAPIKey(cfg, cfg.Runtime.LLM.APIKeyRef, ""); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()

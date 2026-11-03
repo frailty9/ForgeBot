@@ -27,7 +27,7 @@ func main() {
 	}
 	configPath := flag.String("config", "", "path to ForgeBot YAML startup configuration file")
 	runtimeConfigPath := flag.String("runtime-config", "", "path to ForgeBot JSON runtime configuration file")
-	initAPIKey := flag.String("init-api-key", "", "credential reference to initialize from FORGEBOT_LLM_API_KEY, then exit (e.g. llm/default or decision/default)")
+	initAPIKey := flag.String("init-api-key", "", "initialize <key_ref> [api_key] and exit; omitted api_key uses FORGEBOT_LLM_API_KEY")
 	flag.Parse()
 	initialize := false
 	flag.Visit(func(f *flag.Flag) {
@@ -35,6 +35,11 @@ func main() {
 			initialize = true
 		}
 	})
+	value, err := apiKeyArgument(initialize, flag.Args())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	cfg, report, err := config.Load(config.LoadOptions{
 		Path:        *configPath,
@@ -48,7 +53,7 @@ func main() {
 	if initialize {
 		ref, err := initialKeyRef(*initAPIKey)
 		if err == nil {
-			err = initializeAPIKey(cfg, ref)
+			err = initializeAPIKey(cfg, ref, value)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "initialize API key: %v\n", err)
@@ -95,7 +100,23 @@ func initialKeyRef(requested string) (string, error) {
 	return ref, nil
 }
 
-func initializeAPIKey(cfg config.Snapshot, requested string) error {
+// 原值可直接跟在引用后，或省略以使用环境变量。额外参数报错不回显原值。
+// Go flag 在首个位置参数处停止解析，因此配置开关须放在 API Key 原值之前。
+func apiKeyArgument(initialize bool, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if !initialize || len(args) != 1 {
+		return "", fmt.Errorf("usage: -config <path> -init-api-key <key_ref> [api_key]; put all flags before api_key")
+	}
+	value := strings.TrimSpace(args[0])
+	if value == "" {
+		return "", fmt.Errorf("API key argument must not be blank")
+	}
+	return value, nil
+}
+
+func initializeAPIKey(cfg config.Snapshot, requested, value string) error {
 	ref, err := initialKeyRef(requested)
 	if err != nil {
 		return err
@@ -107,9 +128,12 @@ func initializeAPIKey(cfg config.Snapshot, requested string) error {
 	if encodedKey == "" {
 		return fmt.Errorf("FORGEBOT_SECRET_KEY is required")
 	}
-	value := strings.TrimSpace(os.Getenv("FORGEBOT_LLM_API_KEY"))
 	if value == "" {
-		return fmt.Errorf("FORGEBOT_LLM_API_KEY is required for -init-api-key")
+		value = os.Getenv("FORGEBOT_LLM_API_KEY")
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("provide an API key after key_ref or set FORGEBOT_LLM_API_KEY")
 	}
 	key, err := secret.ParseKey(encodedKey)
 	if err != nil {
