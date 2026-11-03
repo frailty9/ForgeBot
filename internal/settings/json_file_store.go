@@ -24,6 +24,7 @@ type JSONFileStore struct {
 	historyLimit int
 	now          func() time.Time
 	document     config.RuntimeDocument
+	recovered    bool
 }
 
 func NewJSONFileStore(path string, static config.StaticConfig) (*JSONFileStore, error) {
@@ -40,11 +41,11 @@ func newJSONFileStore(path string, static config.StaticConfig, historyLimit int,
 	if err := static.Validate(); err != nil {
 		return nil, err
 	}
-	document, _, err := config.ReadRuntimeDocumentWithRecovery(path, now)
+	document, recovered, err := config.ReadRuntimeDocumentWithRecovery(path, now)
 	if err != nil {
 		return nil, err
 	}
-	return &JSONFileStore{path: path, static: static, historyLimit: historyLimit, now: now, document: document}, nil
+	return &JSONFileStore{path: path, static: static, historyLimit: historyLimit, now: now, document: document, recovered: recovered}, nil
 }
 
 func (s *JSONFileStore) Current(_ context.Context) (config.Snapshot, error) {
@@ -137,6 +138,7 @@ func (s *JSONFileStore) updateLocked(request UpdateRequest) (config.Snapshot, er
 		history = history[overflow:]
 	}
 	s.document = config.RuntimeDocument{
+		SchemaVersion: config.RuntimeSchemaVersion, ID: config.RuntimeDocumentID,
 		Version: s.document.Version + 1, UpdatedAt: s.now().UTC(), Source: request.Source,
 		Runtime: request.Runtime.Clone(), History: history,
 	}
@@ -192,21 +194,29 @@ func (s *JSONFileStore) persistLocked() error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(tempPath, s.path); err != nil {
+	backup := s.path + ".bak"
+	if s.recovered {
+		// 恢复来源仍是有效 .bak；不能先用损坏主文件覆盖它，留下双重故障窗口。
+		// 原主文件另存，成功提交前后都保留可读取的恢复版本。
+		backup = s.path + ".recovery-invalid"
+	}
+	if err := replaceFileWithBackup(tempPath, s.path, backup); err != nil {
 		return err
 	}
+	s.recovered = false
 	keep = true
 	return nil
 }
 
-func replaceFile(source, target string) error {
-	backup := target + ".bak"
+func replaceFileWithBackup(source, target, backup string) error {
 	_ = os.Remove(backup)
 	if err := os.Rename(target, backup); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("prepare atomic replace: %w", err)
 	}
 	if err := os.Rename(source, target); err != nil {
-		_ = os.Rename(backup, target)
+		if restoreErr := os.Rename(backup, target); restoreErr != nil {
+			return operation.Wrap("config.replace", operation.Internal, operation.EffectUnknown, errors.Join(err, fmt.Errorf("restore runtime configuration: %w", restoreErr)))
+		}
 		return fmt.Errorf("replace runtime config: %w", err)
 	}
 	return nil

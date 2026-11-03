@@ -1,3 +1,6 @@
+storage:
+  backend: file
+
 server:
   addr: 127.0.0.1:8080
   read_timeout: 10s

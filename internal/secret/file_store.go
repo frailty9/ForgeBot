@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const fileFormatVersion = 1
+const fileFormatVersion = 2
 
 type FileStore struct {
 	mu      sync.RWMutex
@@ -21,6 +21,7 @@ type FileStore struct {
 	crypter *Crypter
 	now     func() time.Time
 	state   fileState
+	legacy  bool
 }
 
 type fileState struct {
@@ -30,6 +31,7 @@ type fileState struct {
 
 type secretEntry struct {
 	Version    uint64          `json:"version"`
+	Sequence   uint64          `json:"sequence,omitempty"`
 	UpdatedAt  time.Time       `json:"updated_at"`
 	Ciphertext string          `json:"ciphertext"`
 	Candidate  *candidateEntry `json:"candidate,omitempty"`
@@ -105,10 +107,14 @@ func (s *FileStore) Stage(_ context.Context, ref, value string) (Candidate, erro
 	defer s.mu.Unlock()
 	entry := s.state.Secrets[ref]
 	version := entry.Version + 1
+	if entry.Sequence >= version {
+		version = entry.Sequence + 1
+	}
 	if entry.Candidate != nil && entry.Candidate.Version >= version {
 		version = entry.Candidate.Version + 1
 	}
 	updatedAt := s.now().UTC()
+	entry.Sequence = version
 	entry.Candidate = &candidateEntry{Version: version, UpdatedAt: updatedAt, Ciphertext: ciphertext}
 	previous, existed := s.state.Secrets[ref]
 	s.state.Secrets[ref] = entry
@@ -154,11 +160,8 @@ func (s *FileStore) Discard(_ context.Context, candidate Candidate) error {
 	}
 	entry.Candidate = nil
 	previous := s.state.Secrets[candidate.Ref]
-	if entry.Ciphertext == "" {
-		delete(s.state.Secrets, candidate.Ref)
-	} else {
-		s.state.Secrets[candidate.Ref] = entry
-	}
+	// 保留分配序列的墓碑，避免丢弃后重建出同版本候选，导致过期句柄误激活。
+	s.state.Secrets[candidate.Ref] = entry
 	if err := s.persistLocked(); err != nil {
 		s.state.Secrets[candidate.Ref] = previous
 		return err
@@ -173,7 +176,19 @@ func (s *FileStore) Delete(_ context.Context, ref string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, existed := s.state.Secrets[ref]
-	delete(s.state.Secrets, ref)
+	if !existed {
+		return nil
+	}
+	entry := previous
+	if entry.Version > entry.Sequence {
+		entry.Sequence = entry.Version
+	}
+	if entry.Candidate != nil && entry.Candidate.Version > entry.Sequence {
+		entry.Sequence = entry.Candidate.Version
+	}
+	entry.Ciphertext = ""
+	entry.Candidate = nil
+	s.state.Secrets[ref] = entry
 	if err := s.persistLocked(); err != nil {
 		restoreEntry(s.state.Secrets, ref, previous, existed)
 		return err
@@ -201,8 +216,15 @@ func validateRef(ref string) error {
 
 func (s *FileStore) load() error {
 	file, err := os.Open(s.path)
+	recovered := false
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		// Windows 替换的两次 rename 之间崩溃时，主文件可能暂时缺失。
+		// 有恢复文件就必须验证并恢复，不能将已有凭据静默视作空仓储。
+		file, err = os.Open(s.path + ".replace-backup")
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		recovered = true
 	}
 	if err != nil {
 		return err
@@ -218,9 +240,12 @@ func (s *FileStore) load() error {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return errors.New("secret store must contain one JSON value")
 	}
-	if state.FormatVersion != fileFormatVersion {
+	if state.FormatVersion != 1 && state.FormatVersion != fileFormatVersion {
 		return fmt.Errorf("unsupported secret store format version %d", state.FormatVersion)
 	}
+	// 旧格式的 active/candidate 版本足以恢复分配序列；更新时再写新格式。
+	s.legacy = state.FormatVersion == 1
+	state.FormatVersion = fileFormatVersion
 	if state.Secrets == nil {
 		state.Secrets = map[string]secretEntry{}
 	}
@@ -238,8 +263,23 @@ func (s *FileStore) load() error {
 				return fmt.Errorf("validate candidate %q: %w", ref, err)
 			}
 		}
+		if entry.Version > entry.Sequence {
+			entry.Sequence = entry.Version
+		}
+		if entry.Candidate != nil && entry.Candidate.Version > entry.Sequence {
+			entry.Sequence = entry.Candidate.Version
+		}
+		state.Secrets[ref] = entry
 	}
 	s.state = state
+	if recovered {
+		if err := file.Close(); err != nil {
+			return err
+		}
+		if err := os.Rename(s.path+".replace-backup", s.path); err != nil {
+			return fmt.Errorf("restore interrupted credential replacement: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -247,6 +287,11 @@ func (s *FileStore) persistLocked() error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
+	}
+	if s.legacy {
+		if err := s.backupLegacy(); err != nil {
+			return err
+		}
 	}
 	temp, err := os.CreateTemp(dir, ".forgebot-secrets-*")
 	if err != nil {
@@ -278,6 +323,48 @@ func (s *FileStore) persistLocked() error {
 		return err
 	}
 	keep = true
+	s.legacy = false
+	return nil
+}
+
+// 数据格式升级先保留原始密文文件；不因允许破坏式接口迭代而丢弃部署数据。
+func (s *FileStore) backupLegacy() error {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	path := s.path + ".format-v1.bak"
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if errors.Is(err, os.ErrExist) {
+		previous, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if string(previous) != string(data) {
+			return fmt.Errorf("legacy credential backup already exists with different content")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	complete := false
+	defer func() {
+		_ = file.Close()
+		if !complete {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err = file.Write(data); err != nil {
+		return err
+	}
+	if err = file.Sync(); err != nil {
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	complete = true
 	return nil
 }
 
@@ -291,7 +378,9 @@ func replaceFile(source, target string) error {
 		return err
 	}
 	if err := os.Rename(source, target); err != nil {
-		_ = os.Rename(backup, target)
+		if restoreErr := os.Rename(backup, target); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("restore credentials: %w", restoreErr))
+		}
 		return err
 	}
 	_ = os.Remove(backup)

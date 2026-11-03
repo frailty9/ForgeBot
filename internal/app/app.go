@@ -23,10 +23,10 @@ import (
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/notification"
 	"github.com/soleapi/forgebot/internal/operator"
+	"github.com/soleapi/forgebot/internal/persistence"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/server"
-	"github.com/soleapi/forgebot/internal/settings"
 )
 
 // App is the top-level process composition and shutdown coordinator.
@@ -43,9 +43,25 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if logger == nil {
 		logger = slog.Default()
 	}
-	secretStore, err := buildSecretStore(cfg.Static)
+	var key []byte
+	if encodedKey := strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY")); encodedKey != "" {
+		var err error
+		key, err = secret.ParseKey(encodedKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	backend, err := persistence.Open(cfg.Static, key)
 	if err != nil {
 		return nil, err
+	}
+	settingsStore, secretStore := backend.Configuration(), backend.Credentials()
+	if settingsStore != nil {
+		// 加载器提供启动快照；构建运行时前以选中后端的当前版本为准。
+		cfg, err = settingsStore.Current(context.Background())
+		if err != nil {
+			return nil, err
+		}
 	}
 	moduleRegistry := modules.NewRegistry()
 	if err := moduleRegistry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
@@ -79,13 +95,6 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		return nil, err
 	}
 
-	var settingsStore settings.Store
-	if cfg.Static.RuntimeConfigPath != "" {
-		settingsStore, err = settings.NewJSONFileStore(cfg.Static.RuntimeConfigPath, cfg.Static)
-		if err != nil {
-			return nil, err
-		}
-	}
 	var secretManager *secret.Manager
 	if secretStore != nil {
 		secretManager, err = secret.NewManagedWriter(secretStore, runtimeManager.ReplaceSecret, runtimeManager.DeleteSecret)
@@ -111,24 +120,6 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		server: server.New(cfg, logger, runtimeManager, adminService), notifier: notifier,
 	}, nil
-}
-
-func buildSecretStore(static config.StaticConfig) (*secret.FileStore, error) {
-	encodedKey := strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY"))
-	if static.SecretStorePath == "" && encodedKey == "" {
-		return nil, nil
-	}
-	if static.SecretStorePath == "" {
-		return nil, errors.New("secret_store_path is required when FORGEBOT_SECRET_KEY is set")
-	}
-	if encodedKey == "" {
-		return nil, errors.New("FORGEBOT_SECRET_KEY is required when secret_store_path is set")
-	}
-	key, err := secret.ParseKey(encodedKey)
-	if err != nil {
-		return nil, err
-	}
-	return secret.NewFileStore(static.SecretStorePath, key)
 }
 
 // Run starts the HTTP server and runtime generation until ctx is canceled.

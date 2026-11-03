@@ -54,10 +54,26 @@ type Snapshot struct {
 
 // StaticConfig contains process-level settings that require restart to change.
 type StaticConfig struct {
-	Server            ServerConfig `json:"server" yaml:"server"`
-	RuntimeConfigPath string       `json:"runtime_config_path" yaml:"runtime_config_path"`
-	SecretStorePath   string       `json:"secret_store_path" yaml:"secret_store_path"`
-	AdminToken        string       `json:"-" yaml:"admin_token"`
+	Storage           StorageConfig `json:"storage" yaml:"storage"`
+	Server            ServerConfig  `json:"server" yaml:"server"`
+	RuntimeConfigPath string        `json:"runtime_config_path" yaml:"runtime_config_path"`
+	SecretStorePath   string        `json:"secret_store_path" yaml:"secret_store_path"`
+	AdminToken        string        `json:"-" yaml:"admin_token"`
+}
+
+// StorageConfig 是进程级单选项，不允许运行时混用多个权威后端。
+// 各领域可以有独立文件，但它们必须由同一个被选中的 Backend 构建。
+type StorageConfig struct {
+	Backend string `json:"backend" yaml:"backend"`
+}
+
+const FileBackend = "file"
+
+func (c StorageConfig) Kind() string {
+	if c.Backend == "" {
+		return FileBackend
+	}
+	return c.Backend
 }
 
 // RuntimeConfig contains hot-reloadable application behavior.
@@ -105,12 +121,19 @@ type SkillsConfig struct {
 
 // RuntimeDocument is the versioned JSON envelope persisted by the settings store.
 type RuntimeDocument struct {
-	Version   uint64            `json:"version"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	Source    string            `json:"source,omitempty"`
-	Runtime   RuntimeConfig     `json:"runtime"`
-	History   []RuntimeRevision `json:"history,omitempty"`
+	SchemaVersion int               `json:"schema_version"`
+	ID            string            `json:"id"`
+	Version       uint64            `json:"version"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Source        string            `json:"source,omitempty"`
+	Runtime       RuntimeConfig     `json:"runtime"`
+	History       []RuntimeRevision `json:"history,omitempty"`
 }
+
+const RuntimeSchemaVersion = 1
+const RuntimeDocumentID = "runtime/default"
+
+var ErrRuntimeSchemaUnsupported = errors.New("unsupported runtime document schema or identity")
 
 type RuntimeRevision struct {
 	Version   uint64        `json:"version"`
@@ -210,7 +233,7 @@ type OperatorGroupConfig struct {
 }
 
 func DefaultStatic() StaticConfig {
-	return StaticConfig{Server: ServerConfig{
+	return StaticConfig{Storage: StorageConfig{Backend: FileBackend}, Server: ServerConfig{
 		Addr: "127.0.0.1:8080", ReadTimeout: 10 * time.Second,
 		WriteTimeout: 30 * time.Second, ShutdownTimeout: 15 * time.Second,
 	}}
@@ -313,6 +336,9 @@ func ReadRuntimeDocumentWithRecovery(path string, now func() time.Time) (Runtime
 	if err == nil {
 		return document, false, nil
 	}
+	if errors.Is(err, ErrRuntimeSchemaUnsupported) {
+		return RuntimeDocument{}, false, err
+	}
 	backup, backupErr := readRuntimeDocumentFile(path+".bak", now)
 	if backupErr == nil {
 		return backup, true, nil
@@ -341,11 +367,33 @@ func readRuntimeDocumentFile(path string, now func() time.Time) (RuntimeDocument
 		if err := runtime.Validate(); err != nil {
 			return RuntimeDocument{}, err
 		}
-		return RuntimeDocument{Version: 1, UpdatedAt: now().UTC(), Source: "legacy", Runtime: runtime}, nil
+		return RuntimeDocument{SchemaVersion: RuntimeSchemaVersion, ID: RuntimeDocumentID, Version: 1, UpdatedAt: now().UTC(), Source: "legacy", Runtime: runtime}, nil
+	}
+	// 先检查信封版本，再严格解析字段；未来版本可能引入未知字段，不能因
+	// DisallowUnknownFields 提前失败而误把正常的新版本当损坏文件回退。
+	var identity struct {
+		SchemaVersion int    `json:"schema_version"`
+		ID            string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &identity); err != nil {
+		return RuntimeDocument{}, err
+	}
+	if (identity.SchemaVersion != 0 && identity.SchemaVersion != RuntimeSchemaVersion) || (identity.ID != "" && identity.ID != RuntimeDocumentID) {
+		return RuntimeDocument{}, ErrRuntimeSchemaUnsupported
 	}
 	var document RuntimeDocument
 	if err := decodeStrictJSON(data, &document); err != nil {
 		return RuntimeDocument{}, err
+	}
+	// 仅在读取时补齐旧元数据；首次更新保留原文件备份，不启动即改写部署数据。
+	if document.SchemaVersion == 0 {
+		document.SchemaVersion = RuntimeSchemaVersion
+	}
+	if document.ID == "" {
+		document.ID = RuntimeDocumentID
+	}
+	if document.SchemaVersion != RuntimeSchemaVersion || document.ID != RuntimeDocumentID {
+		return RuntimeDocument{}, ErrRuntimeSchemaUnsupported
 	}
 	normalizeExtensionsDefaults(&document.Runtime)
 	if document.Version == 0 {
@@ -383,6 +431,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		ShutdownTimeout string `yaml:"shutdown_timeout"`
 	}
 	type rawStaticConfig struct {
+		Storage           *StorageConfig   `yaml:"storage"`
 		Server            *rawServerConfig `yaml:"server"`
 		RuntimeConfigPath string           `yaml:"runtime_config_path"`
 		SecretStorePath   string           `yaml:"secret_store_path"`
@@ -402,6 +451,9 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		return err
 	}
 	out := *target
+	if raw.Storage != nil {
+		out.Storage = *raw.Storage
+	}
 	if raw.Server != nil {
 		if raw.Server.Addr != "" {
 			out.Server.Addr = raw.Server.Addr
@@ -471,6 +523,9 @@ func applyStaticEnv(cfg *StaticConfig, lookupEnv func(string) string) {
 
 func (c StaticConfig) Validate() error {
 	var problems []string
+	if c.Storage.Kind() != FileBackend {
+		problems = append(problems, "storage.backend must be file; SQL/NoSQL backends are not implemented")
+	}
 	if strings.TrimSpace(c.Server.Addr) == "" {
 		problems = append(problems, "server.addr is required")
 	}
@@ -784,6 +839,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 	return map[string]any{
 		"version": c.Version, "updated_at": c.UpdatedAt,
 		"static": map[string]any{
+			"storage": map[string]any{"backend": c.Static.Storage.Kind()},
 			"server": map[string]any{
 				"addr":             c.Static.Server.Addr,
 				"read_timeout":     c.Static.Server.ReadTimeout.String(),

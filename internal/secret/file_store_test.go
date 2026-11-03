@@ -154,3 +154,114 @@ func testKey() []byte {
 	}
 	return key
 }
+
+func TestFileStoreRecoversInterruptedReplacement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	store, err := NewFileStore(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	candidate, err := store.Stage(ctx, "llm/default", "active-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Activate(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟旧文件已改名、候选文件尚未就位时进程终止。
+	if err = os.Rename(path, path+".replace-backup"); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := NewFileStore(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := recovered.Get(ctx, "llm/default")
+	if err != nil || value != "active-value" {
+		t.Fatal("interrupted replacement lost active credentials", err)
+	}
+	if _, err = os.Stat(path); err != nil {
+		t.Fatal("primary file was not restored", err)
+	}
+}
+
+func TestFileStoreDoesNotTreatCorruptBackupAsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	if err := os.WriteFile(path+".replace-backup", []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFileStore(path, testKey()); err == nil {
+		t.Fatal("corrupt credentials silently replaced with empty store")
+	}
+}
+
+func TestExpiredCandidatesCannotActivateAfterDiscardOrDelete(t *testing.T) {
+	for _, discard := range []bool{true, false} {
+		store, err := NewFileStore(filepath.Join(t.TempDir(), "secrets.json"), testKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		old, err := store.Stage(ctx, "llm/default", "old")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if discard {
+			err = store.Discard(ctx, old)
+		} else {
+			err = store.Delete(ctx, old.Ref)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := store.Stage(ctx, old.Ref, "new")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Version <= old.Version {
+			t.Fatal("candidate identity reused")
+		}
+		if _, err = store.Activate(ctx, old); !errors.Is(err, ErrCandidateNotFound) {
+			t.Fatalf("stale candidate accepted: %v", err)
+		}
+		if _, err = store.Activate(ctx, current); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLegacyCredentialUpgradeKeepsOriginalEncryptedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	store, err := NewFileStore(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	candidate, err := store.Stage(ctx, "llm/default", "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Activate(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	store.state.FormatVersion = 1
+	legacy, err := json.Marshal(store.state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewFileStore(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loaded.Stage(ctx, "llm/default", "replacement"); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(path + ".format-v1.bak")
+	if err != nil || string(backup) != string(legacy) {
+		t.Fatal("legacy encrypted file was not preserved", err)
+	}
+}

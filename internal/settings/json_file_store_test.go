@@ -151,6 +151,17 @@ func TestJSONFileStoreReloadsFromPreviousBackup(t *testing.T) {
 	if snapshot.Version != 1 || snapshot.Runtime.Bot.Name != "ForgeBot" {
 		t.Fatalf("recovered = %+v", snapshot)
 	}
+	backupBefore, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = recovered.Update(context.Background(), UpdateRequest{ExpectedVersion: snapshot.Version, Runtime: snapshot.Runtime, Source: "after-recovery"}); err != nil {
+		t.Fatal(err)
+	}
+	backupAfter, err := os.ReadFile(path + ".bak")
+	if err != nil || string(backupBefore) != string(backupAfter) {
+		t.Fatal("valid recovery backup overwritten by corrupt primary", err)
+	}
 }
 
 func writeRuntimeFile(t *testing.T) string {
