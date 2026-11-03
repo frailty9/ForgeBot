@@ -11,6 +11,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/operation"
+	"github.com/soleapi/forgebot/internal/platform"
 )
 
 func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
@@ -35,6 +36,17 @@ func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
 	}))
 	defer api.Close()
 	s := &Sender{cfg: testConfig(api.URL), client: api.Client(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	registry := platform.NewRegistry()
+	if err := registry.RegisterConnector("one", s); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.BindConversation(platform.ConversationBinding{ConversationID: "g", ConnectorID: "one", Target: "8"}); err != nil {
+		t.Fatal(err)
+	}
+	support, err := registry.Support(context.Background(), "g")
+	if err != nil || !support.JoinEvents || !support.MemberEvents || !support.Announcement || support.Permission != "unknown" || len(paths) != 0 {
+		t.Fatal("support query is incorrect or probed network", support, err)
+	}
 	reference, _ := json.Marshal(requestReference{Flag: "opaque", SubType: "add", Target: "8"})
 	if err := s.ReviewGroupRequest(context.Background(), "8", group.ReviewRequest{Reference: string(reference), Approve: true}); err != nil {
 		t.Fatal(err)

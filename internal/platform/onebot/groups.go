@@ -21,6 +21,8 @@ type requestReference struct {
 	Target  string `json:"target"`
 }
 
+func (*Sender) GroupEventSupport() (bool, bool) { return true, true }
+
 func (e rawEvent) groupEvent(cfg Config) (group.Event, bool, error) {
 	target := scalar(e.GroupID)
 	binding, bound := cfg.Groups[target]

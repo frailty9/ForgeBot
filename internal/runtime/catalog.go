@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/catalog"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -33,6 +34,19 @@ func (m *Manager) Capabilities(ctx context.Context) catalog.Snapshot {
 			state = "unknown"
 		}
 		result.Entries = append(result.Entries, catalog.Entry{ID: connector.ID, Kind: "connector", Source: connector.Type, Enabled: connector.Enabled, Configured: true, Loaded: connector.Enabled && state != "stopped" && state != "unknown", Health: state, Permission: "unknown", Documentation: "docs/configuration.md"})
+	}
+	for _, binding := range g.snapshot.Runtime.Platforms.Groups {
+		support := group.Support{Permission: "unknown"}
+		actions, ok := g.connectors.(group.Actions)
+		if !ok {
+			actions, ok = m.builder.Sender.(group.Actions)
+		}
+		if ok {
+			if value, err := actions.Support(ctx, binding.ID); err == nil {
+				support = value
+			}
+		}
+		result.Entries = append(result.Entries, catalog.Entry{ID: binding.ID, Kind: "group", Source: binding.ConnectorID, Enabled: true, Configured: true, Loaded: true, Health: "not_probed", Permission: support.Permission, GroupSupport: &support, Documentation: "docs/group-management.md"})
 	}
 	configured := strings.TrimSpace(g.snapshot.Runtime.LLM.Model) != ""
 	if g.snapshot.Runtime.LLM.Authentication != "none" {

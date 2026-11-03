@@ -24,7 +24,11 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	_, review := target.sender.(group.Reviewer)
 	_, announce := target.sender.(group.Announcer)
 	_, recall := target.sender.(group.Recaller)
-	return group.Support{JoinReview: review, Announcement: announce, Recall: recall, Permission: "unknown"}, nil
+	joinEvents, memberEvents := false, false
+	if reporter, ok := target.sender.(group.EventReporter); ok {
+		joinEvents, memberEvents = reporter.GroupEventSupport()
+	}
+	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, Announcement: announce, Recall: recall, Permission: "unknown"}, nil
 }
 func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRequest) error {
 	target, err := r.groupDestination(id)
