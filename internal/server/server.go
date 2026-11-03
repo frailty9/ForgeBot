@@ -57,6 +57,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.Handle("PUT /v1/admin/config", s.authorize(http.HandlerFunc(s.adminUpdate)))
 	mux.Handle("POST /v1/admin/config/rollback", s.authorize(http.HandlerFunc(s.adminRollback)))
 	mux.Handle("GET /v1/admin/runtime", s.authorize(http.HandlerFunc(s.adminRuntime)))
+	mux.Handle("GET /v1/admin/capabilities", s.authorize(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, s.admin.Capabilities(r.Context()))
+	})))
 	mux.Handle("POST /v1/admin/runtime/restart", s.authorize(http.HandlerFunc(s.adminRestart)))
 	mux.Handle("POST /v1/admin/search/reload", s.authorize(http.HandlerFunc(s.adminSearchReload)))
 	mux.Handle("POST /v1/admin/reflection/scan", s.authorize(http.HandlerFunc(s.adminReflectionScan)))

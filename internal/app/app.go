@@ -64,26 +64,8 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 			return nil, err
 		}
 	}
-	moduleRegistry := modules.NewRegistry()
-	if err := moduleRegistry.Register(replyexperience.Factory{}, hooks.Native, 100, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(echo.Factory{}, hooks.Native, 50, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(onebot.Factory{}, hooks.Native, 60, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(proactivereply.Factory{}, hooks.Native, 200, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(structuredsearch.Factory{}, hooks.Native, 300, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
-		return nil, err
-	}
-	if err := moduleRegistry.Register(welcome.Factory{}, hooks.Native, 500, hooks.Continue); err != nil {
+	moduleRegistry, err := NativeModules()
+	if err != nil {
 		return nil, err
 	}
 	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {
@@ -124,6 +106,20 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		cfg: cfg, logger: logger, runtime: runtimeManager,
 		server: server.New(cfg, logger, runtimeManager, adminService), notifier: notifier,
 	}, nil
+}
+
+// NativeModules 仅注册工厂，不构建索引/连接器/模型，供 App 和 doctor 共用校验。
+func NativeModules() (*modules.Registry, error) {
+	registry := modules.NewRegistry()
+	for _, item := range []struct {
+		factory modules.Factory
+		order   int
+	}{{echo.Factory{}, 50}, {onebot.Factory{}, 60}, {replyexperience.Factory{}, 100}, {proactivereply.Factory{}, 200}, {structuredsearch.Factory{}, 300}, {knowledgereflection.Factory{}, 400}, {welcome.Factory{}, 500}} {
+		if err := registry.Register(item.factory, hooks.Native, item.order, hooks.Continue); err != nil {
+			return nil, err
+		}
+	}
+	return registry, nil
 }
 
 // Run starts the HTTP server and runtime generation until ctx is canceled.

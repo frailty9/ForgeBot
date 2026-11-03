@@ -18,6 +18,7 @@
 /configs/*-local.json
 /configs/*.local.yaml
 /configs/*-local.yaml
+/configs/*.local.key
 /configs/secrets.json
 .env
 .env.*

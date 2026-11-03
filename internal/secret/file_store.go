@@ -56,7 +56,7 @@ func newFileStore(path string, key []byte, now func() time.Time) (*FileStore, er
 		return nil, err
 	}
 	store := &FileStore{path: path, crypter: crypter, now: now, state: fileState{FormatVersion: fileFormatVersion, Secrets: map[string]secretEntry{}}}
-	if err := store.load(); err != nil {
+	if err := store.load(true); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -214,7 +214,26 @@ func validateRef(ref string) error {
 	return nil
 }
 
-func (s *FileStore) load() error {
+// InspectFile 供诊断使用，可读取有效恢复文件但不恢复/改写任何部署文件。
+func InspectFile(path string, key []byte) (interface {
+	Reader
+	StatusReader
+}, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("secret store path is required")
+	}
+	crypter, err := NewCrypter(key)
+	if err != nil {
+		return nil, err
+	}
+	store := &FileStore{path: path, crypter: crypter, now: time.Now, state: fileState{FormatVersion: fileFormatVersion, Secrets: map[string]secretEntry{}}}
+	if err = store.load(false); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *FileStore) load(restore bool) error {
 	file, err := os.Open(s.path)
 	recovered := false
 	if errors.Is(err, os.ErrNotExist) {
@@ -272,7 +291,7 @@ func (s *FileStore) load() error {
 		state.Secrets[ref] = entry
 	}
 	s.state = state
-	if recovered {
+	if recovered && restore {
 		if err := file.Close(); err != nil {
 			return err
 		}

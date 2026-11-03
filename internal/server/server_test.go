@@ -44,6 +44,23 @@ func TestAdminRequiresBearerToken(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesProtectedAndUsesRuntimeProjection(t *testing.T) {
+	fixture := newAdminFixture(t)
+	r := httptest.NewRequest(http.MethodGet, "/v1/admin/capabilities", nil)
+	w := httptest.NewRecorder()
+	fixture.server.server.Handler.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatal("capabilities accepted anonymous request")
+	}
+	w = fixture.request(t, http.MethodGet, "/v1/admin/capabilities", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"entries"`) || !strings.Contains(w.Body.String(), `"not_probed"`) {
+		t.Fatal(w.Code, w.Body)
+	}
+	if strings.Contains(w.Body.String(), "test-admin-token") {
+		t.Fatal("capabilities exposed management token")
+	}
+}
+
 func TestAPIKeyEndpointIsWriteOnly(t *testing.T) {
 	fixture := newAdminFixture(t)
 	response := fixture.request(t, http.MethodPut, "/v1/admin/llm/api-key", `{"api_key":"top-secret-value"}`)

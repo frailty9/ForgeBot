@@ -255,6 +255,18 @@ func (e *Engine) Shutdown(grace time.Duration) {
 }
 
 func (e *Engine) Done() <-chan struct{} { return e.closed }
+func (e *Engine) HasModel() bool        { return e.deps.LLM != nil }
+func (e *Engine) HasSkills() bool {
+	return strings.TrimSpace(e.deps.Policy.ExtensionInstructions) != ""
+}
+func (e *Engine) ToolNames() []string {
+	definitions := e.toolDefinitions()
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	return names
+}
 
 // SendEventReply 由宿主在已验证的群事件作用域调用，不向模块或模型暴露 Sender。
 func (e *Engine) SendEventReply(ctx context.Context, id, text string) error {

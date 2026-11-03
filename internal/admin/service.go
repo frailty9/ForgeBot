@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/operation"
@@ -144,6 +145,9 @@ func (s *Service) Rollback(ctx context.Context, request RollbackRequest) (runtim
 func (s *Service) RuntimeStatus() runtimecfg.Status {
 	_, status := s.runtime.Snapshot()
 	return status
+}
+func (s *Service) Capabilities(ctx context.Context) catalog.Snapshot {
+	return s.runtime.Capabilities(ctx)
 }
 
 func (s *Service) Restart(ctx context.Context, reason string) error {

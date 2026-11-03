@@ -18,6 +18,13 @@ import (
 )
 
 func main() {
+	if handled, err := runCommand(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	configPath := flag.String("config", "", "path to ForgeBot YAML startup configuration file")
 	runtimeConfigPath := flag.String("runtime-config", "", "path to ForgeBot JSON runtime configuration file")
 	initAPIKey := flag.Bool("init-api-key", false, "write FORGEBOT_LLM_API_KEY to the encrypted SecretStore and exit")
