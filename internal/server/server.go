@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,11 +16,10 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/proactive"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
-	searchcontract "github.com/soleapi/forgebot/internal/search"
-	"github.com/soleapi/forgebot/internal/settings"
 )
 
 const maxAdminBodyBytes = 1 << 20
@@ -248,36 +246,49 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return err
+		return operation.Wrap("request.decode", operation.Invalid, operation.NotStarted, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("request body must contain one JSON value")
+		return operation.New(operation.Invalid, "request body must contain one JSON value")
 	}
 	return nil
 }
 
 func (s *Server) writeAdminError(w http.ResponseWriter, err error) {
-	status := http.StatusBadRequest
-	if errors.Is(err, runtimecfg.ErrRuntimeBusy) {
-		status = http.StatusConflict
+	s.logger.Error("management operation failed", "err", err, "failure", operation.Describe(err))
+	failure := operation.Describe(err)
+	writeJSON(w, failureStatus(failure.Code), map[string]any{"error": operation.PublicMessage(failure.Code), "failure": failure})
+}
+
+// HTTP 只负责领域分类到状态码的映射，不按错误文案猜测失败原因。
+func failureStatus(code operation.Code) int {
+	switch code {
+	case operation.Invalid:
+		return http.StatusBadRequest
+	case operation.Unauthenticated:
+		return http.StatusUnauthorized
+	case operation.PermissionDenied, operation.PolicyDenied:
+		return http.StatusForbidden
+	case operation.NotFound:
+		return http.StatusNotFound
+	case operation.Expired:
+		return http.StatusGone
+	case operation.Conflict, operation.Busy:
+		return http.StatusConflict
+	case operation.RateLimited, operation.BudgetExhausted:
+		return http.StatusTooManyRequests
+	case operation.Unsupported:
+		return http.StatusNotImplemented
+	case operation.Disabled, operation.NotConfigured, operation.Unavailable:
+		return http.StatusServiceUnavailable
+	case operation.Timeout:
+		return http.StatusGatewayTimeout
+	case operation.Canceled:
+		return http.StatusRequestTimeout
+	default:
+		return http.StatusInternalServerError
 	}
-	if errors.Is(err, settings.ErrVersionConflict) {
-		status = http.StatusConflict
-	}
-	if errors.Is(err, settings.ErrVersionNotFound) {
-		status = http.StatusNotFound
-	}
-	if errors.Is(err, admin.ErrUnavailable) {
-		status = http.StatusServiceUnavailable
-	}
-	if errors.Is(err, searchcontract.ErrDisabled) || errors.Is(err, searchcontract.ErrNoIndex) {
-		status = http.StatusServiceUnavailable
-	}
-	if errors.Is(err, runtimecfg.ErrReflectionDisabled) || errors.Is(err, runtimecfg.ErrReflectionUnavailable) {
-		status = http.StatusServiceUnavailable
-	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
 func (s *Server) Start() error {
@@ -330,7 +341,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.engine.HandleInbound(r.Context(), msg)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "result": result})
+		s.logger.ErrorContext(r.Context(), "message processing failed", "err", err)
+		failure := operation.Describe(err)
+		writeJSON(w, failureStatus(failure.Code), map[string]any{"error": operation.PublicMessage(failure.Code), "failure": failure, "result": result})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, result)

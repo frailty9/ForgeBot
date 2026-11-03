@@ -73,7 +73,7 @@ func (m *multiExecutor) Execute(ctx context.Context, call Call) Result {
 	for _, executor := range m.executors {
 		for _, definition := range executor.Definitions() {
 			if definition.Name == call.Name {
-				return executor.Execute(ctx, call)
+				return Normalize(executor.Execute(ctx, call))
 			}
 		}
 	}
@@ -134,5 +134,5 @@ func (r *Registry) Execute(ctx context.Context, call Call) Result {
 	if !exists {
 		return Result{Code: "tool_not_allowed"}
 	}
-	return tool.Execute(ctx, call)
+	return Normalize(tool.Execute(ctx, call))
 }

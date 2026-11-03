@@ -74,7 +74,7 @@ func TestAPIKeyEndpointIsWriteOnly(t *testing.T) {
 func TestOrdinaryConfigRejectsAPIKeyAndStaleVersion(t *testing.T) {
 	fixture := newAdminFixture(t)
 	response := fixture.request(t, http.MethodPut, "/v1/admin/config", `{"expected_version":1,"runtime":{"llm":{"api_key":"forbidden"}}}`)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unknown field") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid"`) {
 		t.Fatalf("api_key response = %d %s", response.Code, response.Body.String())
 	}
 
@@ -103,7 +103,7 @@ func TestAdminSearchReloadRequiresAuthenticationAndReportsDisabled(t *testing.T)
 		t.Fatalf("unauthenticated status = %d", response.Code)
 	}
 	response = fixture.request(t, http.MethodPost, "/v1/admin/search/reload", "")
-	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "search is disabled") {
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"disabled"`) {
 		t.Fatalf("disabled reload = %d %s", response.Code, response.Body.String())
 	}
 }
@@ -117,7 +117,7 @@ func TestAdminReflectionScanRequiresAuthenticationAndReportsDisabled(t *testing.
 		t.Fatalf("unauthenticated status = %d", response.Code)
 	}
 	response = fixture.request(t, http.MethodPost, "/v1/admin/reflection/scan", "")
-	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "reflection is disabled") {
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"disabled"`) {
 		t.Fatalf("disabled scan = %d %s", response.Code, response.Body.String())
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 // Transport carries MCP JSON-RPC messages. The MCP client deliberately does
@@ -88,12 +90,12 @@ func (t *streamableHTTPTransport) request(ctx context.Context, body []byte, noti
 	}
 	response, err := t.http.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, operation.Wrap("mcp.request", operation.Unavailable, operation.EffectUnknown, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, t.maxResponseBytes))
-		return nil, fmt.Errorf("HTTP %s: %s", response.Status, strings.TrimSpace(string(data)))
+		return nil, operation.Wrap("mcp.request", operation.HTTPCode(response.StatusCode), operation.EffectUnknown, fmt.Errorf("HTTP %s: %s", response.Status, strings.TrimSpace(string(data))))
 	}
 	if value := response.Header.Get("Mcp-Session-Id"); value != "" {
 		t.mu.Lock()

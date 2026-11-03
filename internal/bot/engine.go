@@ -21,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
 )
@@ -106,7 +107,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	e.lifetime.RLock()
 	defer e.lifetime.RUnlock()
 	if e.closing.Load() {
-		return platform.HandleResult{Verdict: "stopped"}, errors.New("engine is stopped")
+		return platform.HandleResult{Verdict: "stopped"}, operation.New(operation.Unavailable, "engine is stopped")
 	}
 	if err := ctx.Err(); err != nil {
 		return platform.HandleResult{Verdict: "canceled"}, err
@@ -114,7 +115,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	ctx = e.beginRun(ctx, msg, "direct")
 	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
-		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, err
+		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, operation.Wrap("message.validate", operation.Invalid, operation.NotStarted, err)
 	}
 	if e.admission.Check(msg) == admission.Duplicate {
 		return platform.HandleResult{Accepted: false, Verdict: VerdictDuplicate.String()}, nil
@@ -143,7 +144,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 			return platform.HandleResult{Verdict: "hook_failed"}, err
 		}
 		e.logger.DebugContext(ctx, "bot reply generation failed", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "err", err)
-		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, err
+		return platform.HandleResult{Accepted: false, Verdict: "llm_failed"}, operation.Wrap("answer.generate", operation.Unknown, operation.Describe(err).Effect, err)
 	}
 	e.logger.DebugContext(ctx, "bot reply generated", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "reply_len", len([]rune(reply)))
 	if err := e.reply(ctx, msg, reply); err != nil {
@@ -264,7 +265,11 @@ func (e *Engine) deliver(ctx context.Context, in messaging.InboundMessage, text,
 		ReplyToMessageID: in.MessageID,
 		Text:             text,
 	}
-	return e.deps.Sender.Send(ctx, message)
+	err = e.deps.Sender.Send(ctx, message)
+	if err == nil {
+		return nil
+	}
+	return operation.Wrap("message.send", operation.Unknown, operation.Describe(err).Effect, err)
 }
 
 func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (string, error) {
@@ -336,7 +341,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		if used[call.Name] < budget && e.deps.Tools != nil {
 			if !allowed[call.Name] {
 				result = tooling.Result{Code: "tool_not_allowed"}
-				payload, marshalErr := json.Marshal(result)
+				payload, marshalErr := json.Marshal(tooling.Normalize(result))
 				if marshalErr != nil {
 					payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
 				}
@@ -367,7 +372,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 				result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
 			}
 		}
-		payload, marshalErr := json.Marshal(result)
+		payload, marshalErr := json.Marshal(tooling.Normalize(result))
 		if marshalErr != nil {
 			payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
 		}

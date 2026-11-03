@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 type Handler interface {
@@ -249,9 +250,16 @@ func (r *Registry) Send(ctx context.Context, msg messaging.OutboundMessage) erro
 	destination := r.conversations[msg.ConversationID]
 	r.mu.RUnlock()
 	if destination.sender == nil {
-		return fmt.Errorf("no delivery binding for conversation %s", msg.ConversationID)
+		return operation.Wrap("message.send", operation.NotConfigured, operation.NotStarted, fmt.Errorf("no delivery binding for conversation %s", msg.ConversationID))
 	}
-	return destination.sender.SendTo(ctx, destination.target, msg)
+	if err := ctx.Err(); err != nil {
+		return operation.Wrap("message.send", operation.Canceled, operation.NotStarted, err)
+	}
+	err := destination.sender.SendTo(ctx, destination.target, msg)
+	if err == nil {
+		return nil
+	}
+	return operation.Wrap("message.send", operation.Unknown, operation.Describe(err).Effect, err)
 }
 
 func (r *Registry) Conversations() []string {

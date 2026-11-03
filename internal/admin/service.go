@@ -8,13 +8,14 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/operation"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/settings"
 )
 
-var ErrUnavailable = errors.New("management capability is unavailable")
+var ErrUnavailable = operation.New(operation.Unavailable, "management capability is unavailable")
 
 // Service is the management facade used by the HTTP server.
 type Service struct {
@@ -97,7 +98,7 @@ func (s *Service) History(ctx context.Context, limit int) ([]settings.RevisionMe
 }
 
 func (s *Service) Validate(runtime config.RuntimeConfig) error {
-	return s.runtime.ValidateConfiguration(runtime)
+	return operation.Wrap("config.validate", operation.Invalid, operation.NotStarted, s.runtime.ValidateConfiguration(runtime))
 }
 
 func (s *Service) Update(ctx context.Context, request UpdateRequest) (runtimecfg.ApplyResult, error) {

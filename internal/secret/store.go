@@ -11,11 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 var (
-	ErrNotFound          = errors.New("secret not found")
-	ErrCandidateNotFound = errors.New("secret candidate not found")
+	ErrNotFound          = operation.New(operation.NotFound, "secret not found")
+	ErrCandidateNotFound = operation.New(operation.NotFound, "secret candidate not found")
 )
 
 // Status exposes secret presence and version without revealing plaintext.

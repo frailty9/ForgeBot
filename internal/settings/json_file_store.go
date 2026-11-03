@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 const defaultHistoryLimit = 10
@@ -69,10 +70,10 @@ func (s *JSONFileStore) RuntimeAt(_ context.Context, version uint64) (config.Run
 func (s *JSONFileStore) Update(_ context.Context, request UpdateRequest) (config.Snapshot, error) {
 	request.Runtime = request.Runtime.Clone()
 	if err := request.Runtime.Validate(); err != nil {
-		return config.Snapshot{}, err
+		return config.Snapshot{}, operation.Wrap("config.update", operation.Invalid, operation.NotStarted, err)
 	}
 	if strings.TrimSpace(request.Source) == "" {
-		return config.Snapshot{}, errors.New("update source is required")
+		return config.Snapshot{}, operation.New(operation.Invalid, "update source is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,7 +82,7 @@ func (s *JSONFileStore) Update(_ context.Context, request UpdateRequest) (config
 
 func (s *JSONFileStore) Rollback(_ context.Context, targetVersion, expectedVersion uint64, source string) (config.Snapshot, error) {
 	if strings.TrimSpace(source) == "" {
-		return config.Snapshot{}, errors.New("rollback source is required")
+		return config.Snapshot{}, operation.New(operation.Invalid, "rollback source is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

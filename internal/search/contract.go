@@ -4,17 +4,17 @@ package search
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/capability"
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 var (
-	ErrDisabled         = errors.New("search is disabled")
-	ErrInvalidQuery     = errors.New("search query is invalid")
-	ErrReloadInProgress = errors.New("search reload is already in progress")
-	ErrNoIndex          = errors.New("search index is unavailable")
+	ErrDisabled         = operation.New(operation.Disabled, "search is disabled")
+	ErrInvalidQuery     = operation.New(operation.Invalid, "search query is invalid")
+	ErrReloadInProgress = operation.New(operation.Busy, "search reload is already in progress")
+	ErrNoIndex          = operation.New(operation.Unavailable, "search index is unavailable")
 )
 
 type State string

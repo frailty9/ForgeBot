@@ -4,15 +4,15 @@ package settings
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 var (
-	ErrVersionConflict = errors.New("runtime configuration version conflict")
-	ErrVersionNotFound = errors.New("runtime configuration version not found")
+	ErrVersionConflict = operation.New(operation.Conflict, "runtime configuration version conflict")
+	ErrVersionNotFound = operation.New(operation.NotFound, "runtime configuration version not found")
 )
 
 // UpdateRequest describes a complete runtime replacement with concurrency guard.

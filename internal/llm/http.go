@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 type apiError struct {
@@ -42,14 +44,14 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return operation.Wrap("llm.request", operation.Unavailable, operation.EffectUnknown, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return apiError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		return operation.Wrap("llm.request", operation.HTTPCode(resp.StatusCode), operation.EffectUnknown, apiError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))})
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return operation.Wrap("llm.decode", operation.Unavailable, operation.EffectUnknown, json.NewDecoder(resp.Body).Decode(out))
 }
 
 func streamJSON(ctx context.Context, client *http.Client, method, url string, headers map[string]string, payload any) (*http.Response, error) {
@@ -73,12 +75,12 @@ func streamJSON(ctx context.Context, client *http.Client, method, url string, he
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, operation.Wrap("llm.stream", operation.Unavailable, operation.EffectUnknown, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, apiError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		return nil, operation.Wrap("llm.stream", operation.HTTPCode(resp.StatusCode), operation.EffectUnknown, apiError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))})
 	}
 	return resp, nil
 }

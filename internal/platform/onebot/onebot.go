@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/messaging"
+	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 )
 
@@ -386,10 +387,10 @@ type Sender struct {
 // SendTo sends a text message to one configured external group target.
 func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.OutboundMessage) error {
 	if strings.TrimSpace(target) == "" || strings.TrimSpace(msg.Text) == "" {
-		return errors.New("onebot target and text are required")
+		return operation.New(operation.Invalid, "onebot target and text are required")
 	}
 	if len(msg.Media) > 0 {
-		return ErrUnsupported
+		return operation.Wrap("onebot.send", operation.Unsupported, operation.NotStarted, ErrUnsupported)
 	}
 	payload := map[string]any{"message": msg.Text}
 	payload["message_type"] = "group"
@@ -417,24 +418,24 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	resp, err := s.client.Do(req)
 	if err != nil {
 		s.logger.DebugContext(ctx, "onebot outbound request failed", "endpoint", endpoint, "err", err)
-		return err
+		return operation.Wrap("onebot.send", operation.Unavailable, operation.EffectUnknown, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		s.logger.DebugContext(ctx, "onebot outbound response failed", "endpoint", endpoint, "status", resp.StatusCode)
-		return fmt.Errorf("onebot API status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return operation.Wrap("onebot.send", operation.HTTPCode(resp.StatusCode), operation.EffectUnknown, fmt.Errorf("onebot API status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 	}
 	var result struct {
 		Retcode int    `json:"retcode"`
 		Status  string `json:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode onebot API response: %w", err)
+		return operation.Wrap("onebot.send", operation.Unavailable, operation.EffectUnknown, fmt.Errorf("decode onebot API response: %w", err))
 	}
 	if result.Retcode != 0 || result.Status == "failed" {
 		s.logger.DebugContext(ctx, "onebot outbound response rejected", "endpoint", endpoint, "retcode", result.Retcode, "status", result.Status)
-		return fmt.Errorf("onebot API failed: retcode=%d status=%s", result.Retcode, result.Status)
+		return operation.Wrap("onebot.send", operation.Unknown, operation.EffectUnknown, fmt.Errorf("onebot API failed: retcode=%d status=%s", result.Retcode, result.Status))
 	}
 	s.logger.DebugContext(ctx, "onebot outbound response accepted", "endpoint", endpoint, "status", result.Status)
 	return nil

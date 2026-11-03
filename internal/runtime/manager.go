@@ -25,6 +25,7 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/notification"
+	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/operations"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/proactive"
@@ -37,10 +38,10 @@ import (
 )
 
 var (
-	ErrStaticConfigChanged   = errors.New("static configuration requires a process restart")
-	ErrReflectionDisabled    = errors.New("reflection is disabled")
-	ErrReflectionUnavailable = errors.New("reflection scanner is unavailable")
-	ErrRuntimeBusy           = errors.New("runtime_busy: previous generation is still retiring")
+	ErrStaticConfigChanged   = operation.New(operation.Conflict, "static configuration requires a process restart")
+	ErrReflectionDisabled    = operation.New(operation.Disabled, "reflection is disabled")
+	ErrReflectionUnavailable = operation.New(operation.Unavailable, "reflection scanner is unavailable")
+	ErrRuntimeBusy           = operation.New(operation.Busy, "runtime_busy: previous generation is still retiring")
 )
 
 var generationSequence atomic.Uint64
@@ -691,13 +692,13 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.RuntimeConfig, persist Persist) (ApplyResult, error) {
 	runtimeConfig = runtimeConfig.Clone()
 	if err := m.builder.Modules.Validate(runtimeConfig.Modules); err != nil {
-		return ApplyResult{}, err
+		return ApplyResult{}, operation.Wrap("config.validate", operation.Invalid, operation.NotStarted, err)
 	}
 	if persist == nil {
 		return ApplyResult{}, errors.New("runtime persistence callback is required")
 	}
 	if err := runtimeConfig.Validate(); err != nil {
-		return ApplyResult{}, err
+		return ApplyResult{}, operation.Wrap("config.validate", operation.Invalid, operation.NotStarted, err)
 	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()

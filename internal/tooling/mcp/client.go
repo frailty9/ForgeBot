@@ -189,7 +189,7 @@ func (c *Client) Execute(ctx context.Context, call tooling.Call) tooling.Result 
 		Structured any  `json:"structuredContent,omitempty"`
 	}
 	if err := c.call(ctx, "tools/call", map[string]any{"name": toolName, "arguments": args}, &result); err != nil {
-		return tooling.Result{Code: "mcp_call_failed", Payload: err.Error()}
+		return tooling.Failed("mcp_call_failed", err)
 	}
 	if result.IsError {
 		return tooling.Result{Code: "mcp_tool_error", Payload: renderContent(result.Content)}
