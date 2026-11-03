@@ -27,8 +27,14 @@ func main() {
 	}
 	configPath := flag.String("config", "", "path to ForgeBot YAML startup configuration file")
 	runtimeConfigPath := flag.String("runtime-config", "", "path to ForgeBot JSON runtime configuration file")
-	initAPIKey := flag.Bool("init-api-key", false, "write FORGEBOT_LLM_API_KEY to the encrypted SecretStore and exit")
+	initAPIKey := flag.String("init-api-key", "", "credential reference to initialize from FORGEBOT_LLM_API_KEY, then exit (e.g. llm/default or decision/default)")
 	flag.Parse()
+	initialize := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "init-api-key" {
+			initialize = true
+		}
+	})
 
 	cfg, report, err := config.Load(config.LoadOptions{
 		Path:        *configPath,
@@ -39,12 +45,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		os.Exit(1)
 	}
-	if *initAPIKey {
-		if err := initializeAPIKey(cfg); err != nil {
+	if initialize {
+		ref, err := initialKeyRef(*initAPIKey)
+		if err == nil {
+			err = initializeAPIKey(cfg, ref)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "initialize API key: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("API key initialized for reference %q.\n", cfg.Runtime.LLM.APIKeyRef)
+		fmt.Printf("API key initialized for reference %q.\n", ref)
 		return
 	}
 
@@ -76,7 +86,20 @@ func main() {
 	}
 }
 
-func initializeAPIKey(cfg config.Snapshot) error {
+// 引用由 -init-api-key 的值明确指定，只选择写入目标，不读取或修改模型引用。
+func initialKeyRef(requested string) (string, error) {
+	ref := strings.TrimSpace(requested)
+	if ref == "" {
+		return "", fmt.Errorf("credential reference must not be blank")
+	}
+	return ref, nil
+}
+
+func initializeAPIKey(cfg config.Snapshot, requested string) error {
+	ref, err := initialKeyRef(requested)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(cfg.Static.SecretStorePath) == "" {
 		return fmt.Errorf("secret_store_path must be configured in YAML or FORGEBOT_SECRET_STORE")
 	}
@@ -100,14 +123,14 @@ func initializeAPIKey(cfg config.Snapshot) error {
 	if store == nil {
 		return fmt.Errorf("credential repository is not configured")
 	}
-	status, err := store.Status(context.Background(), cfg.Runtime.LLM.APIKeyRef)
+	status, err := store.Status(context.Background(), ref)
 	if err != nil {
 		return err
 	}
 	if status.Configured {
-		return fmt.Errorf("secret reference %q is already configured; use the authenticated management API to replace it", cfg.Runtime.LLM.APIKeyRef)
+		return fmt.Errorf("secret reference %q is already configured; initialization never overwrites existing credentials", ref)
 	}
-	candidate, err := store.Stage(context.Background(), cfg.Runtime.LLM.APIKeyRef, value)
+	candidate, err := store.Stage(context.Background(), ref, value)
 	if err != nil {
 		return err
 	}

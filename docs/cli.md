@@ -13,9 +13,19 @@ go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol anthropic_me
 ```powershell
 $env:FORGEBOT_SECRET_KEY = (Get-Content -Raw configs/master.local.key).Trim()
 $env:FORGEBOT_LLM_API_KEY = 'YOUR_PROVIDER_API_KEY'
-go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key
+go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key llm/default
 Remove-Item Env:FORGEBOT_LLM_API_KEY
 ```
+
+`-init-api-key` 后直接填写要初始化的凭据引用，例如决策模型或 MCP：
+
+```powershell
+$env:FORGEBOT_LLM_API_KEY = 'YOUR_DECISION_API_KEY'
+go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key decision/default
+Remove-Item Env:FORGEBOT_LLM_API_KEY
+```
+
+引用参数必填，可指定 `llm/default`、`decision/default`、`mcp/custom` 等任意合法引用；不再隐式采用 `llm.api_key_ref`。该参数只选择加密仓储写入目标，不修改 JSON 配置；对应功能的 `api_key_ref` 需指向相同引用。密钥值仍通过 `FORGEBOT_LLM_API_KEY` 传入，不放到命令参数中。已有引用拒绝覆盖。
 
 主密钥文件应单独备份，不提交 Git；迁移部署时应连同加密凭据一起保留。正式启动仍通过环境变量读取主密钥，不会自行读取任意 key 文件。
 

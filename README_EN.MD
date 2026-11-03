@@ -30,7 +30,7 @@ Use Go 1.25.5 or a newer version capable of building the project, plus an answer
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol openai_completions -base-url https://YOUR_API_ROOT
 $env:FORGEBOT_SECRET_KEY = (Get-Content -Raw configs/master.local.key).Trim()
 $env:FORGEBOT_LLM_API_KEY = 'YOUR_PROVIDER_API_KEY'
-go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key
+go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key llm/default
 Remove-Item Env:FORGEBOT_LLM_API_KEY
 go run ./cmd/forgebot doctor -config configs/forgebot.local.yaml
 go run ./cmd/forgebot -config configs/forgebot.local.yaml

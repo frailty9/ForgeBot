@@ -156,7 +156,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	}
 	fmt.Fprintf(out, "已初始化 %s\n请配置模型与凭据。加载本地主密钥后再启动（不要提交 master.local.key）：\n", root)
 	fmt.Fprintf(out, "PowerShell: $env:FORGEBOT_SECRET_KEY = (Get-Content -Raw '%s').Trim()\n", strings.ReplaceAll(filepath.Join(root, "master.local.key"), "'", "''"))
-	fmt.Fprintf(out, "随后设置 FORGEBOT_LLM_API_KEY，执行 -config '%s' -init-api-key；doctor 可在尚未配置模型时运行并列出缺项。\n", filepath.Join(root, "forgebot.local.yaml"))
+	fmt.Fprintf(out, "随后设置 FORGEBOT_LLM_API_KEY，执行 -config '%s' -init-api-key %s；doctor 可在尚未配置模型时运行并列出缺项。\n", filepath.Join(root, "forgebot.local.yaml"), cfg.LLM.APIKeyRef)
 	return nil
 }
 
@@ -261,7 +261,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 			add("credential_store", err, "只读验证加密仓储，不执行恢复或格式升级")
 			if err == nil && cfg.Runtime.LLM.Authentication != "none" {
 				apiKey, err = credentials.Get(context.Background(), cfg.Runtime.LLM.APIKeyRef)
-				add("answer_credential", err, "先执行 -init-api-key 配置回答凭据")
+				add("answer_credential", err, "先执行 -init-api-key <llm.api_key_ref> 配置回答凭据")
 			}
 		}
 	}
