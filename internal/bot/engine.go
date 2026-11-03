@@ -96,7 +96,7 @@ var errHookFailed = errors.New("hook_failed")
 
 func (e *Engine) beginRun(ctx context.Context, in messaging.InboundMessage, trigger string) context.Context {
 	ctx = decision.WithBudget(ctx, 2)
-	return context.WithValue(ctx, runKey{}, &execution{info: hooks.Info{RunID: fmt.Sprintf("run-%d", runSequence.Add(1)), Generation: e.deps.Generation, ConversationID: in.ConversationID, UserID: in.UserID, MessageID: in.MessageID, Trigger: trigger}})
+	return context.WithValue(ctx, runKey{}, &execution{info: hooks.Info{ProactiveRevision: in.ProactiveRevision, RunID: fmt.Sprintf("run-%d", runSequence.Add(1)), Generation: e.deps.Generation, ConversationID: in.ConversationID, UserID: in.UserID, MessageID: in.MessageID, Trigger: trigger}})
 }
 func runFrom(ctx context.Context) *execution {
 	run, _ := ctx.Value(runKey{}).(*execution)

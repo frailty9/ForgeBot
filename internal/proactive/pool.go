@@ -13,6 +13,7 @@ import (
 
 // Input is the proactive buffer projection of an inbound message.
 type Input struct {
+	Revision         uint64
 	ConversationID   string
 	MsgID            string
 	ReplyToMessageID string
@@ -30,6 +31,7 @@ func (i Input) SessionKey() string { return i.ConversationID }
 
 // Message is the bounded record retained while awaiting a trusted answer.
 type Message struct {
+	Revision         uint64
 	MsgID            string
 	ReplyToMessageID string
 	UserID           string
@@ -121,6 +123,7 @@ type bucket struct {
 	key            string
 	conversationID string
 	msgs           []Message
+	inflight       []Message
 	openedAt       time.Time
 	lastAt         time.Time
 	lastTouch      time.Time
@@ -206,7 +209,9 @@ func (p *Pool) Absorb(in Input) Verdict {
 	pol := p.policy(in.ConversationID)
 	if in.Administrator {
 		if strings.TrimSpace(in.ReplyToMessageID) != "" && p.dismissAdministratorReply(in, now) {
-			return VerdictIgnored
+			if !in.Addressed {
+				return VerdictIgnored
+			}
 		}
 		if in.Addressed {
 			return VerdictPass
@@ -228,7 +233,7 @@ func (p *Pool) Absorb(in Input) Verdict {
 	if len(b.msgs) == 0 {
 		b.openedAt = now
 	}
-	b.msgs = append(b.msgs, Message{MsgID: in.MsgID, ReplyToMessageID: in.ReplyToMessageID, UserID: in.UserID, UserName: in.UserName, Text: in.Text, PromptSuffix: in.PromptSuffix, At: messageTime})
+	b.msgs = append(b.msgs, Message{Revision: in.Revision, MsgID: in.MsgID, ReplyToMessageID: in.ReplyToMessageID, UserID: in.UserID, UserName: in.UserName, Text: in.Text, PromptSuffix: in.PromptSuffix, At: messageTime})
 	if pol.MaxBuffered > 0 && len(b.msgs) > pol.MaxBuffered {
 		b.msgs = b.msgs[len(b.msgs)-pol.MaxBuffered:]
 	}
@@ -345,6 +350,7 @@ func (b *bucket) detachLocked(reason FlushReason) *Batch {
 	b.msgs = nil
 	b.generation++
 	b.flushing = true
+	b.inflight = msgs
 	return &Batch{SessionKey: b.key, ConversationID: b.conversationID, Msgs: msgs, Reason: reason, OpenedAt: b.openedAt}
 }
 
@@ -360,6 +366,7 @@ func (p *Pool) dispatch(b *bucket, batch Batch) {
 			}
 			b.mu.Lock()
 			b.flushing = false
+			b.inflight = nil
 			if len(b.msgs) > 0 && !p.closed.Load() {
 				p.armLocked(b, p.policy(b.conversationID), p.clock.Now())
 			}
@@ -390,6 +397,63 @@ func (p *Pool) Refresh() {
 		}
 		b.mu.Unlock()
 	}
+}
+
+// PendingTranscript 只提供有界的待答快照给可信管理员接答判断，不获取新锁后等待模型。
+func (p *Pool) PendingTranscript(group string) string {
+	p.mu.Lock()
+	b := p.buckets[group]
+	p.mu.Unlock()
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	items := append(append([]Message(nil), b.inflight...), b.msgs...)
+	text := (Batch{Msgs: items}).Transcript(500)
+	runes := []rune(text)
+	if len(runes) > 1500 {
+		text = string(runes[:1500])
+	}
+	return text
+}
+
+func (p *Pool) HasPending(group, id string) bool {
+	p.mu.Lock()
+	b := p.buckets[group]
+	p.mu.Unlock()
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, message := range b.msgs {
+		if message.MsgID == id {
+			return true
+		}
+	}
+	for _, message := range b.inflight {
+		if message.MsgID == id {
+			return true
+		}
+	}
+	return false
+}
+func (p *Pool) DropConversation(group string) {
+	p.mu.Lock()
+	b := p.buckets[group]
+	p.mu.Unlock()
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	p.dropped.Add(int64(len(b.msgs)))
+	b.msgs = nil
+	b.generation++
 }
 
 func (p *Pool) DropPending() {

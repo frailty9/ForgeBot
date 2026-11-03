@@ -451,6 +451,7 @@ type rawEvent struct {
 	SelfID      json.RawMessage `json:"self_id"`
 	Sender      struct {
 		Nickname string `json:"nickname"`
+		Role     string `json:"role"`
 	} `json:"sender"`
 	RawMessage string          `json:"raw_message"`
 	Message    json.RawMessage `json:"message"`
@@ -479,11 +480,21 @@ func (e rawEvent) message(groups map[string]Group) (messaging.InboundMessage, er
 	media := extractMedia(e.Message, e.RawMessage)
 	return messaging.InboundMessage{
 		PromptSuffix:   group.PromptSuffix,
+		PlatformRole:   normalizeRole(e.Sender.Role),
 		ConversationID: group.ConversationID, UserID: scalar(e.UserID), UserName: e.Sender.Nickname,
 		MessageID: scalar(e.MessageID), ReplyToMessageID: replyToMessageID(e.Message, e.RawMessage),
 		Text: text, Media: media, Mentioned: mentions(e.Message, e.RawMessage, scalar(e.SelfID)),
 		Command: strings.HasPrefix(text, "/"), At: time.Unix(e.Time, 0),
 	}, nil
+}
+
+func normalizeRole(role string) string {
+	switch role {
+	case "owner", "admin", "member":
+		return role
+	default:
+		return ""
+	}
 }
 
 func extractMedia(raw json.RawMessage, rawMessage string) []messaging.Media {

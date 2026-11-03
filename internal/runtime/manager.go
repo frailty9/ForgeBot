@@ -95,6 +95,7 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	Yield              *proactive.YieldState
 	Decisions          decision.Decider
 	Memory             *conversation.Memory
 	Modules            *modules.Registry
@@ -271,6 +272,9 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 
 func (b Builder) initialCapabilities(snapshot config.Snapshot, client llm.Client) capability.Values {
 	values := capability.NewValues()
+	if b.Yield != nil {
+		_ = values.Provide(proactive.YieldKey.ID(), b.Yield)
+	}
 	if b.Decisions != nil {
 		_ = values.Provide(decision.ServiceKey.ID(), b.Decisions)
 	}
@@ -390,6 +394,10 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	if builder.Memory == nil {
 		builder.Memory = conversation.NewMemory(snapshot.Runtime.ConversationMemory)
 	}
+	if builder.Yield == nil {
+		builder.Yield = proactive.NewYieldState()
+	}
+	builder.Yield.Configure(boundConversationIDs(snapshot.Runtime))
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
 	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
 	if err != nil {
@@ -996,6 +1004,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		next.modules.Mark("active")
 	}
 	m.builder.Memory.Configure(next.snapshot.Runtime.ConversationMemory)
+	m.builder.Yield.Configure(boundConversationIDs(next.snapshot.Runtime))
 	old := m.current.Swap(next)
 	m.storeSnapshot(next.snapshot)
 	if m.started {

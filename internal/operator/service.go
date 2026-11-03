@@ -125,6 +125,19 @@ func (s *Service) status() string {
 }
 
 func (s *Service) proactive(request operations.Request) (operations.Result, error) {
+	if len(request.Arguments) == 1 {
+		action := strings.ToLower(strings.TrimSpace(request.Arguments[0]))
+		if action == "yield" || action == "resume" {
+			control, ok := s.runtime.(interface{ SetProactiveYield(string, bool) error })
+			if !ok {
+				return operations.Result{}, ErrCapabilityUnavailable
+			}
+			if err := control.SetProactiveYield(request.ConversationID, action == "yield"); err != nil {
+				return operations.Result{}, err
+			}
+			return operations.Result{Reply: "本群主动插话让位状态已调整；明确 @ 仍可正常处理。"}, nil
+		}
+	}
 	snapshot, _ := s.runtime.Snapshot()
 	currentEnabled := false
 	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {

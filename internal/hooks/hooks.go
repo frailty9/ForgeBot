@@ -43,12 +43,13 @@ var ErrPanic = errors.New("hook panicked")
 
 // Info contains value-only attribution, not mutable host state or credentials.
 type Info struct {
-	RunID          string
-	Generation     uint64
-	ConversationID string
-	UserID         string
-	MessageID      string
-	Trigger        string
+	RunID             string
+	Generation        uint64
+	ConversationID    string
+	UserID            string
+	MessageID         string
+	Trigger           string
+	ProactiveRevision uint64
 }
 
 type Input struct {
