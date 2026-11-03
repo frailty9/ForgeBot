@@ -13,6 +13,7 @@ import (
 	"github.com/soleapi/forgebot/internal/app"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/logging"
+	"github.com/soleapi/forgebot/internal/persistence"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -84,9 +85,13 @@ func initializeAPIKey(cfg config.Snapshot) error {
 	if err != nil {
 		return err
 	}
-	store, err := secret.NewFileStore(cfg.Static.SecretStorePath, key)
+	backend, err := persistence.Open(cfg.Static, key)
 	if err != nil {
 		return err
+	}
+	store := backend.Credentials()
+	if store == nil {
+		return fmt.Errorf("credential repository is not configured")
 	}
 	status, err := store.Status(context.Background(), cfg.Runtime.LLM.APIKeyRef)
 	if err != nil {
