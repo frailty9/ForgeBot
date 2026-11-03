@@ -80,6 +80,8 @@ func (c StorageConfig) Kind() string {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
+	Decision           DecisionConfig            `json:"decision"`
+	AnswerPolicy       AnswerPolicy              `json:"answer_policy"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
 	Agent              agent.Limits              `json:"agent"`
 	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
@@ -552,6 +554,12 @@ func (c StaticConfig) Validate() error {
 
 func (c RuntimeConfig) Validate() error {
 	var problems []string
+	if err := c.Decision.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if err := c.AnswerPolicy.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if err := c.ConversationMemory.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -864,6 +872,8 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"runtime_config_path": c.Static.RuntimeConfigPath,
 		},
 		"runtime": map[string]any{
+			"decision":            c.Runtime.Decision.Public(),
+			"answer_policy":       c.Runtime.AnswerPolicy,
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
 			"agent":               c.Runtime.Agent.Defaults(),
 			"log":                 c.Runtime.Log, "bot": c.Runtime.Bot,

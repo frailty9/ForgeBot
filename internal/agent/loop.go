@@ -16,6 +16,8 @@ import (
 type ExecuteTool func(context.Context, tooling.Call) (tooling.Result, error)
 
 type Loop struct {
+	// Preparation 是宿主策略明确选择的依据调用，同样受全部工具预算与 Hook 约束。
+	Preparation []llm.ToolCall
 	Client      llm.Client
 	Limits      Limits
 	ToolBudgets map[string]int
@@ -47,7 +49,11 @@ func (l Loop) Run(ctx context.Context, request llm.Request) (llm.Response, error
 	fail := func(code operation.Code, message string) (llm.Response, error) {
 		return llm.Response{}, operation.Wrap("agent.run", code, effect, operation.New(code, message))
 	}
-	for turn := 0; turn < limits.MaxTurns; turn++ {
+	// -1 仅承载可选宿主预调用，不计为回答模型轮次。
+	for turn := -1; turn < limits.MaxTurns; turn++ {
+		if turn == -1 && len(l.Preparation) == 0 {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return llm.Response{}, operation.Wrap("agent.run", operation.Canceled, effect, err)
 		}
@@ -64,7 +70,13 @@ func (l Loop) Run(ctx context.Context, request llm.Request) (llm.Response, error
 				}
 			}
 		}
-		response, err := l.Client.Complete(ctx, request)
+		var response llm.Response
+		var err error
+		if turn == -1 {
+			response.Message = llm.Message{Role: llm.RoleAssistant, ToolCalls: l.Preparation}
+		} else {
+			response, err = l.Client.Complete(ctx, request)
+		}
 		if err != nil {
 			return llm.Response{}, operation.Wrap("agent.model", operation.Unknown, effect, err)
 		}

@@ -180,3 +180,32 @@ func (s *Service) DeleteAPIKey(ctx context.Context) error {
 	snapshot, _ := s.runtime.Snapshot()
 	return s.secrets.Delete(ctx, snapshot.Runtime.LLM.APIKeyRef)
 }
+
+func (s *Service) decisionKeyRef() (string, error) {
+	snapshot, _ := s.runtime.Snapshot()
+	if s.secrets == nil || snapshot.Runtime.Decision.DM == nil {
+		return "", operation.New(operation.NotConfigured, "decision model credential is not configured")
+	}
+	return snapshot.Runtime.Decision.DM.APIKeyRef, nil
+}
+func (s *Service) DecisionAPIKeyStatus(ctx context.Context) (secret.Status, error) {
+	ref, err := s.decisionKeyRef()
+	if err != nil {
+		return secret.Status{}, err
+	}
+	return s.secrets.Status(ctx, ref)
+}
+func (s *Service) ReplaceDecisionAPIKey(ctx context.Context, value string) (secret.Status, error) {
+	ref, err := s.decisionKeyRef()
+	if err != nil {
+		return secret.Status{}, err
+	}
+	return s.secrets.Replace(ctx, ref, value)
+}
+func (s *Service) DeleteDecisionAPIKey(ctx context.Context) error {
+	ref, err := s.decisionKeyRef()
+	if err != nil {
+		return err
+	}
+	return s.secrets.Delete(ctx, ref)
+}

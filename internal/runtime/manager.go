@@ -21,6 +21,7 @@ import (
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/conversation"
+	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -94,6 +95,7 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	Decisions          decision.Decider
 	Memory             *conversation.Memory
 	Modules            *modules.Registry
 	Sender             platform.Sender
@@ -116,6 +118,10 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 		return nil, err
 	}
 	client, err := b.buildClient(ctx, snapshot, "", "")
+	if err != nil {
+		return nil, err
+	}
+	b, err = b.withDecision(ctx, snapshot, client, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +205,29 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.Loop = snapshot.Runtime.Agent.Defaults()
+	policy.Scope = snapshot.Runtime.AnswerPolicy.Scope
+	policy.AllowDaily = snapshot.Runtime.AnswerPolicy.DailyAllowed()
+	policy.RefusalText = snapshot.Runtime.AnswerPolicy.RefusalText
+	policy.ClarificationText = snapshot.Runtime.AnswerPolicy.ClarificationText
+	if binding := snapshot.Runtime.AnswerPolicy.Evidence; binding != nil {
+		found := false
+		if executor != nil {
+			for _, definition := range executor.Definitions() {
+				if definition.Name == binding.Tool {
+					found = true
+				}
+			}
+		}
+		if !found {
+			return nil, operation.New(operation.NotConfigured, "answer_policy.evidence references an unavailable tool")
+		}
+		policy.EvidenceTool = binding.Tool
+		policy.EvidenceQueryArgument = binding.QueryArgument
+		policy.EvidenceArguments = binding.Arguments
+	}
 	policy.ImageUnderstanding = snapshot.Runtime.LLM.ImageUnderstanding
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Memory: b.Memory, Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Decisions: b.Decisions, Memory: b.Memory, Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {
@@ -245,6 +271,9 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 
 func (b Builder) initialCapabilities(snapshot config.Snapshot, client llm.Client) capability.Values {
 	values := capability.NewValues()
+	if b.Decisions != nil {
+		_ = values.Provide(decision.ServiceKey.ID(), b.Decisions)
+	}
 	if completer := agent.NewCompleter(client, snapshot.Runtime.LLM.Model); completer != nil {
 		_ = values.Provide(agent.CompleterKey.ID(), completer)
 	}
@@ -268,7 +297,7 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 	if current == nil {
 		return errors.New("runtime is stopped")
 	}
-	if ref != current.snapshot.Runtime.LLM.APIKeyRef {
+	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (current.snapshot.Runtime.Decision.DM == nil || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
 		return activate()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
@@ -300,7 +329,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 	if current == nil {
 		return errors.New("runtime is stopped")
 	}
-	if ref != current.snapshot.Runtime.LLM.APIKeyRef {
+	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (current.snapshot.Runtime.Decision.DM == nil || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
 		return remove()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
@@ -389,7 +418,11 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	initial := m.builder.initialCapabilities(snapshot, client)
+	generationBuilder, err := m.builder.withDecision(ctx, snapshot, client, secretRef, secretValue)
+	if err != nil {
+		return nil, err
+	}
+	initial := generationBuilder.initialCapabilities(snapshot, client)
 	moduleSet, err := m.builder.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
@@ -407,7 +440,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if connectors != nil {
 		sender = connectors
 	}
-	engine, err := m.builder.build(ctx, snapshot, sender, client, moduleSet)
+	engine, err := generationBuilder.build(ctx, snapshot, sender, client, moduleSet)
 	if err != nil {
 		return nil, err
 	}

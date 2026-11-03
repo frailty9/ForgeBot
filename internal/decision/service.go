@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/operation"
 )
 
@@ -101,6 +102,14 @@ func (s *Service) Decide(ctx context.Context, request Request) (Result, error) {
 	if len(request.State) == 0 || len(request.State) > 16384 || !json.Valid(request.State) {
 		return Result{}, operation.New(operation.Invalid, "decision state must contain at most 16384 bytes of JSON")
 	}
+	if len(request.Media) > 4 {
+		return Result{}, operation.New(operation.Invalid, "decision media count exceeds limit")
+	}
+	for _, media := range request.Media {
+		if media.Type != "image" || len(media.Data) > 2<<20 || len(media.MediaURL) > 2048 || (media.Data == "" && media.MediaURL == "") {
+			return Result{}, operation.New(operation.Invalid, "invalid decision image")
+		}
+	}
 	if request.State[0] != '{' && request.State[0] != '[' && request.State[0] != '"' {
 		return Result{}, operation.New(operation.Invalid, "decision state must be object, array or string")
 	}
@@ -143,7 +152,7 @@ func (s *Service) Decide(ctx context.Context, request Request) (Result, error) {
 			break
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, candidate.timeout)
-		answer, err := candidate.provider.Decide(attemptCtx, ProviderRequest{Task: task, State: append(json.RawMessage(nil), request.State...)})
+		answer, err := candidate.provider.Decide(attemptCtx, ProviderRequest{Task: task, State: append(json.RawMessage(nil), request.State...), Media: append([]llm.ContentPart(nil), request.Media...)})
 		if err == nil && attemptCtx.Err() != nil {
 			err = attemptCtx.Err()
 		}

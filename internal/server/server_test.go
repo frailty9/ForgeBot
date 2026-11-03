@@ -122,6 +122,40 @@ func TestAdminReflectionScanRequiresAuthenticationAndReportsDisabled(t *testing.
 	}
 }
 
+func TestDecisionAPIKeyUsesWriteOnlyManagementAndEncryptedStore(t *testing.T) {
+	fixture := newAdminFixture(t)
+	runtimeConfig := config.DefaultRuntime()
+	runtimeConfig.Decision.DM = &config.DecisionModelConfig{Provider: "jev", APIKeyRef: "decision/private"}
+	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: 1, Runtime: runtimeConfig, Source: "dm-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := fixture.requestBytes(t, http.MethodPut, "/v1/admin/config", body); response.Code != http.StatusOK {
+		t.Fatalf("configure DM: %d %s", response.Code, response.Body)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/decision/api-key", nil)
+	response := httptest.NewRecorder()
+	fixture.server.server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatal("DM key endpoint accepted anonymous request")
+	}
+	response = fixture.request(t, http.MethodPut, "/v1/admin/decision/api-key", `{"api_key":"dm-private-value"}`)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "dm-private-value") {
+		t.Fatalf("write DM credential: %d %s", response.Code, response.Body)
+	}
+	response = fixture.request(t, http.MethodGet, "/v1/admin/decision/api-key", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"configured":true`) || strings.Contains(response.Body.String(), "dm-private-value") {
+		t.Fatal("unsafe DM status", response.Body)
+	}
+	data, err := os.ReadFile(fixture.secretPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "dm-private-value") {
+		t.Fatal("DM key persisted in plaintext")
+	}
+}
+
 type adminFixture struct {
 	server     *Server
 	secretPath string

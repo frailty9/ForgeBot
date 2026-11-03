@@ -63,6 +63,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.Handle("GET /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyStatus)))
 	mux.Handle("PUT /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyReplace)))
 	mux.Handle("DELETE /v1/admin/llm/api-key", s.authorize(http.HandlerFunc(s.adminAPIKeyDelete)))
+	mux.Handle("GET /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyStatus)))
+	mux.Handle("PUT /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyReplace)))
+	mux.Handle("DELETE /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyDelete)))
 	s.server = &http.Server{
 		Addr:         cfg.Static.Server.Addr,
 		Handler:      requestLog(logger, mux),
@@ -235,6 +238,37 @@ func (s *Server) adminAPIKeyReplace(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminAPIKeyDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.admin.DeleteAPIKey(r.Context()); err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) adminDecisionAPIKeyStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.admin.DecisionAPIKeyStatus(r.Context())
+	if err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+func (s *Server) adminDecisionAPIKeyReplace(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := decodeAdminJSON(w, r, &request); err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	status, err := s.admin.ReplaceDecisionAPIKey(r.Context(), request.APIKey)
+	if err != nil {
+		s.writeAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+func (s *Server) adminDecisionAPIKeyDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.admin.DeleteDecisionAPIKey(r.Context()); err != nil {
 		s.writeAdminError(w, err)
 		return
 	}

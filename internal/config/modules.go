@@ -62,6 +62,26 @@ func ValidateModules(entries map[string]ModuleConfig) error {
 // Clone returns an independently owned runtime configuration, including secrets
 // already held by the runtime. It is not a redaction or serialization operation.
 func (c RuntimeConfig) Clone() RuntimeConfig {
+	if c.AnswerPolicy.Evidence != nil {
+		copy := *c.AnswerPolicy.Evidence
+		c.AnswerPolicy.Evidence = &copy
+		if data, err := json.Marshal(copy.Arguments); err == nil {
+			c.AnswerPolicy.Evidence.Arguments = nil
+			_ = json.Unmarshal(data, &c.AnswerPolicy.Evidence.Arguments)
+		}
+	}
+	if c.AnswerPolicy.AllowDaily != nil {
+		copy := *c.AnswerPolicy.AllowDaily
+		c.AnswerPolicy.AllowDaily = &copy
+	}
+	if c.Decision.DM != nil {
+		copy := *c.Decision.DM
+		c.Decision.DM = &copy
+		if copy.MinConfidence != nil {
+			threshold := *copy.MinConfidence
+			c.Decision.DM.MinConfidence = &threshold
+		}
+	}
 	c.Modules = maps.Clone(c.Modules)
 	for id, entry := range c.Modules {
 		if entry.Enabled != nil {

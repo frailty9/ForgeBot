@@ -26,6 +26,9 @@ type JevProvider struct {
 }
 
 func (p JevProvider) Decide(ctx context.Context, request ProviderRequest) (Answer, error) {
+	if len(request.Media) > 0 {
+		return nil, operation.New(operation.Unsupported, "Jev image assets are not enabled in this adapter; use vision LLM fallback")
+	}
 	if strings.TrimSpace(p.APIKey) == "" {
 		return nil, operation.New(operation.NotConfigured, "decision DM credential is not configured")
 	}

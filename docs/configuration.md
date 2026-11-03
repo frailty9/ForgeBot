@@ -162,6 +162,34 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 ### 5.4 `admission`
 
+### 业务范围与决策（`answer_policy` / `decision`）
+
+`answer_policy.scope` 缺省为空，表示通用问答；部署者填写业务说明后，全部问答都先判断范围，明确 @ 也不能绕过。`allow_daily` 缺省 true，只允许寒暄、自我介绍等日常互动，不代表短小或容易的域外专业问题可回答。`refusal_text`、`clarification_text` 可覆盖拒答与不确定时的说明。判断失败不会退到无限制回答，未 @ 主动判断不确定时保持沉默。
+
+`decision` 缺省不配置专用 DM，语义判断独立使用回答 LLM；`dm_timeout=3s`、`llm_timeout=8s`、`max_concurrent=16` 可调整。专用 Jev 示例：
+
+```json
+{
+  "decision": {
+    "dm": {
+      "provider": "jev",
+      "endpoint": "https://api.typesafe.ai",
+      "model": "jev-latest",
+      "api_key_ref": "decision/default",
+      "min_confidence": 0.6
+    }
+  },
+  "answer_policy": {
+    "scope": "本项目的接口、部署与故障排查",
+    "allow_daily": true
+  }
+}
+```
+
+DM Key 与回答 Key 一样存入加密凭据仓储。配置 DM 后可以通过受认证的 `GET/PUT/DELETE /v1/admin/decision/api-key` 查看状态、写入或删除，PUT 格式为 `{"api_key":"..."}`；GET 不返回明文。缺少 DM Key、DM 超时或结构无效会受预算限制地回退 LLM；合法 unknown 或低置信不继续换模型争取肯定结果。图片判断先保留明确能力检查，当前 Jev 适配不启用图片资产，含图决策回退支持图片的回答 LLM。
+
+可选预检索通过 `answer_policy.evidence` 显式绑定工具，例如 `{"tool":"search_docs","query_argument":"query","arguments":{"limit":3}}`。只在允许范围内、决策要求依据时执行；工具不存在会拒绝候选配置，避免静默失效。它使用同一工具白名单、预算、Hook 与进度效果，结果计入 Agent Loop 上下文；不绑定则由提示词和模型按需选择工具。混合范围问题不预检索完整原问题，由回答模型在范围约束下选择工具。
+
 顶层 `conversation_memory` 配置进程内短期问答：缺省启用（`disabled=false`），`ttl=20m`、`max_pairs=6`、`max_sessions=1000`、每会话等待队列 `max_pending=8`、`max_session_bytes=65536`、`max_total_bytes=8388608`。配置可以热更新；关闭会清空已有上下文，重新打开不恢复旧内容。
 
 上下文按逻辑群＋用户隔离，同会话按到达会话服务的顺序执行，排队计入 `agent.timeout`；超出等待或会话容量返回 busy。只保存已确认发送成功的必要问答（含回复格式 Hook 后实际发送的文字）；发送失败、结果未知、被抑制、工具中间数据与主动介入混合群消息均不保存。超出单会话容量的问答整对不保留，不静默截成错误依据。

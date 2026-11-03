@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/capability"
+	"github.com/soleapi/forgebot/internal/llm"
 )
 
 var ServiceKey = capability.NewKey[Decider]("decision.service.v1")
@@ -26,13 +27,15 @@ type Task struct {
 	Questions map[string]Choice `json:"questions"`
 }
 type Request struct {
-	TaskID  string          `json:"task_id"`
-	Version int             `json:"version"`
-	State   json.RawMessage `json:"state"`
+	TaskID  string            `json:"task_id"`
+	Version int               `json:"version"`
+	State   json.RawMessage   `json:"state"`
+	Media   []llm.ContentPart `json:"media,omitempty"`
 }
 type ProviderRequest struct {
 	Task  Task
 	State json.RawMessage
+	Media []llm.ContentPart
 }
 type Answer map[string]string
 
@@ -41,7 +44,7 @@ func (t Task) Validate() error {
 		return fmt.Errorf("invalid decision task")
 	}
 	for name, q := range t.Questions {
-		if strings.TrimSpace(name) == "" || len(name) > 64 || len(q.Instructions) == 0 || len(q.Instructions) > 4096 || len(q.Options) < 2 || len(q.Options) > 32 {
+		if strings.TrimSpace(name) == "" || len(name) > 64 || len(q.Instructions) == 0 || len(q.Instructions) > 8192 || len(q.Options) < 2 || len(q.Options) > 32 {
 			return fmt.Errorf("invalid decision question %q", name)
 		}
 		if _, ok := q.Options[Unknown]; !ok {

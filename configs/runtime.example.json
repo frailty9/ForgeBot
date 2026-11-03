@@ -1,4 +1,13 @@
 {
+  "decision": {
+    "dm_timeout": "3s",
+    "llm_timeout": "8s",
+    "max_concurrent": 16
+  },
+  "answer_policy": {
+    "scope": "",
+    "allow_daily": true
+  },
   "conversation_memory": {
     "disabled": false,
     "ttl": "20m",

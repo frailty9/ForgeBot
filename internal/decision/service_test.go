@@ -121,7 +121,7 @@ func (decisionModel) Stream(context.Context, llm.Request) (<-chan llm.StreamEven
 }
 
 func TestLLMAdapterIsIsolatedAndStrict(t *testing.T) {
-	for _, output := range []string{`{"action":"allow"}`, `{"action":"wrong"}`, `{"action":"allow","extra":true}`, "```json\n{\"action\":\"allow\"}\n```", `{"action":"allow"} {"action":"deny"}`} {
+	for _, output := range []string{`{"action":"allow"}`, `{"action":"wrong"}`, `{"action":"allow","extra":true}`, "```json\n{\"action\":\"allow\"}\n```", `{"action":"allow"} {"action":"deny"}`, `{"action":"deny","action":"allow"}`} {
 		p := LLMProvider{Model: "answer-model", Client: decisionModel(func(r llm.Request) (llm.Response, error) {
 			if len(r.Tools) != 0 || len(r.Messages) != 1 || r.MaxTokens != 512 {
 				t.Fatal("decision inherited chat context or tools", r)
