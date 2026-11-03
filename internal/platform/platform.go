@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/operation"
 )
@@ -113,6 +114,19 @@ func NewSet(adapters []Adapter, bindings []ConversationBinding) (*Set, error) {
 
 func (s *Set) Send(ctx context.Context, message messaging.OutboundMessage) error {
 	return s.registry.Send(ctx, message)
+}
+
+func (s *Set) Support(ctx context.Context, id string) (group.Support, error) {
+	return s.registry.Support(ctx, id)
+}
+func (s *Set) Review(ctx context.Context, id string, request group.ReviewRequest) error {
+	return s.registry.Review(ctx, id, request)
+}
+func (s *Set) Announce(ctx context.Context, id, text string) error {
+	return s.registry.Announce(ctx, id, text)
+}
+func (s *Set) Recall(ctx context.Context, id, message string) error {
+	return s.registry.Recall(ctx, id, message)
 }
 
 func (s *Set) Start(ctx context.Context, handler Handler) error {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/conversation"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
@@ -56,6 +57,7 @@ type Snapshot struct {
 
 // StaticConfig contains process-level settings that require restart to change.
 type StaticConfig struct {
+	GroupStorePath    string        `json:"group_store_path" yaml:"group_store_path"`
 	Storage           StorageConfig `json:"storage" yaml:"storage"`
 	Server            ServerConfig  `json:"server" yaml:"server"`
 	RuntimeConfigPath string        `json:"runtime_config_path" yaml:"runtime_config_path"`
@@ -80,6 +82,7 @@ func (c StorageConfig) Kind() string {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
+	GroupManagement    map[string]group.Policy   `json:"group_management,omitempty"`
 	Decision           DecisionConfig            `json:"decision"`
 	AnswerPolicy       AnswerPolicy              `json:"answer_policy"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
@@ -307,6 +310,9 @@ func Load(opts LoadOptions) (Snapshot, LoadReport, error) {
 		runtimePath = filepath.Join(filepath.Dir(staticPath), runtimePath)
 	}
 	static.RuntimeConfigPath = runtimePath
+	if static.GroupStorePath != "" && !filepath.IsAbs(static.GroupStorePath) && staticPath != "" {
+		static.GroupStorePath = filepath.Join(filepath.Dir(staticPath), static.GroupStorePath)
+	}
 	secretPathOverridden := strings.TrimSpace(lookupEnv(envSecretStorePath)) != ""
 	if static.SecretStorePath != "" && !secretPathOverridden && !filepath.IsAbs(static.SecretStorePath) && staticPath != "" {
 		static.SecretStorePath = filepath.Join(filepath.Dir(staticPath), static.SecretStorePath)
@@ -439,6 +445,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		ShutdownTimeout string `yaml:"shutdown_timeout"`
 	}
 	type rawStaticConfig struct {
+		GroupStorePath    string           `yaml:"group_store_path"`
 		Storage           *StorageConfig   `yaml:"storage"`
 		Server            *rawServerConfig `yaml:"server"`
 		RuntimeConfigPath string           `yaml:"runtime_config_path"`
@@ -487,6 +494,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		}
 	}
 	out.RuntimeConfigPath = raw.RuntimeConfigPath
+	out.GroupStorePath = raw.GroupStorePath
 	out.SecretStorePath = raw.SecretStorePath
 	out.AdminToken = raw.AdminToken
 	*target = out
@@ -554,6 +562,18 @@ func (c StaticConfig) Validate() error {
 
 func (c RuntimeConfig) Validate() error {
 	var problems []string
+	bound := map[string]bool{}
+	for _, binding := range c.Platforms.Groups {
+		bound[binding.ID] = true
+	}
+	for id, policy := range c.GroupManagement {
+		if !bound[id] {
+			problems = append(problems, "group_management must reference a bound conversation")
+		}
+		if len(policy.ReviewRule) > 4096 || (policy.AutoReview && (!policy.ReviewEnabled || strings.TrimSpace(policy.ReviewRule) == "")) {
+			problems = append(problems, "automatic group review requires enabled review and a bounded nonblank rule")
+		}
+	}
 	if err := c.Decision.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -872,6 +892,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"runtime_config_path": c.Static.RuntimeConfigPath,
 		},
 		"runtime": map[string]any{
+			"group_management":    c.Runtime.GroupManagement,
 			"decision":            c.Runtime.Decision.Public(),
 			"answer_policy":       c.Runtime.AnswerPolicy,
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),

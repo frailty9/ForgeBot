@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/operation"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
@@ -208,4 +209,17 @@ func (s *Service) DeleteDecisionAPIKey(ctx context.Context) error {
 		return err
 	}
 	return s.secrets.Delete(ctx, ref)
+}
+
+func (s *Service) GroupOperations(ctx context.Context, limit int) ([]group.Record, error) {
+	return s.runtime.ListGroupOperations(ctx, limit)
+}
+func (s *Service) GroupSupport(ctx context.Context, id string) (group.Support, error) {
+	return s.runtime.Support(ctx, id)
+}
+func (s *Service) ReviewGroupRequest(ctx context.Context, id string, revision uint64, approve bool, reason string) (group.Record, error) {
+	return s.runtime.ReviewJoinRequest(ctx, id, revision, approve, reason)
+}
+func (s *Service) PerformGroupAction(ctx context.Context, kind string, request group.ActionRequest) (group.Record, error) {
+	return s.runtime.PerformGroupAction(ctx, kind, request)
 }

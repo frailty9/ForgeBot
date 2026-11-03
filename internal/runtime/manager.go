@@ -22,6 +22,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/decision"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -95,6 +96,7 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	GroupStore         group.Store
 	Yield              *proactive.YieldState
 	Decisions          decision.Decider
 	Memory             *conversation.Memory
@@ -358,6 +360,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 // Manager owns the active generation and coordinates lifecycle, updates,
 // persistence, notifications, and administrative actions.
 type Manager struct {
+	groups   *group.Service
 	retiring <-chan struct{}
 	applyMu  sync.Mutex
 	routeMu  sync.RWMutex
@@ -374,6 +377,7 @@ type Manager struct {
 }
 
 type generation struct {
+	decisions   decision.Decider
 	modules     *modules.Set
 	snapshot    config.Snapshot
 	engine      *bot.Engine
@@ -404,6 +408,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
+	manager.groups = group.New(builder.GroupStore, manager, manager.groupPolicy)
 	generation.modules.Mark("active")
 	manager.storeSnapshot(snapshot)
 	return manager, nil
@@ -472,8 +477,9 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		})
 	}
 	return &generation{
-		modules:  moduleSet,
-		snapshot: snapshot, engine: engine, connectors: connectors, handler: router,
+		decisions: generationBuilder.Decisions,
+		modules:   moduleSet,
+		snapshot:  snapshot, engine: engine, connectors: connectors, handler: router,
 		admins: administration.New(adminIdentities),
 	}, nil
 }

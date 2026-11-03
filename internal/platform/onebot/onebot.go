@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -199,6 +200,23 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			return
 		}
 		msg, err := event.message(a.cfg.Groups)
+		if normalized, handled, eventErr := event.groupEvent(a.cfg); handled {
+			if eventErr != nil {
+				writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1002"})
+				return
+			}
+			consumer, ok := handler.(group.EventHandler)
+			if !ok {
+				writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
+				return
+			}
+			result, eventErr := consumer.HandleGroupEvent(context.WithoutCancel(r.Context()), normalized)
+			if eventErr != nil {
+				a.logger.Error("onebot group event failed", "err", eventErr, "kind", normalized.Kind, "conversation_id", normalized.ConversationID)
+			}
+			writeResponse(w, http.StatusOK, map[string]any{"status": "ok", "retcode": "0", "data": result})
+			return
+		}
 		if err != nil {
 			if errors.Is(err, ErrNotMessageEvent) {
 				a.logger.DebugContext(r.Context(), "onebot event ignored", "post_type", event.PostType, "message_type", event.MessageType)
@@ -442,6 +460,11 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 }
 
 type rawEvent struct {
+	RequestType string          `json:"request_type"`
+	NoticeType  string          `json:"notice_type"`
+	SubType     string          `json:"sub_type"`
+	Flag        string          `json:"flag"`
+	Comment     string          `json:"comment"`
 	PostType    string          `json:"post_type"`
 	MessageType string          `json:"message_type"`
 	Time        int64           `json:"time"`

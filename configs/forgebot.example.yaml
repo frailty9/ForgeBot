@@ -9,6 +9,9 @@ server:
 
 runtime_config_path: runtime.example.json
 
+# Persistent group requests and idempotent operations (optional).
+# group_store_path: ../data/group-operations.json
+
 # Enable together with FORGEBOT_SECRET_KEY.
 # secret_store_path: secrets.json
 

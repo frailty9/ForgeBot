@@ -82,7 +82,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err := moduleRegistry.Register(knowledgereflection.Factory{}, hooks.Native, 400, hooks.Continue); err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {
+	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {
 		if logController != nil {
 			logController.Apply(logConfig)
 		}
