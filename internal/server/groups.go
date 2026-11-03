@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/soleapi/forgebot/internal/group"
+	"github.com/soleapi/forgebot/internal/operation"
 )
 
 func (s *Server) adminGroupSupport(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +38,7 @@ func (s *Server) adminGroupReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Approve == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "approve is required"})
+		s.writeAdminError(w, operation.New(operation.Invalid, "approve is required"))
 		return
 	}
 	result, err := s.admin.ReviewGroupRequest(r.Context(), request.ID, request.ExpectedRevision, *request.Approve, request.Reason)

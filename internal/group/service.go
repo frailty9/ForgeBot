@@ -48,6 +48,9 @@ func (s *Service) HandleEvent(ctx context.Context, event Event) (EventResult, er
 	if !policy.ReviewEnabled {
 		return EventResult{Verdict: "disabled"}, nil
 	}
+	if len(event.Comment) > 8192 || len(event.Reference) > 4096 {
+		return EventResult{}, operation.New(operation.Invalid, "join event content exceeds limit")
+	}
 	if event.ID == "" || event.Reference == "" || event.ConnectorID == "" || event.UserID == "" {
 		return EventResult{}, operation.New(operation.Invalid, "join request identity is required")
 	}

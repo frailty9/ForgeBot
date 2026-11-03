@@ -12,6 +12,12 @@ import (
 
 type fixedDecider decision.Answer
 
+type decisionFunc func(context.Context, decision.Request) (decision.Result, error)
+
+func (f decisionFunc) Decide(ctx context.Context, r decision.Request) (decision.Result, error) {
+	return f(ctx, r)
+}
+
 func (f fixedDecider) Decide(context.Context, decision.Request) (decision.Result, error) {
 	return decision.Result{Answer: decision.Answer(f), Source: "rules"}, nil
 }

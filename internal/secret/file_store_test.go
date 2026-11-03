@@ -265,3 +265,32 @@ func TestLegacyCredentialUpgradeKeepsOriginalEncryptedFile(t *testing.T) {
 		t.Fatal("legacy encrypted file was not preserved", err)
 	}
 }
+
+func TestInspectFileDoesNotRestoreInterruptedReplacement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	store, err := NewFileStore(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	candidate, err := store.Stage(ctx, "llm/default", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Activate(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(path, path+".replace-backup"); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := InspectFile(path, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, err := reader.Get(ctx, "llm/default"); err != nil || value != "key" {
+		t.Fatal("read-only recovery inspection failed", err)
+	}
+	if _, err = os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("inspection restored file")
+	}
+}

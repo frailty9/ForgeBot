@@ -86,6 +86,7 @@ type execution struct {
 	info              hooks.Info
 	progressAttempted bool
 	lease             *conversation.Lease
+	history           []llm.Message
 	finalText         string
 }
 
@@ -161,6 +162,8 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 		}
 		defer lease.Release()
 		runFrom(ctx).lease = lease
+		// 决策和回答共享同一上下文快照，期间热更新不能让两者看到不同历史。
+		runFrom(ctx).history = lease.History()
 	}
 	reply, err := e.replyText(ctx, msg)
 	if err != nil {
@@ -392,7 +395,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
 	startedAt := time.Now()
-	history := runFrom(ctx).lease.History()
+	history := runFrom(ctx).history
 	if !e.deps.Policy.ImageUnderstanding {
 		for i := range history {
 			for j := range history[i].Content {

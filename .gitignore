@@ -14,12 +14,12 @@
 *.log
 
 # Local configuration
-/configs/*.local.json
-/configs/*-local.json
+/configs/*.local.json*
+/configs/*-local.json*
 /configs/*.local.yaml
 /configs/*-local.yaml
 /configs/*.local.key
-/configs/secrets.json
+/configs/secrets.json*
 .env
 .env.*
 

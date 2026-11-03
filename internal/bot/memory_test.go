@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/conversation"
+	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -79,5 +80,41 @@ func TestProactiveReplyDoesNotWritePrivateContext(t *testing.T) {
 	defer lease.Release()
 	if len(lease.History()) != 0 {
 		t.Fatal("proactive reply polluted private history")
+	}
+}
+
+func TestDecisionAndAnswerKeepSameHistorySnapshotAcrossHotPolicyChange(t *testing.T) {
+	memory := conversation.NewMemory(conversation.MemoryPolicy{})
+	lease, err := memory.Acquire(context.Background(), "c", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Commit(llm.TextMessage(llm.RoleUser, "earlier question"), "earlier answer")
+	lease.Release()
+	model := &fakeLLM{response: llm.Response{Text: "followup answer"}}
+	policy := testPolicy()
+	policy.Scope = "business"
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: newRecordedSender(), LLM: model, Memory: memory, Policy: policy, Decisions: decisionFunc(func(context.Context, decision.Request) (decision.Result, error) {
+		memory.Configure(conversation.MemoryPolicy{Disabled: true})
+		return decision.Result{Answer: decision.Answer{"scope": "in_domain", "respond": "yes", "evidence": "none"}}, nil
+	})}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(0)
+	if _, err = engine.HandleInbound(context.Background(), testInbound("followup")); err != nil {
+		t.Fatal(err)
+	}
+	if len(model.request.Messages) != 3 || model.request.Messages[0].Text() != "earlier question" {
+		t.Fatal("answer observed a different history snapshot", model.request.Messages)
+	}
+	memory.Configure(conversation.MemoryPolicy{})
+	lease, err = memory.Acquire(context.Background(), "c", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if len(lease.History()) != 0 {
+		t.Fatal("old run repopulated cleared history")
 	}
 }

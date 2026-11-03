@@ -26,7 +26,7 @@ func (e *Engine) decideAnswer(ctx context.Context, in messaging.InboundMessage, 
 	fullInput := len(text) <= 6000 && (in.Quoted == nil || len(in.Quoted.Text) <= 3000)
 	// 被裁掉的当前/引用内容未获范围判断，不能给前缀判定后放行完整请求。
 	if e.deps.Decisions != nil && fullInput {
-		history := runFrom(ctx).lease.History()
+		history := runFrom(ctx).history
 		contextText := make([]map[string]string, 0, 4)
 		if len(history) > 4 {
 			history = history[len(history)-4:]
