@@ -197,6 +197,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 		}
 	}
 	policy := policyFrom(snapshot.Runtime)
+	policy.Loop = snapshot.Runtime.Agent.Defaults()
 	policy.ImageUnderstanding = snapshot.Runtime.LLM.ImageUnderstanding
 	policy.ExtensionInstructions = extensionInstructions
 	return bot.NewEngine(ctx, bot.Dependencies{Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)

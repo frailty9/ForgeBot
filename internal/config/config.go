@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
@@ -78,6 +79,7 @@ func (c StorageConfig) Kind() string {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
+	Agent          agent.Limits            `json:"agent"`
 	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
 	Log            LogConfig               `json:"log"`
 	Bot            BotConfig               `json:"bot"`
@@ -548,6 +550,9 @@ func (c StaticConfig) Validate() error {
 
 func (c RuntimeConfig) Validate() error {
 	var problems []string
+	if err := c.Agent.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if strings.TrimSpace(c.Bot.Name) == "" {
 		problems = append(problems, "bot.name is required")
 	}
@@ -854,7 +859,8 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"runtime_config_path": c.Static.RuntimeConfigPath,
 		},
 		"runtime": map[string]any{
-			"log": c.Runtime.Log, "bot": c.Runtime.Bot,
+			"agent": c.Runtime.Agent.Defaults(),
+			"log":   c.Runtime.Log, "bot": c.Runtime.Bot,
 			"llm": map[string]any{
 				"protocol": c.Runtime.LLM.Protocol, "base_url": c.Runtime.LLM.BaseURL,
 				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion, "image_understanding": c.Runtime.LLM.ImageUnderstanding, "authentication": c.Runtime.LLM.Authentication,

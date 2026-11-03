@@ -129,6 +129,10 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 ### 5.3 `llm`
 
+一次回答的总预算由顶层 `agent` 配置控制：`timeout` 缺省 `90s`、`max_turns=6`、`max_tool_calls=12`、`max_tools_per_turn=4`、`max_result_bytes=16384`、`max_context_bytes=131072`。它与 `llm.timeout` 的单次请求时限共同生效，采用更早截止时间；全部值可热更新。
+
+工具串行执行并保留调用 ID。后续轮次继续通过同一 Hook、白名单与工具预算；最后一轮仅允许总结，预算不足不会自动重试。超大的工具结果替换为完整的预算错误 JSON，不截断成可能误导的半段依据；中间工具内容不直接发送给用户。预回复同次回答最多尝试一次。
+
 ```json
 {
   "protocol": "openai_responses",

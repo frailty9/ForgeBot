@@ -6,7 +6,6 @@ package bot
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/admission"
+	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -34,6 +34,7 @@ type Policy struct {
 	Admission             AdmissionPolicy
 	ExtensionInstructions string
 	ImageUnderstanding    bool
+	Loop                  agent.Limits
 }
 
 type AdmissionPolicy struct {
@@ -105,6 +106,8 @@ func NewEngine(ctx context.Context, deps Dependencies, logger *slog.Logger) (*En
 // HandleInbound processes one normalized inbound message and returns a verdict
 // describing whether it was handled, buffered, or rejected.
 func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage) (platform.HandleResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.deps.Policy.Loop.Defaults().Timeout)
+	defer cancel()
 	e.lifetime.RLock()
 	defer e.lifetime.RUnlock()
 	if e.closing.Load() {
@@ -229,6 +232,8 @@ func (e *Engine) Shutdown(grace time.Duration) {
 func (e *Engine) Done() <-chan struct{} { return e.closed }
 
 func (e *Engine) respondDeferred(ctx context.Context, in messaging.InboundMessage) {
+	ctx, cancel := context.WithTimeout(ctx, e.deps.Policy.Loop.Defaults().Timeout)
+	defer cancel()
 	ctx = e.beginRun(ctx, in, "proactive")
 	reply, err := e.replyText(ctx, in)
 	if err != nil {
@@ -307,88 +312,46 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 		return "", operation.New(operation.NotConfigured, "answer LLM is not configured")
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
-	messages := []llm.Message{user}
-	tools := e.toolDefinitions()
 	startedAt := time.Now()
-	response, err := e.deps.LLM.Complete(ctx, llm.Request{
+	response, err := (agent.Loop{Client: e.deps.LLM, Limits: e.deps.Policy.Loop, ToolBudgets: e.deps.ToolBudgets, Execute: func(ctx context.Context, call tooling.Call) (tooling.Result, error) {
+		return e.executeTool(ctx, in, call)
+	}}).Run(ctx, llm.Request{
 		Model:        e.deps.Policy.Model,
 		Instructions: instructions,
-		Messages:     messages,
-		Tools:        tools,
+		Messages:     []llm.Message{user},
+		Tools:        e.toolDefinitions(),
 	})
 	if err != nil {
 		e.logger.DebugContext(ctx, "llm completion failed", "model", e.deps.Policy.Model, "duration", time.Since(startedAt), "err", err)
 		return "", err
 	}
 	e.logger.DebugContext(ctx, "llm completion finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(response.Text)), "tool_calls", len(response.Message.ToolCalls), "total_tokens", response.Usage.TotalTokens)
-	if len(response.Message.ToolCalls) == 0 {
-		return response.Text, nil
-	}
-	messages = append(messages, llm.AssistantToolCallMessage(response.Message))
-	used := make(map[string]int)
-	allowed := make(map[string]bool, len(tools))
-	for _, definition := range tools {
-		allowed[definition.Name] = true
-	}
-	for _, call := range response.Message.ToolCalls {
-		result := tooling.Result{Code: "budget_exhausted"}
-		budget := e.deps.ToolBudgets[call.Name]
-		if budget <= 0 {
-			budget = 1
-		}
-		if used[call.Name] < budget && e.deps.Tools != nil {
-			if !allowed[call.Name] {
-				result = tooling.Result{Code: "tool_not_allowed"}
-				payload, marshalErr := json.Marshal(tooling.Normalize(result))
-				if marshalErr != nil {
-					payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
-				}
-				messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
-				continue
-			}
-			used[call.Name]++
-			run := runFrom(ctx)
-			decision, hookErr := e.deps.Hooks.Tool(ctx, run.info, hooks.ToolInput{Name: call.Name, Arguments: call.Arguments})
-			if hookErr != nil {
-				return "", fmt.Errorf("%w: %w", errHookFailed, hookErr)
-			}
-			if decision.Deny {
-				result = tooling.Result{Code: "module_denied"}
-			} else {
-				if decision.Progress != nil && !run.progressAttempted {
-					run.progressAttempted = true
-					if sendErr := e.deliver(ctx, in, decision.Progress.Text, "progress"); sendErr != nil && !errors.Is(sendErr, errReplySuppressed) {
-						if errors.Is(sendErr, errHookFailed) {
-							return "", sendErr
-						}
-						e.logger.WarnContext(ctx, "send progress reply failed", "run_id", run.info.RunID, "err", sendErr)
-					}
-				}
-				if err := ctx.Err(); err != nil {
-					return "", err
-				}
-				result = e.deps.Tools.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
-			}
-		}
-		payload, marshalErr := json.Marshal(tooling.Normalize(result))
-		if marshalErr != nil {
-			payload = []byte(`{"ok":false,"code":"tool_result_failed"}`)
-		}
-		messages = append(messages, llm.ToolResultMessage(call.ID, call.Name, string(payload)))
-	}
-	startedAt = time.Now()
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	final, err := e.deps.LLM.Complete(ctx, llm.Request{
-		Model: e.deps.Policy.Model, Instructions: instructions, Messages: messages,
-	})
+	return response.Text, nil
+}
+
+// 所有轮次复用同一宿主工具入口，模块 Hook 不因进入后续轮次而被绕过。
+func (e *Engine) executeTool(ctx context.Context, in messaging.InboundMessage, call tooling.Call) (tooling.Result, error) {
+	run := runFrom(ctx)
+	decision, err := e.deps.Hooks.Tool(ctx, run.info, hooks.ToolInput{Name: call.Name, Arguments: call.Arguments})
 	if err != nil {
-		e.logger.DebugContext(ctx, "llm tool follow-up failed", "model", e.deps.Policy.Model, "duration", time.Since(startedAt), "err", err)
-		return "", err
+		return tooling.Result{}, fmt.Errorf("%w: %w", errHookFailed, err)
 	}
-	e.logger.DebugContext(ctx, "llm tool follow-up finished", "model", e.deps.Policy.Model, "reply_len", len([]rune(final.Text)), "total_tokens", final.Usage.TotalTokens)
-	return final.Text, nil
+	if decision.Deny {
+		return tooling.Result{Code: "module_denied"}, nil
+	}
+	if decision.Progress != nil && !run.progressAttempted {
+		run.progressAttempted = true
+		if err := e.deliver(ctx, in, decision.Progress.Text, "progress"); err != nil && !errors.Is(err, errReplySuppressed) {
+			if errors.Is(err, errHookFailed) {
+				return tooling.Result{}, err
+			}
+			e.logger.WarnContext(ctx, "send progress reply failed", "run_id", run.info.RunID, "err", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return tooling.Result{}, err
+	}
+	return e.deps.Tools.Execute(ctx, call), nil
 }
 
 func userMessage(in messaging.InboundMessage, currentText string, syntheticText bool) llm.Message {

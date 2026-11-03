@@ -70,8 +70,6 @@ func contextWithTimeout(ctx context.Context, timeout time.Duration) (context.Con
 	if timeout <= 0 {
 		return ctx, func() {}
 	}
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
-	}
+	// WithTimeout 自动采用更早的父截止时间；有父预算不代表单次模型时限失效。
 	return context.WithTimeout(ctx, timeout)
 }
