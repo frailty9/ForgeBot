@@ -16,6 +16,8 @@ type DecisionConfig struct {
 	MaxConcurrent int                  `json:"max_concurrent,omitempty"`
 }
 type DecisionModelConfig struct {
+	// Disabled 允许完整保留供应商参数而不加载DM；关闭后直接使用LLM后备。
+	Disabled      bool     `json:"disabled"`
 	Provider      string   `json:"provider"`
 	Endpoint      string   `json:"endpoint"`
 	Model         string   `json:"model"`
@@ -33,10 +35,14 @@ type AnswerPolicy struct {
 
 // EvidenceBinding 将可选预检索绑定到部署者挂载的工具，不依赖 search 包。
 type EvidenceBinding struct {
+	Disabled      bool           `json:"disabled"`
 	Tool          string         `json:"tool"`
 	QueryArgument string         `json:"query_argument"`
 	Arguments     map[string]any `json:"arguments,omitempty"`
 }
+
+func (c DecisionConfig) DMEnabled() bool     { return c.DM != nil && !c.DM.Disabled }
+func (p AnswerPolicy) EvidenceEnabled() bool { return p.Evidence != nil && !p.Evidence.Disabled }
 
 func (p AnswerPolicy) DailyAllowed() bool { return p.AllowDaily == nil || *p.AllowDaily }
 func (c DecisionConfig) Timeouts() (time.Duration, time.Duration, error) {
@@ -107,7 +113,7 @@ func (c DecisionConfig) Public() map[string]any {
 	dmTimeout, llmTimeout, _ := c.Timeouts()
 	result := map[string]any{"dm_timeout": dmTimeout.String(), "llm_timeout": llmTimeout.String(), "max_concurrent": c.MaxConcurrent}
 	if c.DM != nil {
-		result["dm"] = map[string]any{"provider": c.DM.Provider, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
+		result["dm"] = map[string]any{"disabled": c.DM.Disabled, "provider": c.DM.Provider, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
 	}
 	return result
 }

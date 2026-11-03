@@ -14,6 +14,31 @@ import (
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
+type forbiddenDMSecrets struct{ t *testing.T }
+
+func (s forbiddenDMSecrets) Get(context.Context, string) (string, error) {
+	s.t.Error("disabled DM resolved credential")
+	return "", nil
+}
+
+func TestDisabledDMUsesLLMFallbackWithoutResolvingCredential(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Disabled: true, Provider: "jev", Endpoint: "http://127.0.0.1:1", APIKeyRef: "unused"}
+	modelCalls := 0
+	client := moduleClient(func(context.Context, llm.Request) (llm.Response, error) {
+		modelCalls++
+		return llm.Response{Text: `{"scope":"in_domain","respond":"yes","evidence":"none"}`}, nil
+	})
+	builder, err := (Builder{Secrets: forbiddenDMSecrets{t}}).withDecision(context.Background(), snapshot, client, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := builder.Decisions.Decide(context.Background(), decision.Request{TaskID: decision.AnswerTaskID, Version: 1, State: json.RawMessage(`{"message":"hello"}`)})
+	if err != nil || result.Source != "llm" || len(result.Attempts) != 1 || modelCalls != 1 {
+		t.Fatalf("disabled DM not bypassed: %+v %v", result, err)
+	}
+}
+
 func TestNoDMUsesIsolatedLLMDecisionAndRejectsOutside(t *testing.T) {
 	snapshot := testSnapshot()
 	snapshot.Runtime.AnswerPolicy.Scope = "配置文档"

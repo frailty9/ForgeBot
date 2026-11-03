@@ -55,7 +55,7 @@ func (m *Manager) Capabilities(ctx context.Context) catalog.Snapshot {
 	result.Entries = append(result.Entries, catalog.Entry{ID: "answer", Kind: "model", Source: string(g.snapshot.Runtime.LLM.Protocol), Enabled: true, Configured: configured, Loaded: g.engine.HasModel(), Health: "not_probed", Documentation: "docs/configuration.md"})
 	decisionSource := "llm_fallback"
 	dmConfigured := configured
-	if dm := g.snapshot.Runtime.Decision.DM; dm != nil {
+	if dm := g.snapshot.Runtime.Decision.DM; g.snapshot.Runtime.Decision.DMEnabled() {
 		decisionSource = dm.Provider + "_with_llm_fallback"
 		dmConfigured = m.credentialConfigured(ctx, dm.APIKeyRef)
 	}

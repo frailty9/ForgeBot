@@ -212,7 +212,7 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	policy.AllowDaily = snapshot.Runtime.AnswerPolicy.DailyAllowed()
 	policy.RefusalText = snapshot.Runtime.AnswerPolicy.RefusalText
 	policy.ClarificationText = snapshot.Runtime.AnswerPolicy.ClarificationText
-	if binding := snapshot.Runtime.AnswerPolicy.Evidence; binding != nil {
+	if binding := snapshot.Runtime.AnswerPolicy.Evidence; snapshot.Runtime.AnswerPolicy.EvidenceEnabled() {
 		found := false
 		if executor != nil {
 			for _, definition := range executor.Definitions() {
@@ -303,7 +303,7 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 	if current == nil {
 		return errors.New("runtime is stopped")
 	}
-	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (current.snapshot.Runtime.Decision.DM == nil || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
+	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (!current.snapshot.Runtime.Decision.DMEnabled() || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
 		return activate()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
@@ -335,7 +335,7 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 	if current == nil {
 		return errors.New("runtime is stopped")
 	}
-	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (current.snapshot.Runtime.Decision.DM == nil || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
+	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (!current.snapshot.Runtime.Decision.DMEnabled() || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
 		return remove()
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")

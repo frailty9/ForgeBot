@@ -35,3 +35,32 @@ func TestDecisionConfigStrictnessAndSnapshotIsolation(t *testing.T) {
 		t.Fatal("decision credential reference exposed")
 	}
 }
+
+func TestDisabledDecisionBlocksRoundTripAndStillValidate(t *testing.T) {
+	var cfg RuntimeConfig
+	if err := decodeStrictJSON([]byte(`{"decision":{"dm":{"disabled":true,"provider":"jev","endpoint":"https://api.typesafe.ai","model":"jev-latest","api_key_ref":"decision/default"}},"answer_policy":{"evidence":{"disabled":true,"tool":"search_docs","query_argument":"query"}}}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundtrip RuntimeConfig
+	if err = decodeStrictJSON(data, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundtrip.Decision.DMEnabled() || roundtrip.AnswerPolicy.EvidenceEnabled() {
+		t.Fatal("disabled flags lost")
+	}
+	copy := roundtrip.Clone()
+	copy.Decision.DM.Disabled = false
+	copy.AnswerPolicy.Evidence.Disabled = false
+	if !copy.Decision.DMEnabled() || !copy.AnswerPolicy.EvidenceEnabled() || roundtrip.Decision.DMEnabled() || roundtrip.AnswerPolicy.EvidenceEnabled() {
+		t.Fatal("cloned flags alias source")
+	}
+	copy.Decision.DM.Provider = "typo"
+	copy.Decision.DM.Disabled = true
+	if err = copy.Decision.Validate(); err == nil {
+		t.Fatal("disabled DM bypassed field validation")
+	}
+}

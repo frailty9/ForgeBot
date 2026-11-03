@@ -26,7 +26,7 @@ func (b Builder) withDecision(ctx context.Context, snapshot config.Snapshot, cli
 	if client != nil {
 		opts.Fallback = decision.LLMProvider{Client: client, Model: snapshot.Runtime.LLM.Model}
 	}
-	if dm := snapshot.Runtime.Decision.DM; dm != nil {
+	if dm := snapshot.Runtime.Decision.DM; snapshot.Runtime.Decision.DMEnabled() {
 		key := ""
 		if secretRef == dm.APIKeyRef {
 			key = secretValue

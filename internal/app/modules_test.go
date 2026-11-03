@@ -10,6 +10,7 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
+	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 )
 
 // 示例必须显式列出全部注册的原生模块，防止新增功能只能从文档中发现。
@@ -39,7 +40,23 @@ func TestExampleDeclaresEveryNativeModule(t *testing.T) {
 			t.Errorf("optional example module %s should be disabled", id)
 		}
 	}
+	if dm := cfg.Runtime.Decision.DM; dm == nil || !dm.Disabled || dm.Provider == "" || dm.Endpoint == "" || dm.Model == "" || dm.APIKeyRef == "" || dm.MinConfidence == nil {
+		t.Fatal("example must declare complete disabled DM configuration")
+	}
+	if evidence := cfg.Runtime.AnswerPolicy.Evidence; evidence == nil || !evidence.Disabled || evidence.Tool == "" || evidence.QueryArgument == "" || len(evidence.Arguments) == 0 {
+		t.Fatal("example must declare complete disabled evidence binding")
+	}
+	// 完整示例关闭的DM和检索不得使构建访问供应商或依赖未挂载工具。
+	engine, err := (runtimecfg.Builder{Modules: registry, Sender: exampleSender{}}).Build(context.Background(), cfg)
+	if err != nil {
+		t.Fatal("disabled example blocks runtime construction", err)
+	}
+	engine.Shutdown(0)
 }
+
+type exampleSender struct{}
+
+func (exampleSender) Send(context.Context, messaging.OutboundMessage) error { return nil }
 
 func TestAppRegistersDefaultNativeModule(t *testing.T) {
 	for _, disabled := range []bool{false, true} {

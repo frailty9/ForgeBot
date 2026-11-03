@@ -1,5 +1,13 @@
 {
   "decision": {
+    "dm": {
+      "disabled": true,
+      "provider": "jev",
+      "endpoint": "https://api.typesafe.ai",
+      "model": "jev-latest",
+      "api_key_ref": "decision/default",
+      "min_confidence": 0.6
+    },
     "dm_timeout": "3s",
     "llm_timeout": "8s",
     "max_concurrent": 16
@@ -8,7 +16,15 @@
     "scope": "",
     "allow_daily": true,
     "refusal_text": "这个专业问题不在当前支持范围内，请咨询对应领域的支持。",
-    "clarification_text": "请说明这个问题与当前服务的关系，或补充必要信息。"
+    "clarification_text": "请说明这个问题与当前服务的关系，或补充必要信息。",
+    "evidence": {
+      "disabled": true,
+      "tool": "search_docs",
+      "query_argument": "query",
+      "arguments": {
+        "limit": 3
+      }
+    }
   },
   "group_management": {
     "local": {
