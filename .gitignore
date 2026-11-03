@@ -7,6 +7,10 @@
 # Runtime data
 /data/
 /logs/
+/cache/
+/tmp/
+/media/
+/knowledge.local/
 *.log
 
 # Local configuration
@@ -26,3 +30,9 @@
 .idea/
 .vscode/
 *.swp
+
+# Personal AI assistant settings; shared project rules remain tracked
+/.claude/settings.local.json
+/.codex/*.local.*
+
+# docs/ and specs/ are shared sources and must remain tracked.
