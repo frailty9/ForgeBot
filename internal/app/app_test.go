@@ -15,6 +15,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
+	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
@@ -62,13 +63,14 @@ func configuredAppSnapshot(t *testing.T) config.Snapshot {
 	return snapshot
 }
 
-func TestAppComposesStructuredSearchForExplicitQuery(t *testing.T) {
+func TestAppComposesStructuredSearchAsModelTool(t *testing.T) {
 	documentRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(documentRoot, "auth.mdx"), []byte("# Authentication\n\nUse the ForgeBot API Key header.\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := config.DefaultSnapshot()
-	snapshot.Runtime.LLM.Model = ""
+	snapshot.Runtime.LLM.Model = "test-model"
+	snapshot.Runtime.LLM.Authentication = "none"
 	enabled := true
 	options, _ := json.Marshal(map[string]any{"document_root": documentRoot})
 	snapshot.Runtime.Modules = map[string]config.ModuleConfig{structuredsearch.ID: {Enabled: &enabled, Options: options}}
@@ -85,18 +87,36 @@ func TestAppComposesStructuredSearchForExplicitQuery(t *testing.T) {
 	if err := moduleRegistry.Register(structuredsearch.Factory{}, hooks.Native, 300, hooks.Continue); err != nil {
 		t.Fatal(err)
 	}
-	runtimeManager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, Modules: moduleRegistry})
+	client := &searchToolClient{}
+	runtimeManager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, Modules: moduleRegistry, RequireLLM: true, ClientFactory: func(llm.ClientConfig) (llm.Client, error) { return client, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := runtimeManager.HandleInbound(context.Background(), messaging.InboundMessage{
-		ConversationID: "local", UserID: "u", MessageID: "m", Text: "/search API Key", Command: true,
+		ConversationID: "local", UserID: "u", MessageID: "m", Text: "API Key怎么用", Mentioned: true,
 	})
 	if err != nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	sent := sender.Sent()
-	if len(sent) != 1 || !strings.Contains(sent[0].Text, "auth.mdx") || !strings.Contains(sent[0].Text, "ForgeBot API Key") {
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "auth.mdx") || client.calls != 2 {
 		t.Fatalf("sent = %+v", sent)
 	}
+	if err := runtimeManager.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type searchToolClient struct{ calls int }
+
+func (*searchToolClient) Protocol() llm.Protocol { return llm.OpenAIResponses }
+func (c *searchToolClient) Complete(_ context.Context, r llm.Request) (llm.Response, error) {
+	c.calls++
+	if c.calls == 1 {
+		return llm.Response{Message: llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "search-1", Name: "search_docs", Arguments: `{"query":"API Key"}`}}}}, nil
+	}
+	return llm.Response{Text: r.Messages[len(r.Messages)-1].Text()}, nil
+}
+func (*searchToolClient) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, error) {
+	return nil, nil
 }

@@ -40,19 +40,15 @@ func buildSearchModule(t *testing.T) *modules.Set {
 	return set
 }
 
-func TestModuleRegistersToolCommandAndCapabilities(t *testing.T) {
+func TestModuleRegistersOnlyToolAndCapabilities(t *testing.T) {
 	set := buildSearchModule(t)
 	tools := set.Tools()
 	if len(tools) != 1 || tools[0].Tool.Definition().Name != "search_docs" || tools[0].MaxCalls != 2 {
 		t.Fatalf("tools = %+v", tools)
 	}
 	commands := set.Commands()
-	if len(commands) != 1 || commands[0].Name != "search" {
+	if len(commands) != 0 {
 		t.Fatalf("commands = %+v", commands)
-	}
-	result, err := commands[0].Handle(context.Background(), modules.CommandRequest{Name: "search", Arguments: []string{"API", "key"}})
-	if err != nil || !strings.Contains(result.Reply, "auth.mdx") || !strings.Contains(result.Reply, "API key") {
-		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	values := set.Capabilities()
 	if control, ok := capability.Resolve(values, searchcontract.ControlKey); !ok || control == nil {
@@ -64,14 +60,6 @@ func TestModuleRegistersToolCommandAndCapabilities(t *testing.T) {
 	toolResult := set.ToolExecutor().Execute(context.Background(), tooling.Call{Name: "search_docs", Arguments: `{"query":"authentication"}`})
 	if !toolResult.OK || !strings.Contains(toolResult.Payload, "auth.mdx") {
 		t.Fatalf("tool result = %+v", toolResult)
-	}
-}
-
-func TestModuleCommandHandlesEmptyQuery(t *testing.T) {
-	set := buildSearchModule(t)
-	result, err := set.Commands()[0].Handle(context.Background(), modules.CommandRequest{Name: "search"})
-	if err != nil || result.Reply != "用法：/search <关键词或问题>" {
-		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

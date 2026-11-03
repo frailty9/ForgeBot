@@ -95,9 +95,8 @@ must not depend on or expose the complete Web administration service.
 6. The LLM boundary supports exactly three wire protocols:
    `anthropic_messages`, `openai_responses`, and `openai_completions`.
    Vendors are configuration targets, not new protocol abstractions.
-7. Retrieval is on-demand. Normal messages are never prefetched from the
-   document index; an explicit `/search` or an LLM `search_docs` call triggers
-   retrieval.
+7. Retrieval is on-demand through the tool executor. An LLM `search_docs` call
+   uses the same authorization and budget boundaries as other tools.
 8. Retrieved documents are untrusted data, never instructions. Tool execution
    is bounded and allow-listed; it has no implicit Shell, secret, network, or
    configuration access.
@@ -154,7 +153,7 @@ identity ordering.
 `native.structured_search` owns the index and its runtime options. A configuration
 update builds the candidate module before persistence and generation publication.
 The module registers `search_docs` into the same LLM Tool directory used by MCP
-tools, registers the optional `/search` command, and provides typed reload/status
+tools and provides typed reload/status
 capabilities. A document reload atomically swaps the index snapshot; failures
 retain the old snapshot and publish a bounded operational event.
 

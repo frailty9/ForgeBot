@@ -32,9 +32,8 @@ other product.
   - OpenAI Chat Completions
 - On-demand structured search over local Markdown, MDX, and plain-text files
   using an in-memory BM25F index.
-- An allow-listed `search_docs` tool. Ordinary messages do not trigger a
-  document search unless the user explicitly uses `/search` or the model asks
-  for the tool.
+- An allow-listed `search_docs` tool. Document retrieval uses the same tool
+  execution path as MCP tools; the model chooses when evidence is needed.
 - Stateless knowledge reflection that can turn approved administrator answers
   into managed Markdown under the document root's `extra/` directory.
 - Versioned JSON runtime configuration, optimistic concurrency control, atomic

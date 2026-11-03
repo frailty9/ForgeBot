@@ -1,5 +1,5 @@
 // Package structuredsearch exposes local document retrieval as a native Tool,
-// command, and host capability while owning the index lifecycle.
+// and host capability while owning the index lifecycle.
 package structuredsearch
 
 import (
@@ -13,12 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/knowledge"
 	"github.com/soleapi/forgebot/internal/knowledge/markdown"
-	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/modules"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 	"github.com/soleapi/forgebot/internal/search/structured"
@@ -49,7 +47,7 @@ func (Factory) Descriptor() modules.Descriptor {
 	return modules.Descriptor{
 		ID: ID, DefaultEnabled: false,
 		Provides:      []capability.ID{searchcontract.ControlKey.ID(), knowledge.PublisherFactoryKey.ID()},
-		Registrations: []modules.RegistrationKind{modules.RegistrationTools, modules.RegistrationCommands, modules.RegistrationStatus},
+		Registrations: []modules.RegistrationKind{modules.RegistrationTools, modules.RegistrationStatus},
 	}
 }
 
@@ -184,7 +182,7 @@ func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
 func (Factory) Build(context.Context, json.RawMessage) (modules.Instance, error) {
 	return nil, errors.New("structured search requires build context")
 }
-func (Factory) BuildWithContext(ctx context.Context, build modules.BuildContext, raw json.RawMessage) (modules.Instance, error) {
+func (Factory) BuildWithContext(ctx context.Context, _ modules.BuildContext, raw json.RawMessage) (modules.Instance, error) {
 	options, err := parse(raw)
 	if err != nil {
 		return nil, err
@@ -196,14 +194,12 @@ func (Factory) BuildWithContext(ctx context.Context, build modules.BuildContext,
 	if err != nil {
 		return nil, err
 	}
-	completer, _ := capability.Resolve(build.Capabilities, agent.CompleterKey)
-	return &instance{options: options, search: service, completer: completer}, nil
+	return &instance{options: options, search: service}, nil
 }
 
 type instance struct {
-	options   Options
-	search    searchcontract.Control
-	completer agent.Completer
+	options Options
+	search  searchcontract.Control
 }
 
 func (i *instance) Registrations() hooks.Registrations { return hooks.Registrations{} }
@@ -211,48 +207,9 @@ func (i *instance) Close(context.Context) error        { return nil }
 func (i *instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	return modules.ExtendedRegistrations{
 		Tools:        []modules.ToolRegistration{{ID: "search_docs", Tool: searchdocs.New(i.search, i.options.DefaultResults, i.options.MaxResults, i.options.MaxContextChars), MaxCalls: i.options.MaxQueriesPerTurn}},
-		Commands:     []modules.CommandRegistration{{ID: "search", Name: "search", Handle: i.command}},
 		Capabilities: []modules.CapabilityRegistration{{ID: searchcontract.ControlKey.ID(), Value: i.search}, {ID: knowledge.PublisherFactoryKey.ID(), Value: publisherFactory{root: i.options.DocumentRoot, maxBytes: i.options.MaxFileBytes, markdown: supportsMarkdown(i.options.Extensions)}}},
 		Status:       func() any { return i.search.Status() },
 	}
-}
-
-func (i *instance) command(ctx context.Context, request modules.CommandRequest) (modules.CommandResult, error) {
-	query := strings.TrimSpace(strings.Join(request.Arguments, " "))
-	if query == "" {
-		return modules.CommandResult{Reply: "用法：/search <关键词或问题>"}, nil
-	}
-	response, err := i.search.Search(ctx, searchcontract.Query{Text: query, Limit: i.options.DefaultResults})
-	if err != nil {
-		return modules.CommandResult{Reply: "文档检索失败，请稍后重试。"}, nil
-	}
-	contextText, selected := searchcontract.BuildContext(response, i.options.MaxContextChars)
-	if contextText == "" {
-		return modules.CommandResult{Reply: "未在文档库中找到可靠结果。"}, nil
-	}
-	if i.completer == nil {
-		return modules.CommandResult{Reply: formatResults(selected)}, nil
-	}
-	result, err := i.completer.Complete(ctx, llm.Request{Instructions: request.Instructions, Messages: []llm.Message{llm.TextMessage(llm.RoleUser, query), llm.TextMessage(llm.RoleUser, contextText+"\n\n请根据以上资料回答原问题，并引用 source 路径。")}})
-	if err != nil {
-		return modules.CommandResult{}, err
-	}
-	return modules.CommandResult{Reply: result.Text}, nil
-}
-
-func formatResults(results []searchcontract.Result) string {
-	var out strings.Builder
-	out.WriteString("文档检索结果：")
-	for index, result := range results {
-		fmt.Fprintf(&out, "\n%d. %s", index+1, result.Path)
-		if len(result.Headings) > 0 {
-			out.WriteString(" - " + strings.Join(result.Headings, " > "))
-		}
-		if result.Snippet != "" {
-			out.WriteString("\n" + result.Snippet)
-		}
-	}
-	return out.String()
 }
 
 type publisherFactory struct {

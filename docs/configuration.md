@@ -200,7 +200,7 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 该模块拥有索引生命周期，并通过通用 LLM Tool 目录注册只读的 `search_docs`。普通
 消息不会自动预检索；模型按需调用工具，`max_queries_per_turn` 限制单轮调用次数。
-模块还注册 `/search <query>` 命令，并提供索引状态与重载 capability。配置更新时会
+模块提供索引状态与重载 capability，不再注册 `/search` 命令。配置更新时会
 先构建候选索引，成功后才切换；构建失败不会替换当前 generation。
 
 ### 5.6 `platforms`
@@ -541,9 +541,9 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 关闭模块后：
 
 - 空 @ 没有其他处理器补充正文时返回 `empty_input`，不调用 LLM、不发错误回复。
-- 纯图片仍传给多模态模型，但不自动追加图片分析提示。
+- `llm.image_understanding=true` 时纯图片仍传给模型，但不自动追加图片分析提示；false 时由核心返回不支持图片。
 - 文档检索仍然可用，只是不发送检索预回复。
-- 普通文字、图文及显式 `/search` 的既有行为不变。
+- 普通文字与获准处理的图文沿用统一问答链；检索始终通过工具调用。
 
 `native.proactive_reply` 默认关闭。启用后仍需在 `options.groups` 中按逻辑群组 ID
 显式打开；`silence` 和 `max_window` 控制等待时间，`max_buffered`、
