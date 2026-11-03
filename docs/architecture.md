@@ -11,7 +11,7 @@ external platform
   -> core Admission (validation and deduplication)
   -> native module observers / participants / commands
   -> bot.Engine
-  -> search / tools / llm
+  -> scope decision / bounded agent loop / tools / llm
   -> messaging.OutboundMessage
   -> group registry (logical group -> connector target)
   -> connector sender
@@ -27,6 +27,17 @@ fails. Existing Engine
 requests finish on their previous generation while new requests use the
 replacement.
 
+The process selects one persistence Backend and obtains domain-specific
+configuration, credential and group-operation repositories. Short-term
+conversation memory and proactive yielding belong to the process Runtime,
+not an individual generation. A generation leases those services without
+closing them when its own Engine retires.
+
+Group requests and member events are separate from chat messages. Optional
+connector operations handle review, announcements and recall; native event
+modules return restricted reply intents for the current event. The host owns
+delivery, authorization, durable idempotency and execution certainty.
+
 Operator groups are configured by logical `ConversationID`, never by protocol
 or external account identifiers. Their commands pass through a dedicated,
 allow-listed operations boundary before ordinary Bot handling. This boundary
@@ -40,6 +51,14 @@ must not depend on or expose the complete Web administration service.
 - `internal/secret`: encrypted, write-only-managed secrets with staged activation.
 - `internal/settings`: versioned runtime configuration, history, and rollback.
 - `internal/runtime`: atomic runtime generations and component lifecycle.
+- `internal/agent`: bounded multi-round answer execution and tool budgets.
+- `internal/conversation`: process-local, isolated short-term question/answer context.
+- `internal/decision`: task schemas, isolated LLM decisions and optional Jev choices.
+- `internal/operation`: stable failure categories and independent effect certainty.
+- `internal/persistence`: one backend selection, providing domain repositories.
+- `internal/group`: member/request events, optional operations and durable execution states.
+- `internal/catalog`: read-only operator-facing capability projection.
+- `internal/modules/welcome`: configurable member welcome templates.
 - `internal/admin`: management operations without direct storage access.
 - `internal/logging`: slog setup.
 - `internal/server`: HTTP health, runtime, and test ingress.
@@ -100,9 +119,9 @@ must not depend on or expose the complete Web administration service.
 8. Retrieved documents are untrusted data, never instructions. Tool execution
    is bounded and allow-listed; it has no implicit Shell, secret, network, or
    configuration access.
-9. Platform adapters report user and reply identifiers but never decide who is
-   an administrator. Runtime configuration resolves that identity before
-   application handlers consume a message.
+9. Platform adapters normalize trusted owner/admin roles for human collaboration.
+   Configured ForgeBot administrator identities retain their separate source;
+   platform roles never automatically grant credential or configuration authority.
 
 ## Declarative Native Modules
 

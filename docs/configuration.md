@@ -2,6 +2,8 @@
 
 ForgeBot 将启动所必需且不应频繁变化的配置放在 YAML 中，将应用层配置放在可写的 JSON 中。LLM API Key 不进入任一配置文件，而是通过管理 API 写入加密的 SecretStore。
 
+首次使用建议从 [CLI 初始化](cli.md) 开始；[默认行为表](default-behavior.md)、[群管理与欢迎](group-management.md)、[存储恢复](storage.md)分别补充行为、事件操作和持久化边界。
+
 ## 1. 配置分层
 
 | 层级 | 介质 | 是否热更新 | 内容 |
@@ -55,7 +57,7 @@ go run ./cmd/forgebot `
 server:
   addr: 127.0.0.1:8080
   read_timeout: 10s
-  write_timeout: 30s
+  write_timeout: 100s
   shutdown_timeout: 15s
 
 runtime_config_path: runtime.json
@@ -69,10 +71,12 @@ admin_token: change-me
 | --- | --- | --- |
 | `server.addr` | `127.0.0.1:8080` | 管理 API、健康检查和测试消息入口的监听地址 |
 | `server.read_timeout` | `10s` | HTTP 请求读取超时，必须大于 0 |
-| `server.write_timeout` | `30s` | HTTP 响应写入超时，必须大于 0 |
+| `server.write_timeout` | `100s` | HTTP 响应写入超时，必须大于 0；调大 agent.timeout 时同步检查此静态限制 |
 | `server.shutdown_timeout` | `15s` | 优雅停止期限，必须大于 0 |
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
+| `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
+| `group_store_path` | 空 | 群申请、幂等动作和欢迎防重记录；相对路径以 YAML 所在目录为基准 |
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 
 YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。
@@ -99,6 +103,8 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 ```json
 {
+  "schema_version": 1,
+  "id": "runtime/default",
   "version": 2,
   "updated_at": "2026-09-12T10:00:00Z",
   "source": "admin",
@@ -453,7 +459,7 @@ Invoke-RestMethod `
   -Body '{"api_key":"replace-with-provider-key"}'
 ```
 
-`GET /v1/admin/llm/api-key` 只返回是否配置及更新时间，永远不会返回密钥值。`DELETE` 可删除当前 `llm.api_key_ref` 对应的密钥。切换 `api_key_ref` 后需为新引用单独写入密钥。
+`GET /v1/admin/llm/api-key` 只返回是否配置及更新时间，永远不会返回密钥值。正式实例要求回答凭据时，删除正在使用的必需 Key 会被拒绝，原值保留；先切到显式无认证配置后才可删除。切换 `api_key_ref` 前应确保新引用已有密钥。
 
 ## 6.5 外部扩展（MCP 与 Skill）
 

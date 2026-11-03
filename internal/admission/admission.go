@@ -19,6 +19,8 @@ const (
 )
 
 type table struct {
+	// 去重属于核心一致性约束，与是否启用主动插话/记忆无关。
+	// 每次检查和插入必须在同一把锁内完成，不能先查后写造成并发重复处理。
 	mu  sync.Mutex
 	m   map[string]time.Time
 	ttl time.Duration

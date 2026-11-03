@@ -48,6 +48,8 @@ func (m *Manager) Status(ctx context.Context, ref string) (Status, error) {
 }
 
 func (m *Manager) Replace(ctx context.Context, ref, value string) (Status, error) {
+	// 候选凭据未激活前不能被正常读取；运行代预构建成功后才提交激活。
+	// 失败丢弃候选，保留旧值；锁只串行化管理操作，不授予管理端明文读取权。
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

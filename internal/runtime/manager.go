@@ -932,6 +932,8 @@ func (m *Manager) ProactiveStats() proactive.Stats {
 }
 
 func (m *Manager) acquire() *generation {
+	// 先读取指针再持读锁，并重新核对当前代。调用者必须释放读锁，
+	// 以保证旧代在整个请求结束前不会关闭；不能只用一次原子读取替代租约。
 	for {
 		generation := m.current.Load()
 		if generation == nil {
@@ -946,6 +948,8 @@ func (m *Manager) acquire() *generation {
 }
 
 func (m *Manager) drain(generation *generation, grace time.Duration) {
+	// 先停止旧代接受后台待答，再等待已取得读锁的请求完成。宽限期到期
+	// 只让更新调用返回，不提前销毁仍在执行的资源；下一次换代受 retiring 限制。
 	if generation == nil {
 		return
 	}
@@ -973,6 +977,8 @@ func (m *Manager) drain(generation *generation, grace time.Duration) {
 }
 
 func (m *Manager) publish(_ context.Context, current, next *generation, persist func() (config.Snapshot, error)) (config.Snapshot, error) {
+	// 可失败的连接器切换和持久化必须位于发布前。进程级记忆/让位策略
+	// 只在候选成功后调整，不能因候选构建失败破坏当前代的有效状态。
 	connectorsChanged := current.connectors != next.connectors
 	if connectorsChanged && m.started {
 		m.routeMu.Lock()
