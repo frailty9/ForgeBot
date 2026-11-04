@@ -1,6 +1,6 @@
 # 默认行为与验收边界
 
-2026-11-03，feat/v0.1.0。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
+2026-11-04，feat/v0.1.0。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
 
 | 场景 | 默认行为 | 配置或约束 | 主要证据 |
 | --- | --- | --- | --- |
@@ -12,7 +12,7 @@
 | 平台表情 | 可靠描述转文字，未知ID忽略；字面转义不重解析 | 适配层负责 | [表情](../internal/platform/onebot/emoji_test.go) |
 | 消息重复 | TTL 内按消息身份去重 | admission | [去重](../internal/admission/admission_test.go) |
 | 域外专业问题 | 配置范围后拒答，即使明确 @ 或问题简单 | answer_policy.scope | [范围判断](../internal/bot/decision_test.go) |
-| 范围未知／决策失败 | 直接问题澄清，主动介入沉默 | DM→LLM→逐点规则，unknown不反复问 | [决策回退](../internal/decision/service_test.go) |
+| 范围未知／决策失败 | 直接问题澄清，主动介入沉默 | 一次只选 DM 或 LLM，故障不转调模型 | [单次决策](../internal/decision/routing_test.go) |
 | 无专用 DM | 独立使用回答 LLM 作有界决策 | 无工具/Skill/聊天记忆污染 | [无DM](../internal/runtime/decision_test.go) |
 | 简单问题 | 默认由模型选择是否用工具，不每条消息预检索 | 未绑定 evidence 时无强制预检索 | [按需检索](../internal/bot/engine_test.go) |
 | 检索无结果 | 成功空结果，不捏造资料 | Tool 结果语义 | [知识工具](../internal/tooling/searchdocs/tool_test.go) |
@@ -21,12 +21,13 @@
 | 预回复失败 | 同一 run 只尝试一次，可继续最终处理 | 仍受Hook与总时限限制 | [Hook](../internal/bot/hooks_test.go) |
 | 短期追问 | 群+用户隔离，发送确认成功后提交 | TTL/容量/顺序队列；重启进程清空 | [记忆](../internal/conversation/memory_test.go) |
 | 发送失败／执行未知 | 不把回答写入记忆，不盲目重发 | effect独立于错误分类 | [投递提交](../internal/bot/memory_test.go) |
-| 管理员接答 | 群级暂停主动插话，@仍走正常范围判断 | 默认5m，可信引用/可选语义 | [主动模块](../internal/modules/proactivereply/module_test.go) |
+| 管理员接答 | 群级暂停主动插话，@仍走正常范围判断 | 默认5m，仅引用命中待答或明确语义接答 | [主动模块](../internal/modules/proactivereply/module_test.go) |
 | 让位后到期 | 新问题可处理，旧批次不补发 | revision抑制旧在途回复 | [让位状态](../internal/proactive/yield_test.go) |
 | 配置更新失败 | 保持原运行代，持久化恢复错误可诊断 | expected_version与候选构建 | [运行时](../internal/runtime/manager_test.go) |
 | 不支持群操作 | unsupported；权限未知不能伪装成功 | 可选接口 | [群操作路由](../internal/platform/groups.go) |
-| 重复审核／公告／撤回 | CAS/幂等ID防重复；未知结果需核实 | 单一运营Store | [运营测试](../internal/group/filestore/service_test.go) |
-| 自动审核不确定 | 待人工，模型建议不授权动作 | 默认关闭，独立规则开关 | [运营测试](../internal/group/filestore/service_test.go) |
+| 重复公告／撤回 | CAS/幂等ID防重复；未知结果需核实 | 单一运营Store | [运营测试](../internal/group/filestore/service_test.go) |
+| 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
+| 自动审核不确定 | 不同意也不拒绝，管理员在原平台处理 | 模型错误不映射为 false；无后备请求 | [审批测试](../internal/group/review_test.go) |
 | 新人欢迎 | 实际入群后去重发送；忽略自身/历史/过旧事件 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go) |
 | 自动沉淀生成失败 | 不发布文档，已有归组/扫描/发布链路保留 | native.knowledge_reflection | [沉淀](../internal/reflection/pipeline/pipeline_test.go) |
 | 能力目录 | 展示投影，not_probed不冒充健康 | 认证API与CLI同源 | [目录](../internal/runtime/catalog_test.go) |

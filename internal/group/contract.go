@@ -44,9 +44,16 @@ type ReviewRequest struct {
 	Reference   string
 	Approve     bool
 	Reason      string
+	// ExpectedPolicy 由自动审批宿主设置，在实际执行的运行代内再次核对。
+	ExpectedPolicy *Policy
 }
 type Reviewer interface {
 	ReviewGroupRequest(context.Context, string, ReviewRequest) error
+}
+
+// ReviewReasonReporter 是可选能力；未声明时拒绝仍执行，只忽略理由。
+type ReviewReasonReporter interface {
+	GroupReviewReasonSupported() bool
 }
 type Announcer interface {
 	PublishGroupAnnouncement(context.Context, string, string) error
@@ -55,12 +62,13 @@ type Recaller interface {
 	RecallGroupMessage(context.Context, string, string) error
 }
 type Support struct {
-	JoinEvents   bool   `json:"join_events"`
-	MemberEvents bool   `json:"member_events"`
-	JoinReview   bool   `json:"join_review"`
-	Announcement bool   `json:"announcement"`
-	Recall       bool   `json:"recall"`
-	Permission   string `json:"permission"`
+	JoinEvents       bool   `json:"join_events"`
+	MemberEvents     bool   `json:"member_events"`
+	JoinReview       bool   `json:"join_review"`
+	JoinReviewReason bool   `json:"join_review_reason"`
+	Announcement     bool   `json:"announcement"`
+	Recall           bool   `json:"recall"`
+	Permission       string `json:"permission"`
 }
 type Actions interface {
 	// Support 只读本地适配能力元数据，不主动探测远端权限或触发网络请求。
@@ -76,11 +84,15 @@ type EventReporter interface {
 }
 
 type Policy struct {
-	ReviewEnabled bool   `json:"review_enabled"`
-	AutoReview    bool   `json:"auto_review"`
-	ReviewRule    string `json:"review_rule,omitempty"`
-	Announcements bool   `json:"announcements"`
-	Recall        bool   `json:"recall"`
+	ReviewEnabled      bool   `json:"review_enabled"`
+	AutoReview         bool   `json:"auto_review"`
+	ReviewRule         string `json:"review_rule,omitempty"`
+	ReviewRegex        string `json:"review_regex,omitempty"`
+	ReviewModelEnabled *bool  `json:"review_model_enabled,omitempty"`
+	ReviewCombine      string `json:"review_combine,omitempty"`
+	RejectReason       string `json:"reject_reason,omitempty"`
+	Announcements      bool   `json:"announcements"`
+	Recall             bool   `json:"recall"`
 }
 
 type Status string

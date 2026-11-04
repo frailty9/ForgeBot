@@ -36,15 +36,6 @@ func (a *actions) Recall(context.Context, string, string) error {
 	return a.Review(context.Background(), "", group.ReviewRequest{})
 }
 
-type decider struct {
-	answer string
-	calls  int
-}
-
-func (d *decider) Decide(context.Context, decision.Request) (decision.Result, error) {
-	d.calls++
-	return decision.Result{Answer: decision.Answer{"recommendation": d.answer}}, nil
-}
 func policy(d decision.Decider) group.Policies {
 	return func(string) (group.Policy, decision.Decider, bool) {
 		return group.Policy{ReviewEnabled: true, Announcements: true, Recall: true, AutoReview: d != nil, ReviewRule: "rule"}, d, true
@@ -58,38 +49,6 @@ func fixture(t *testing.T) (*Store, string) {
 		t.Fatal(err)
 	}
 	return s, path
-}
-
-func TestJoinReviewDuplicateCASAndOpaqueReference(t *testing.T) {
-	store, _ := fixture(t)
-	port := &actions{}
-	s := group.New(store, port, policy(nil))
-	ctx := context.Background()
-	event := group.Event{ID: "event", Kind: group.JoinRequested, ConversationID: "g", ConnectorID: "one", UserID: "u", Reference: "opaque", At: time.Now()}
-	if r, err := s.HandleEvent(ctx, event); err != nil || r.Verdict != "pending" {
-		t.Fatal(r, err)
-	}
-	if r, err := s.HandleEvent(ctx, event); err != nil || r.Verdict != "duplicate" {
-		t.Fatal(r, err)
-	}
-	public, err := s.List(ctx, 10)
-	if err != nil || len(public) != 1 || public[0].Reference != "" {
-		t.Fatal(public, err)
-	}
-	id := public[0].ID
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); _, _ = s.Review(ctx, id, 1, true, "") }()
-	}
-	wg.Wait()
-	if port.calls != 1 {
-		t.Fatalf("duplicate review calls=%d", port.calls)
-	}
-	record, err := store.Get(ctx, id)
-	if err != nil || record.Status != group.Done || record.Revision != 3 {
-		t.Fatal(record, err)
-	}
 }
 
 func TestTimeoutIsUnknownAndNeverAutomaticallyReplayed(t *testing.T) {
@@ -142,25 +101,5 @@ func TestExecutingStateRecoversUnknownAndRevisionIsolated(t *testing.T) {
 	}
 	if _, err = loaded.Update(ctx, 99, current); err == nil || operation.Describe(err).Code != operation.Conflict {
 		t.Fatal(err)
-	}
-}
-
-func TestAutomaticReviewConsumesSharedDecisionAndUnknownWaitsHuman(t *testing.T) {
-	for _, answer := range []string{"approve", decision.Unknown} {
-		store, _ := fixture(t)
-		port := &actions{}
-		d := &decider{answer: answer}
-		s := group.New(store, port, policy(d))
-		r, err := s.HandleEvent(context.Background(), group.Event{ID: "event", Kind: group.JoinRequested, ConversationID: "g", ConnectorID: "one", UserID: "u", Reference: "opaque", Comment: "application", At: time.Now()})
-		if err != nil || d.calls != 1 {
-			t.Fatal(r, err)
-		}
-		want := 0
-		if answer == "approve" {
-			want = 1
-		}
-		if port.calls != want {
-			t.Fatal("unknown approval performed", port.calls)
-		}
 	}
 }

@@ -408,7 +408,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
-	manager.groups = group.New(builder.GroupStore, manager, manager.groupPolicy)
+	manager.groups = group.New(builder.GroupStore, manager, manager.groupPolicy, builder.Logger)
 	generation.modules.Mark("active")
 	manager.storeSnapshot(snapshot)
 	return manager, nil

@@ -16,6 +16,7 @@ import (
 	"github.com/soleapi/forgebot/internal/app"
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
 )
 
@@ -67,6 +68,15 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("doctor sent remote request without probe")
+	}
+	approvalConfig := cfg.Clone()
+	approvalConfig.Static.GroupStorePath = ""
+	approvalConfig.Runtime.GroupManagement = map[string]group.Policy{
+		approvalConfig.Runtime.Platforms.Groups[0].ID: {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`},
+	}
+	var approvalOutput bytes.Buffer
+	if err = doctor(approvalConfig, false, false, &approvalOutput); err != nil {
+		t.Fatal("automatic approval incorrectly requires an operation store", approvalOutput.String(), err)
 	}
 	if strings.Contains(output.String(), "temporary-test-key") || strings.Contains(output.String(), strings.TrimSpace(string(key))) {
 		t.Fatal("doctor exposed credentials")

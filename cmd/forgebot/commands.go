@@ -236,7 +236,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 	}
 	needsGroupStore := false
 	for _, policy := range cfg.Runtime.GroupManagement {
-		needsGroupStore = needsGroupStore || policy.ReviewEnabled || policy.Announcements || policy.Recall
+		needsGroupStore = needsGroupStore || policy.Announcements || policy.Recall
 	}
 	if entry, ok := cfg.Runtime.Modules["native.welcome"]; ok && entry.Enabled != nil && *entry.Enabled {
 		needsGroupStore = true

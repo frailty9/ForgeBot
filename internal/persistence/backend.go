@@ -17,7 +17,7 @@ import (
 
 // Backend 聚合同一实现的领域仓储。未配置的仓储返回 nil，调用方必须明确
 // 报告 not_configured/unavailable，禁止偷偷创建内存或另一种持久化实现。
-// 新的持久业务（如群申请）以独立领域接口加入，不增加通用 Query/Exec 方法。
+// 新的持久业务（如群公告幂等）以独立领域接口加入，不增加通用 Query/Exec 方法。
 type Backend interface {
 	Kind() string
 	Configuration() settings.Store

@@ -76,7 +76,7 @@ admin_token: change-me
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
-| `group_store_path` | 空 | 群申请、幂等动作和欢迎防重记录；相对路径以 YAML 所在目录为基准 |
+| `group_store_path` | 空 | 公告、撤回等幂等动作和欢迎防重记录；入群自动审批不依赖此项；相对路径以 YAML 所在目录为基准 |
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 
 YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。
@@ -87,7 +87,7 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 完整示例显式列出全部内置模块及其参数；只启用本地 Echo 渠道，可选功能（包括回复体验、短期记忆、主动介入、检索、反思、欢迎和群管理）明确关闭。需要的功能直接在对应位置启用；这属于完整示例的取值，不改变程序缺省行为或 `init` 生成的最小配置。
 
-可选的 `decision.dm` 与 `answer_policy.evidence` 也保留完整参数并设置 `disabled=true`。将对应值改为 false 即启用，省略整个对象等同于未配置；对象存在但不写 disabled 沿用启用语义。关闭 DM 时不解析其凭据、不发 DM 请求，直接用 LLM 后备；关闭 evidence 时不要求工具存在，也不触发预检索。关闭块的字段仍需通过结构校验，避免潜藏拼写错误。DM Key 可在关闭期间通过管理接口预先写入，启用前先准备好凭据。
+可选的 `decision.dm` 与 `answer_policy.evidence` 也保留完整参数并设置 `disabled=true`。将对应值改为 false 即启用，省略整个对象等同于未配置；对象存在但不写 disabled 沿用启用语义。关闭 DM 时不解析其凭据、不发 DM 请求，直接用 LLM 作决策；已启用 DM 的调用失败直接返回错误，不改用 LLM；关闭 evidence 时不要求工具存在，也不触发预检索。关闭块的字段仍需通过结构校验，避免潜藏拼写错误。DM Key 可在关闭期间通过管理接口预先写入，启用前先准备好凭据。
 
 ```json
 {
@@ -722,5 +722,11 @@ Invoke-RestMethod `
 - OneBot 启用 `receive_secret`，并保护当前仍在 JSON 中的 OneBot 密钥。
 - 在启用自动反思前确认文档库备份策略和管理员名单。
 - 监控 `/healthz`、结构化日志及运维群组故障通知。
+
+## 入群自动审批
+
+`group_management.<逻辑群ID>` 沿用 `review_enabled` 和 `auto_review` 两个开关，均默认关闭。`review_regex` 是可选 Go 正则（最多 4096 字节），`review_model_enabled` 控制是否使用共享模型决策，`review_rule` 为模型判断标准（最多 4096 字节），`review_combine` 为 `and`（默认）或 `or`，`reject_reason` 是最多 2048 字节的固定拒绝理由。
+
+正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `review_rule` 沿用启用模型的旧配置语义；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
 
 单次工具结果默认 64 KiB，包含 JSON 信封和转义开销，可容纳默认 12000 字符的正常中文检索上下文。字符数不等于字节数；显式更小预算或自定义更大检索输出仍可能得到 `budget_exhausted`。

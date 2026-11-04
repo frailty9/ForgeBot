@@ -71,7 +71,6 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.Handle("DELETE /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyDelete)))
 	mux.Handle("GET /v1/admin/groups/operations", s.authorize(http.HandlerFunc(s.adminGroupOperations)))
 	mux.Handle("GET /v1/admin/groups/support", s.authorize(http.HandlerFunc(s.adminGroupSupport)))
-	mux.Handle("POST /v1/admin/groups/review", s.authorize(http.HandlerFunc(s.adminGroupReview)))
 	mux.Handle("POST /v1/admin/groups/announcements", s.authorize(http.HandlerFunc(s.adminGroupAnnouncement)))
 	mux.Handle("POST /v1/admin/groups/recall", s.authorize(http.HandlerFunc(s.adminGroupRecall)))
 	s.server = &http.Server{

@@ -570,8 +570,8 @@ func (c RuntimeConfig) Validate() error {
 		if !bound[id] {
 			problems = append(problems, "group_management must reference a bound conversation")
 		}
-		if len(policy.ReviewRule) > 4096 || (policy.AutoReview && (!policy.ReviewEnabled || strings.TrimSpace(policy.ReviewRule) == "")) {
-			problems = append(problems, "automatic group review requires enabled review and a bounded nonblank rule")
+		if err := policy.Validate(); err != nil {
+			problems = append(problems, err.Error())
 		}
 	}
 	if err := c.Decision.Validate(); err != nil {

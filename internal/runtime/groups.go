@@ -87,15 +87,27 @@ func (m *Manager) Support(ctx context.Context, id string) (group.Support, error)
 	return actions.Support(ctx, id)
 }
 func (m *Manager) Review(ctx context.Context, id string, request group.ReviewRequest) error {
-	return m.groupAction(ctx, id, request.ConnectorID, "review", func(ctx context.Context, actions group.Actions) error { return actions.Review(ctx, id, request) })
+	return m.groupAction(ctx, id, request.ConnectorID, "review", request.ExpectedPolicy, func(ctx context.Context, actions group.Actions) error {
+		support, err := actions.Support(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !support.JoinReview {
+			return operation.New(operation.Unsupported, "connector does not support join review")
+		}
+		if request.Approve || !support.JoinReviewReason {
+			request.Reason = ""
+		}
+		return actions.Review(ctx, id, request)
+	})
 }
 func (m *Manager) Announce(ctx context.Context, id, text string) error {
-	return m.groupAction(ctx, id, "", "announcement", func(ctx context.Context, actions group.Actions) error { return actions.Announce(ctx, id, text) })
+	return m.groupAction(ctx, id, "", "announcement", nil, func(ctx context.Context, actions group.Actions) error { return actions.Announce(ctx, id, text) })
 }
 func (m *Manager) Recall(ctx context.Context, id, message string) error {
-	return m.groupAction(ctx, id, "", "recall", func(ctx context.Context, actions group.Actions) error { return actions.Recall(ctx, id, message) })
+	return m.groupAction(ctx, id, "", "recall", nil, func(ctx context.Context, actions group.Actions) error { return actions.Recall(ctx, id, message) })
 }
-func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string, call func(context.Context, group.Actions) error) error {
+func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string, expected *group.Policy, call func(context.Context, group.Actions) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	g := m.acquire()
@@ -114,7 +126,10 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 		return operation.New(operation.Conflict, "conversation binding changed")
 	}
 	policy := g.snapshot.Runtime.GroupManagement[id]
-	if (kind == "review" && !policy.ReviewEnabled) || (kind == "announcement" && !policy.Announcements) || (kind == "recall" && !policy.Recall) {
+	if expected != nil && !policy.Equal(*expected) {
+		return operation.New(operation.Conflict, "group review policy changed")
+	}
+	if (kind == "review" && (!policy.ReviewEnabled || !policy.AutoReview)) || (kind == "announcement" && !policy.Announcements) || (kind == "recall" && !policy.Recall) {
 		return operation.New(operation.Disabled, "group operation disabled by current configuration")
 	}
 	if m.Paused() {
@@ -132,9 +147,6 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 
 func (m *Manager) ListGroupOperations(ctx context.Context, limit int) ([]group.Record, error) {
 	return m.groups.List(ctx, limit)
-}
-func (m *Manager) ReviewJoinRequest(ctx context.Context, id string, revision uint64, approve bool, reason string) (group.Record, error) {
-	return m.groups.Review(ctx, id, revision, approve, reason)
 }
 func (m *Manager) PerformGroupAction(ctx context.Context, kind string, request group.ActionRequest) (group.Record, error) {
 	return m.groups.Perform(ctx, kind, request)

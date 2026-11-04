@@ -82,7 +82,7 @@ func (p *groupPort) Recall(context.Context, string, string) error   { p.calls.Ad
 
 func TestGroupOperationsBoundAuthorizedAndIdempotent(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {ReviewEnabled: true, Announcements: true, Recall: true}}
+	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`, Announcements: true, Recall: true}}
 	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -93,16 +93,13 @@ func TestGroupOperationsBoundAuthorizedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Shutdown(context.Background())
-	event := group.Event{ID: "request", Kind: group.JoinRequested, ConversationID: "local", ConnectorID: "echo", UserID: "u", Reference: "opaque", At: time.Now()}
-	if r, err := manager.HandleGroupEvent(context.Background(), event); err != nil || r.Verdict != "pending" {
+	event := group.Event{ID: "request", Kind: group.JoinRequested, ConversationID: "local", ConnectorID: "echo", UserID: "u", Reference: "opaque", Comment: "application", At: time.Now()}
+	if r, err := manager.HandleGroupEvent(context.Background(), event); err != nil || r.Verdict != "approved" {
 		t.Fatal(r, err)
 	}
 	list, err := manager.ListGroupOperations(context.Background(), 10)
-	if err != nil || len(list) != 1 {
+	if err != nil || len(list) != 0 {
 		t.Fatal(list, err)
-	}
-	if _, err = manager.ReviewJoinRequest(context.Background(), list[0].ID, 1, true, ""); err != nil {
-		t.Fatal(err)
 	}
 	request := group.ActionRequest{ID: "announce", ConversationID: "local", Text: "notice"}
 	if _, err = manager.PerformGroupAction(context.Background(), "announcement", request); err != nil {

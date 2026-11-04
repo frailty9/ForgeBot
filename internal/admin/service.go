@@ -221,9 +221,6 @@ func (s *Service) GroupOperations(ctx context.Context, limit int) ([]group.Recor
 func (s *Service) GroupSupport(ctx context.Context, id string) (group.Support, error) {
 	return s.runtime.Support(ctx, id)
 }
-func (s *Service) ReviewGroupRequest(ctx context.Context, id string, revision uint64, approve bool, reason string) (group.Record, error) {
-	return s.runtime.ReviewJoinRequest(ctx, id, revision, approve, reason)
-}
 func (s *Service) PerformGroupAction(ctx context.Context, kind string, request group.ActionRequest) (group.Record, error) {
 	return s.runtime.PerformGroupAction(ctx, kind, request)
 }

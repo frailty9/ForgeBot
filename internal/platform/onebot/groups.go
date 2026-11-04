@@ -21,7 +21,8 @@ type requestReference struct {
 	Target  string `json:"target"`
 }
 
-func (*Sender) GroupEventSupport() (bool, bool) { return true, true }
+func (*Sender) GroupEventSupport() (bool, bool)  { return true, true }
+func (*Sender) GroupReviewReasonSupported() bool { return true }
 
 func (e rawEvent) groupEvent(cfg Config) (group.Event, bool, error) {
 	target := scalar(e.GroupID)
@@ -65,7 +66,11 @@ func (s *Sender) ReviewGroupRequest(ctx context.Context, target string, request 
 	if reference.Target != target {
 		return operation.New(operation.Conflict, "join request group binding changed")
 	}
-	return s.groupAPI(ctx, "set_group_add_request", map[string]any{"flag": reference.Flag, "sub_type": reference.SubType, "approve": request.Approve, "reason": request.Reason}, nil)
+	payload := map[string]any{"flag": reference.Flag, "sub_type": reference.SubType, "approve": request.Approve}
+	if !request.Approve && request.Reason != "" {
+		payload["reason"] = request.Reason
+	}
+	return s.groupAPI(ctx, "set_group_add_request", payload, nil)
 }
 
 // _send_group_notice 是实现扩展；仅发布普通文本公告，不宣称 OneBot11 标准保证。

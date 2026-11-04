@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/decision"
@@ -19,74 +21,26 @@ type Service struct {
 	actions Actions
 	policy  Policies
 	now     func() time.Time
+	logger  *slog.Logger
+	mu      sync.Mutex
+	reviews map[string]time.Time
 }
 
-func New(store Store, actions Actions, policy Policies) *Service {
+func New(store Store, actions Actions, policy Policies, loggers ...*slog.Logger) *Service {
 	if policy == nil {
 		policy = func(string) (Policy, decision.Decider, bool) { return Policy{}, nil, false }
 	}
-	return &Service{store: store, actions: actions, policy: policy, now: time.Now}
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
+	return &Service{store: store, actions: actions, policy: policy, now: time.Now, logger: logger, reviews: map[string]time.Time{}}
 }
 
 func ID(parts ...string) string {
 	data, _ := json.Marshal(parts)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-func (s *Service) HandleEvent(ctx context.Context, event Event) (EventResult, error) {
-	if s.store == nil {
-		return EventResult{}, operation.New(operation.NotConfigured, "group operation store is not configured")
-	}
-	policy, decider, bound := s.policy(event.ConversationID)
-	if !bound {
-		return EventResult{}, operation.New(operation.NotFound, "conversation is not bound")
-	}
-	if event.Kind != JoinRequested {
-		return EventResult{Verdict: "ignored"}, nil
-	}
-	if !policy.ReviewEnabled {
-		return EventResult{Verdict: "disabled"}, nil
-	}
-	if len(event.Comment) > 8192 || len(event.Reference) > 4096 {
-		return EventResult{}, operation.New(operation.Invalid, "join event content exceeds limit")
-	}
-	if event.ID == "" || event.Reference == "" || event.ConnectorID == "" || event.UserID == "" {
-		return EventResult{}, operation.New(operation.Invalid, "join request identity is required")
-	}
-	if event.At.IsZero() {
-		event.At = s.now()
-	}
-	if event.At.Before(s.now().Add(-24*time.Hour)) || event.At.After(s.now().Add(5*time.Minute)) {
-		return EventResult{Verdict: "expired"}, nil
-	}
-	record := Record{ID: ID(event.ConnectorID, event.ConversationID, string(event.Kind), event.ID), Kind: string(JoinRequested), ConversationID: event.ConversationID, ConnectorID: event.ConnectorID, UserID: event.UserID, Reference: event.Reference, Comment: event.Comment, CreatedAt: event.At, ExpiresAt: event.At.Add(24 * time.Hour), Status: Pending}
-	record, created, err := s.store.Create(ctx, record)
-	if err != nil {
-		return EventResult{}, err
-	}
-	if !created {
-		return EventResult{Verdict: "duplicate"}, nil
-	}
-	if policy.AutoReview && strings.TrimSpace(policy.ReviewRule) != "" && decider != nil {
-		state, _ := json.Marshal(map[string]string{"rule": policy.ReviewRule, "application": event.Comment})
-		result, decisionErr := decider.Decide(decision.WithBudget(ctx, 2), decision.Request{TaskID: decision.JoinTaskID, Version: 1, State: state})
-		if decisionErr == nil {
-			recommendation := result.Answer["recommendation"]
-			if recommendation == "approve" || recommendation == "reject" {
-				current, _, bound := s.policy(event.ConversationID)
-				if !bound || current != policy {
-					return EventResult{Accepted: true, Verdict: "pending_policy_changed"}, nil
-				}
-				_, err = s.Review(ctx, record.ID, record.Revision, recommendation == "approve", "自动审核策略")
-				if err != nil {
-					return EventResult{Accepted: true, Verdict: "review_failed"}, err
-				}
-				return EventResult{Accepted: true, Verdict: "reviewed"}, nil
-			}
-		}
-	}
-	return EventResult{Accepted: true, Verdict: "pending"}, nil
 }
 
 func (s *Service) List(ctx context.Context, limit int) ([]Record, error) {
@@ -98,54 +52,6 @@ func (s *Service) List(ctx context.Context, limit int) ([]Record, error) {
 		records[i] = records[i].Public()
 	}
 	return records, err
-}
-
-// Review 用申请聚合自身的 revision 防止重复审批；不以多个动作ID规避同一申请的终态。
-func (s *Service) Review(ctx context.Context, id string, expected uint64, approve bool, reason string) (public Record, resultErr error) {
-	defer func() { public = public.Public() }()
-	if s.store == nil {
-		return Record{}, operation.New(operation.NotConfigured, "group operation store is not configured")
-	}
-	if s.actions == nil {
-		return Record{}, operation.New(operation.Unsupported, "group actions are unavailable")
-	}
-	r, err := s.store.Get(ctx, id)
-	if err != nil {
-		return r, err
-	}
-	if r.Kind != string(JoinRequested) {
-		return r, operation.New(operation.Invalid, "record is not a join request")
-	}
-	if r.Revision != expected {
-		return r, operation.New(operation.Conflict, "join request revision conflict")
-	}
-	if r.Status != Pending {
-		return r, operation.New(operation.Conflict, "join request already handled or execution uncertain")
-	}
-	if !r.ExpiresAt.After(s.now()) {
-		return r, operation.New(operation.Expired, "join request has expired")
-	}
-	policy, _, bound := s.policy(r.ConversationID)
-	if !bound || !policy.ReviewEnabled {
-		return r, operation.New(operation.Disabled, "join request review is disabled")
-	}
-	support, err := s.actions.Support(ctx, r.ConversationID)
-	if err != nil {
-		return r, err
-	}
-	if !support.JoinReview {
-		return r, operation.New(operation.Unsupported, "connector does not support join review")
-	}
-	if len(reason) > 2048 {
-		return r, operation.New(operation.Invalid, "review reason exceeds limit")
-	}
-	r.Decision = "reject"
-	if approve {
-		r.Decision = "approve"
-	}
-	return s.execute(ctx, r, func() error {
-		return s.actions.Review(ctx, r.ConversationID, ReviewRequest{ConnectorID: r.ConnectorID, Reference: r.Reference, Approve: approve, Reason: reason})
-	})
 }
 
 type ActionRequest struct {

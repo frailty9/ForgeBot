@@ -28,7 +28,11 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	if reporter, ok := target.sender.(group.EventReporter); ok {
 		joinEvents, memberEvents = reporter.GroupEventSupport()
 	}
-	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, Announcement: announce, Recall: recall, Permission: "unknown"}, nil
+	reviewReason := false
+	if reporter, ok := target.sender.(group.ReviewReasonReporter); ok {
+		reviewReason = review && reporter.GroupReviewReasonSupported()
+	}
+	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, Announcement: announce, Recall: recall, Permission: "unknown"}, nil
 }
 func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRequest) error {
 	target, err := r.groupDestination(id)
@@ -38,6 +42,10 @@ func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRe
 	port, ok := target.sender.(group.Reviewer)
 	if !ok {
 		return operation.New(operation.Unsupported, "connector does not support group review")
+	}
+	reporter, supportsReason := target.sender.(group.ReviewReasonReporter)
+	if request.Approve || !supportsReason || !reporter.GroupReviewReasonSupported() {
+		request.Reason = ""
 	}
 	return port.ReviewGroupRequest(ctx, target.target, request)
 }

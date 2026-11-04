@@ -44,7 +44,7 @@ func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	support, err := registry.Support(context.Background(), "g")
-	if err != nil || !support.JoinEvents || !support.MemberEvents || !support.Announcement || support.Permission != "unknown" || len(paths) != 0 {
+	if err != nil || !support.JoinEvents || !support.MemberEvents || !support.JoinReviewReason || !support.Announcement || support.Permission != "unknown" || len(paths) != 0 {
 		t.Fatal("support query is incorrect or probed network", support, err)
 	}
 	reference, _ := json.Marshal(requestReference{Flag: "opaque", SubType: "add", Target: "8"})
@@ -62,6 +62,36 @@ func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
 	}
 	if err := s.RecallGroupMessage(context.Background(), "9", "1"); err == nil || operation.Describe(err).Code != operation.PolicyDenied || len(paths) != 5 {
 		t.Fatal("cross-group recall allowed", err, paths)
+	}
+}
+
+func TestJoinReviewReasonOnlySentForRejection(t *testing.T) {
+	calls := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		_, hasReason := payload["reason"]
+		if payload["approve"] == true && hasReason {
+			t.Error("approval included rejection reason", payload)
+		}
+		if payload["approve"] == false && payload["reason"] != "请填写申请说明" {
+			t.Error(payload)
+		}
+		_, _ = io.WriteString(w, `{"status":"ok","retcode":0,"data":null}`)
+	}))
+	defer api.Close()
+	s := &Sender{cfg: testConfig(api.URL), client: api.Client()}
+	reference, _ := json.Marshal(requestReference{Flag: "opaque", SubType: "add", Target: "8"})
+	for _, approve := range []bool{true, false} {
+		if err := s.ReviewGroupRequest(context.Background(), "8", group.ReviewRequest{Reference: string(reference), Approve: approve, Reason: "请填写申请说明"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 2 {
+		t.Fatal(calls)
 	}
 }
 
