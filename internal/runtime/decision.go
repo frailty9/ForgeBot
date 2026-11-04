@@ -17,14 +17,14 @@ func (b Builder) withDecision(ctx context.Context, snapshot config.Snapshot, cli
 	if b.Decisions != nil {
 		return b, nil
 	}
-	opts := decision.Options{MaxConcurrent: snapshot.Runtime.Decision.MaxConcurrent}
+	opts := decision.Options{MaxConcurrent: snapshot.Runtime.Decision.MaxConcurrent, Logger: b.Logger}
 	var err error
-	opts.PrimaryTimeout, opts.FallbackTimeout, err = snapshot.Runtime.Decision.Timeouts()
+	opts.DMTimeout, opts.LLMTimeout, err = snapshot.Runtime.Decision.Timeouts()
 	if err != nil {
 		return b, err
 	}
 	if client != nil {
-		opts.Fallback = decision.LLMProvider{Client: client, Model: snapshot.Runtime.LLM.Model}
+		opts.LLM = decision.LLMProvider{Client: client, Model: snapshot.Runtime.LLM.Model}
 	}
 	if dm := snapshot.Runtime.Decision.DM; snapshot.Runtime.Decision.DMEnabled() {
 		key := ""
@@ -40,7 +40,7 @@ func (b Builder) withDecision(ctx context.Context, snapshot config.Snapshot, cli
 		if dm.MinConfidence != nil {
 			threshold = *dm.MinConfidence
 		}
-		opts.Primary = decision.JevProvider{Client: &http.Client{Timeout: opts.PrimaryTimeout}, Endpoint: dm.Endpoint, APIKey: key, Model: dm.Model, MinConfidence: threshold}
+		opts.DM = decision.JevProvider{Client: &http.Client{Timeout: opts.DMTimeout}, Endpoint: dm.Endpoint, APIKey: key, Model: dm.Model, MinConfidence: threshold}
 	}
 	scope := strings.TrimSpace(snapshot.Runtime.AnswerPolicy.Scope)
 	if scope == "" {

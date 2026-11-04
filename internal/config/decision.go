@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// DecisionConfig 是共享决策服务配置；DM 可缺省，LLM 后备不依赖此字段存在。
+// DecisionConfig 是共享决策服务配置；未启用 DM 时使用 LLM，每次最多一个模型请求。
 type DecisionConfig struct {
 	DM            *DecisionModelConfig `json:"dm,omitempty"`
 	DMTimeout     string               `json:"dm_timeout,omitempty"`
@@ -16,7 +16,7 @@ type DecisionConfig struct {
 	MaxConcurrent int                  `json:"max_concurrent,omitempty"`
 }
 type DecisionModelConfig struct {
-	// Disabled 允许完整保留供应商参数而不加载DM；关闭后直接使用LLM后备。
+	// Disabled 允许保留供应商参数而不加载 DM；关闭后直接使用 LLM。
 	Disabled      bool     `json:"disabled"`
 	Provider      string   `json:"provider"`
 	Endpoint      string   `json:"endpoint"`

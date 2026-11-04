@@ -21,7 +21,7 @@ func (s forbiddenDMSecrets) Get(context.Context, string) (string, error) {
 	return "", nil
 }
 
-func TestDisabledDMUsesLLMFallbackWithoutResolvingCredential(t *testing.T) {
+func TestDisabledDMUsesLLMWithoutResolvingCredential(t *testing.T) {
 	snapshot := testSnapshot()
 	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Disabled: true, Provider: "jev", Endpoint: "http://127.0.0.1:1", APIKeyRef: "unused"}
 	modelCalls := 0

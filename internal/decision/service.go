@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -31,11 +32,12 @@ type Result struct {
 }
 
 type Options struct {
-	Primary         Provider
-	Fallback        Provider
-	PrimaryTimeout  time.Duration
-	FallbackTimeout time.Duration
-	MaxConcurrent   int
+	DM            Provider
+	LLM           Provider
+	DMTimeout     time.Duration
+	LLMTimeout    time.Duration
+	MaxConcurrent int
+	Logger        *slog.Logger
 }
 
 type Service struct {
@@ -45,20 +47,23 @@ type Service struct {
 }
 
 func New(tasks []Task, options Options) (*Service, error) {
-	if options.PrimaryTimeout == 0 {
-		options.PrimaryTimeout = 3 * time.Second
+	if options.Logger == nil {
+		options.Logger = slog.Default()
 	}
-	if options.FallbackTimeout == 0 {
-		options.FallbackTimeout = 8 * time.Second
+	if options.DMTimeout == 0 {
+		options.DMTimeout = 3 * time.Second
+	}
+	if options.LLMTimeout == 0 {
+		options.LLMTimeout = 8 * time.Second
 	}
 	if options.MaxConcurrent == 0 {
 		options.MaxConcurrent = 16
 	}
-	if options.PrimaryTimeout <= 0 || options.FallbackTimeout <= 0 || options.MaxConcurrent < 1 || options.MaxConcurrent > 256 {
+	if options.DMTimeout <= 0 || options.LLMTimeout <= 0 || options.MaxConcurrent < 1 || options.MaxConcurrent > 256 {
 		return nil, fmt.Errorf("invalid decision service limits")
 	}
 	s := &Service{tasks: map[string]Task{}, options: options, slots: make(chan struct{}, options.MaxConcurrent)}
-	for _, task := range tasks {
+	for _, task := range append(append([]Task(nil), tasks...), booleanTask()) {
 		if err := task.Validate(); err != nil {
 			return nil, err
 		}
@@ -82,7 +87,7 @@ type budget struct {
 	cache     map[[32]byte]Result
 }
 
-// WithBudget 在聊天 run 或群事件入口调用；同一 context 的后备和多个判断共享预算。
+// WithBudget 在聊天 run 或群事件入口调用；同一 context 的多个判断共享预算。
 func WithBudget(ctx context.Context, max int) context.Context {
 	if _, exists := ctx.Value(budgetKey{}).(*budget); exists {
 		return ctx
@@ -90,7 +95,7 @@ func WithBudget(ctx context.Context, max int) context.Context {
 	return context.WithValue(ctx, budgetKey{}, &budget{remaining: max, cache: map[[32]byte]Result{}})
 }
 
-func (s *Service) Decide(ctx context.Context, request Request) (Result, error) {
+func (s *Service) Decide(ctx context.Context, request Request) (result Result, decisionErr error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -123,65 +128,62 @@ func (s *Service) Decide(ctx context.Context, request Request) (Result, error) {
 		return cloneResult(cached), nil
 	}
 	b.mu.Unlock()
-	result := Result{Answer: task.Unknown(), Source: "rules"}
-	for _, candidate := range []struct {
-		source   string
-		provider Provider
-		timeout  time.Duration
-	}{{"dm", s.options.Primary, s.options.PrimaryTimeout}, {"llm", s.options.Fallback, s.options.FallbackTimeout}} {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		if candidate.provider == nil {
-			continue
-		}
-		select {
-		case s.slots <- struct{}{}:
-		case <-ctx.Done():
-			return result, ctx.Err()
-		}
-		b.mu.Lock()
-		available := b.remaining > 0
-		if available {
-			b.remaining--
-		}
-		b.mu.Unlock()
-		if !available {
-			<-s.slots
-			result.Reason = operation.BudgetExhausted
-			break
-		}
-		attemptCtx, cancel := context.WithTimeout(ctx, candidate.timeout)
-		answer, err := candidate.provider.Decide(attemptCtx, ProviderRequest{Task: task, State: append(json.RawMessage(nil), request.State...), Media: append([]llm.ContentPart(nil), request.Media...)})
-		if err == nil && attemptCtx.Err() != nil {
-			err = attemptCtx.Err()
-		}
-		cancel()
-		<-s.slots
-		if err == nil {
-			err = operation.Wrap("decision.validate", operation.Invalid, operation.NotStarted, task.ValidateAnswer(answer))
-		}
-		attempt := Attempt{Source: candidate.source}
-		if err != nil {
-			attempt.Failure = operation.Describe(err)
-			result.Reason = attempt.Failure.Code
-			result.Attempts = append(result.Attempts, attempt)
-			continue
-		}
-		result.Answer = cloneAnswer(answer)
-		result.Source = candidate.source
-		result.Attempts = append(result.Attempts, attempt)
-		// 合法 unknown 是可采纳的“不确定”，不能为得到肯定答案继续换模型。
-		b.mu.Lock()
-		if len(b.cache) < 8 {
-			b.cache[hash] = cloneResult(result)
-		}
-		b.mu.Unlock()
-		return result, nil
+	// 在调用前只选一个模型；DM 故障绝不转调 LLM。
+	provider, source, timeout := s.options.DM, "dm", s.options.DMTimeout
+	if provider == nil {
+		provider, source, timeout = s.options.LLM, "llm", s.options.LLMTimeout
 	}
-	if result.Reason == "" {
+	result = Result{Answer: task.Unknown(), Source: source}
+	defer func() {
+		s.options.Logger.InfoContext(ctx, "model decision", "task_id", request.TaskID,
+			"source", source, "answer", result.Answer, "failure", operation.Describe(decisionErr))
+	}()
+	if provider == nil {
 		result.Reason = operation.NotConfigured
+		return result, operation.New(result.Reason, "decision model is not configured")
 	}
+	select {
+	case s.slots <- struct{}{}:
+	case <-ctx.Done():
+		return result, ctx.Err()
+	}
+	defer func() { <-s.slots }()
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	b.mu.Lock()
+	available := b.remaining > 0
+	if available {
+		b.remaining--
+	}
+	b.mu.Unlock()
+	if !available {
+		result.Reason = operation.BudgetExhausted
+		return result, operation.New(result.Reason, "decision model budget exhausted")
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	answer, err := provider.Decide(attemptCtx, ProviderRequest{Task: task, State: append(json.RawMessage(nil), request.State...), Media: append([]llm.ContentPart(nil), request.Media...)})
+	if err == nil {
+		err = attemptCtx.Err()
+	}
+	if err == nil {
+		err = operation.Wrap("decision.validate", operation.Invalid, operation.NotStarted, task.ValidateAnswer(answer))
+	}
+	attempt := Attempt{Source: source}
+	if err != nil {
+		attempt.Failure = operation.Describe(err)
+		result.Reason = attempt.Failure.Code
+		result.Attempts = []Attempt{attempt}
+		return result, operation.Wrap("decision.model", operation.Unknown, operation.NotStarted, err)
+	}
+	result.Answer = cloneAnswer(answer)
+	result.Attempts = []Attempt{attempt}
+	b.mu.Lock()
+	if len(b.cache) < 8 {
+		b.cache[hash] = cloneResult(result)
+	}
+	b.mu.Unlock()
 	return result, nil
 }
 

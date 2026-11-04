@@ -20,7 +20,7 @@ type LLMProvider struct {
 
 func (p LLMProvider) Decide(ctx context.Context, request ProviderRequest) (Answer, error) {
 	if p.Client == nil {
-		return nil, operation.New(operation.NotConfigured, "decision fallback LLM is unavailable")
+		return nil, operation.New(operation.NotConfigured, "decision LLM is unavailable")
 	}
 	definition, _ := json.Marshal(map[string]any{"task": request.Task, "output_schema": request.Task.Schema()})
 	message := llm.TextMessage(llm.RoleUser, string(request.State))
