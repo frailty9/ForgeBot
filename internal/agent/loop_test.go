@@ -168,7 +168,7 @@ func TestLimitsJSONRejectsUnknownAndUsesDefaults(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{}`), &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if defaults.MaxTurns != 6 || defaults.Timeout != 90*time.Second {
+	if defaults.MaxTurns != 6 || defaults.Timeout != 90*time.Second || defaults.MaxResultBytes != 64<<10 {
 		t.Fatalf("defaults %+v", defaults)
 	}
 }

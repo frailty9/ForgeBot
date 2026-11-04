@@ -31,7 +31,7 @@ func (l Limits) Defaults() Limits {
 		l.MaxToolsPerTurn = 4
 	}
 	if l.MaxResultBytes == 0 {
-		l.MaxResultBytes = 16 << 10
+		l.MaxResultBytes = 64 << 10
 	}
 	if l.MaxContextBytes == 0 {
 		l.MaxContextBytes = 128 << 10

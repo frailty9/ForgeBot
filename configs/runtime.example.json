@@ -49,7 +49,7 @@
     "max_turns": 6,
     "max_tool_calls": 12,
     "max_tools_per_turn": 4,
-    "max_result_bytes": 16384,
+    "max_result_bytes": 65536,
     "max_context_bytes": 131072
   },
   "modules": {
