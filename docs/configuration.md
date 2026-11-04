@@ -597,7 +597,7 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 
 `native.proactive_reply` 默认关闭。启用后仍需在 `options.groups` 中按逻辑群组 ID
 显式打开；`silence` 和 `max_window` 控制等待时间，`max_buffered`、
-`max_text_len` 和 `max_concurrent` 提供资源边界。可信管理员引用待处理问题作答
+`max_text_len` 和 `max_concurrent` 提供资源边界。可信管理员引用 ID 命中同群待处理或生成中问题作答
 时，模块按群暂时让位，缺省 `yield_duration=5m`，可在模块 options 中调整。平台群主/管理员只作为可信接答身份，不自动授予 ForgeBot 配置或凭据权限。无待答问题的普通管理员闲聊不调用接答模型，也不刷新让位时长；有待答/生成中问题时可通过共享 Decision 判断语义接答。
 
 让位只暂停未 @ 的主动插话；同条消息引用问题并 @Bot 时仍走正常问答与范围检查。旧待答项丢弃，已生成的主动回复在发送前复查群版本，即使到期也不补发。状态跨无关热更新保留，进程重启清空。管理群的 `proactive` 运维命令增加 `/proactive yield`（本群让位 5 分钟）和 `/proactive resume`（提前恢复）；这与全局 pause/resume 相互独立。

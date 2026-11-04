@@ -97,7 +97,7 @@ type interventionDecider struct {
 
 func (d *interventionDecider) Decide(_ context.Context, r decision.Request) (decision.Result, error) {
 	d.calls++
-	return decision.Result{Answer: decision.Answer{"intervened": d.answer}}, nil
+	return decision.Result{Answer: decision.Answer{"matches": d.answer}}, nil
 }
 
 func TestOrdinaryAdminChatDoesNotYieldButSemanticAnswerDoes(t *testing.T) {

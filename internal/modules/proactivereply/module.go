@@ -203,7 +203,7 @@ func (i *instance) handle(ctx context.Context, message messaging.InboundMessage,
 	i.responder = responder
 	i.mu.Unlock()
 	if message.TrustedResponder() && i.options.Groups[message.ConversationID].Enabled {
-		intervened := message.ReplyToMessageID != "" && (i.pool.HasPending(message.ConversationID, message.ReplyToMessageID) || message.HasQuotedContent())
+		intervened := message.ReplyToMessageID != "" && i.pool.HasPending(message.ConversationID, message.ReplyToMessageID)
 		pending := i.pool.PendingTranscript(message.ConversationID)
 		if !intervened && !message.Addressed() && pending != "" && strings.TrimSpace(message.Text) != "" && i.decisions != nil {
 			text := []rune(message.Text)
@@ -211,8 +211,8 @@ func (i *instance) handle(ctx context.Context, message messaging.InboundMessage,
 				text = text[:1000]
 			}
 			state, _ := json.Marshal(map[string]any{"pending": pending, "administrator_reply": string(text)})
-			result, err := i.decisions.Decide(ctx, decision.Request{TaskID: decision.InterventionTaskID, Version: 1, State: state})
-			intervened = err == nil && result.Answer["intervened"] == "yes"
+			answer, err := decision.DecideBool(ctx, i.decisions, "可信管理员是否正在对待答问题给出实质回答或明确接管；普通闲聊、只问新问题不算接管。", state)
+			intervened = err == nil && answer
 		}
 		if intervened {
 			i.yield.Suspend(message.ConversationID, i.options.YieldDuration)
