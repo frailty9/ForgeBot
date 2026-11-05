@@ -108,7 +108,7 @@ func TestAllEngineRepliesUseReplyHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	sender := newRecordedSender()
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: sender, Decisions: fixedDecider{"respond": "yes"}, LLM: &fakeLLM{response: llm.Response{Text: "reply"}}, Policy: testPolicy(), Hooks: chain, Generation: 42}, nil)
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: sender, LLM: &fakeLLM{response: llm.Response{Text: "reply"}}, Policy: testPolicy(), Hooks: chain, Generation: 42}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

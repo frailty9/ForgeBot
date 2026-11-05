@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -54,77 +53,8 @@ func (s *Service) List(ctx context.Context, limit int) ([]Record, error) {
 	return records, err
 }
 
-type ActionRequest struct {
-	ID             string `json:"id"`
-	ConversationID string `json:"conversation_id"`
-	Text           string `json:"text,omitempty"`
-	MessageID      string `json:"message_id,omitempty"`
-}
-
-func (s *Service) Perform(ctx context.Context, kind string, request ActionRequest) (Record, error) {
-	if s.store == nil {
-		return Record{}, operation.New(operation.NotConfigured, "group operation store is not configured")
-	}
-	if s.actions == nil {
-		return Record{}, operation.New(operation.Unsupported, "group actions are unavailable")
-	}
-	if request.ID == "" || len(request.ID) > 128 || request.ConversationID == "" {
-		return Record{}, operation.New(operation.Invalid, "operation id and conversation are required")
-	}
-	policy, _, bound := s.policy(request.ConversationID)
-	if !bound {
-		return Record{}, operation.New(operation.NotFound, "conversation is not bound")
-	}
-	support, err := s.actions.Support(ctx, request.ConversationID)
-	if err != nil {
-		return Record{}, err
-	}
-	var call func() error
-	switch kind {
-	case "announcement":
-		if !policy.Announcements {
-			return Record{}, operation.New(operation.Disabled, "announcements are disabled")
-		}
-		if !support.Announcement {
-			return Record{}, operation.New(operation.Unsupported, "connector does not support announcements")
-		}
-		if strings.TrimSpace(request.Text) == "" || len(request.Text) > 8192 {
-			return Record{}, operation.New(operation.Invalid, "announcement requires 1..8192 bytes")
-		}
-		call = func() error { return s.actions.Announce(ctx, request.ConversationID, request.Text) }
-	case "recall":
-		if !policy.Recall {
-			return Record{}, operation.New(operation.Disabled, "recall is disabled")
-		}
-		if !support.Recall {
-			return Record{}, operation.New(operation.Unsupported, "connector does not support recall")
-		}
-		if request.MessageID == "" || len(request.MessageID) > 256 {
-			return Record{}, operation.New(operation.Invalid, "recall message id is required")
-		}
-		call = func() error { return s.actions.Recall(ctx, request.ConversationID, request.MessageID) }
-	default:
-		return Record{}, operation.New(operation.Unsupported, "unknown group action")
-	}
-	data, _ := json.Marshal(request)
-	hash := sha256.Sum256(data)
-	r := Record{ID: ID("action", kind, request.ConversationID, request.ID), Kind: kind, ConversationID: request.ConversationID, CreatedAt: s.now(), Status: Pending, Fingerprint: fmt.Sprintf("%x", hash)}
-	saved, created, err := s.store.Create(ctx, r)
-	if err != nil {
-		return saved, err
-	}
-	if !created {
-		if saved.Fingerprint != r.Fingerprint {
-			return saved.Public(), operation.New(operation.Conflict, "idempotency key reused with different action content")
-		}
-		if saved.Status == Done {
-			return saved.Public(), nil
-		}
-		return saved.Public(), operation.New(operation.Conflict, "action already started; inspect execution state before retry")
-	}
-	return s.execute(ctx, saved, call)
-}
-
+// execute 先落 executing 再调用外部副作用，结果有界落盘；超时等未知结果
+// 记为 unknown，不自动重试。当前仅欢迎语事件投递使用。
 func (s *Service) execute(ctx context.Context, r Record, call func() error) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return r.Public(), err

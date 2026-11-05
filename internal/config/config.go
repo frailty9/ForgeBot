@@ -84,7 +84,6 @@ func (c StorageConfig) Kind() string {
 type RuntimeConfig struct {
 	GroupManagement    map[string]group.Policy   `json:"group_management,omitempty"`
 	Decision           DecisionConfig            `json:"decision"`
-	AnswerPolicy       AnswerPolicy              `json:"answer_policy"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
 	Agent              agent.Limits              `json:"agent"`
 	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
@@ -577,9 +576,6 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Decision.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.AnswerPolicy.Validate(); err != nil {
-		problems = append(problems, err.Error())
-	}
 	if err := c.ConversationMemory.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -894,7 +890,6 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 		"runtime": map[string]any{
 			"group_management":    c.Runtime.GroupManagement,
 			"decision":            c.Runtime.Decision.Public(),
-			"answer_policy":       c.Runtime.AnswerPolicy,
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
 			"agent":               c.Runtime.Agent.Defaults(),
 			"log":                 c.Runtime.Log, "bot": c.Runtime.Bot,

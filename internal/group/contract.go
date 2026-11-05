@@ -55,27 +55,17 @@ type Reviewer interface {
 type ReviewReasonReporter interface {
 	GroupReviewReasonSupported() bool
 }
-type Announcer interface {
-	PublishGroupAnnouncement(context.Context, string, string) error
-}
-type Recaller interface {
-	RecallGroupMessage(context.Context, string, string) error
-}
 type Support struct {
 	JoinEvents       bool   `json:"join_events"`
 	MemberEvents     bool   `json:"member_events"`
 	JoinReview       bool   `json:"join_review"`
 	JoinReviewReason bool   `json:"join_review_reason"`
-	Announcement     bool   `json:"announcement"`
-	Recall           bool   `json:"recall"`
 	Permission       string `json:"permission"`
 }
 type Actions interface {
 	// Support 只读本地适配能力元数据，不主动探测远端权限或触发网络请求。
 	Support(context.Context, string) (Support, error)
 	Review(context.Context, string, ReviewRequest) error
-	Announce(context.Context, string, string) error
-	Recall(context.Context, string, string) error
 }
 
 // EventReporter 仅声明适配器实现了哪些事件，不保证远端服务已开启上报。
@@ -91,8 +81,6 @@ type Policy struct {
 	ReviewModelEnabled *bool  `json:"review_model_enabled,omitempty"`
 	ReviewCombine      string `json:"review_combine,omitempty"`
 	RejectReason       string `json:"reject_reason,omitempty"`
-	Announcements      bool   `json:"announcements"`
-	Recall             bool   `json:"recall"`
 }
 
 type Status string

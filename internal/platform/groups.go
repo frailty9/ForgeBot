@@ -22,8 +22,6 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 		return group.Support{}, err
 	}
 	_, review := target.sender.(group.Reviewer)
-	_, announce := target.sender.(group.Announcer)
-	_, recall := target.sender.(group.Recaller)
 	joinEvents, memberEvents := false, false
 	if reporter, ok := target.sender.(group.EventReporter); ok {
 		joinEvents, memberEvents = reporter.GroupEventSupport()
@@ -32,7 +30,7 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	if reporter, ok := target.sender.(group.ReviewReasonReporter); ok {
 		reviewReason = review && reporter.GroupReviewReasonSupported()
 	}
-	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, Announcement: announce, Recall: recall, Permission: "unknown"}, nil
+	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, Permission: "unknown"}, nil
 }
 func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRequest) error {
 	target, err := r.groupDestination(id)
@@ -48,26 +46,4 @@ func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRe
 		request.Reason = ""
 	}
 	return port.ReviewGroupRequest(ctx, target.target, request)
-}
-func (r *Registry) Announce(ctx context.Context, id, text string) error {
-	target, err := r.groupDestination(id)
-	if err != nil {
-		return err
-	}
-	port, ok := target.sender.(group.Announcer)
-	if !ok {
-		return operation.New(operation.Unsupported, "connector does not support announcements")
-	}
-	return port.PublishGroupAnnouncement(ctx, target.target, text)
-}
-func (r *Registry) Recall(ctx context.Context, id, message string) error {
-	target, err := r.groupDestination(id)
-	if err != nil {
-		return err
-	}
-	port, ok := target.sender.(group.Recaller)
-	if !ok {
-		return operation.New(operation.Unsupported, "connector does not support recall")
-	}
-	return port.RecallGroupMessage(ctx, target.target, message)
 }

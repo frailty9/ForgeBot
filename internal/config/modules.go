@@ -63,18 +63,6 @@ func ValidateModules(entries map[string]ModuleConfig) error {
 // already held by the runtime. It is not a redaction or serialization operation.
 func (c RuntimeConfig) Clone() RuntimeConfig {
 	c.GroupManagement = maps.Clone(c.GroupManagement)
-	if c.AnswerPolicy.Evidence != nil {
-		copy := *c.AnswerPolicy.Evidence
-		c.AnswerPolicy.Evidence = &copy
-		if data, err := json.Marshal(copy.Arguments); err == nil {
-			c.AnswerPolicy.Evidence.Arguments = nil
-			_ = json.Unmarshal(data, &c.AnswerPolicy.Evidence.Arguments)
-		}
-	}
-	if c.AnswerPolicy.AllowDaily != nil {
-		copy := *c.AnswerPolicy.AllowDaily
-		c.AnswerPolicy.AllowDaily = &copy
-	}
 	if c.Decision.DM != nil {
 		copy := *c.Decision.DM
 		c.Decision.DM = &copy

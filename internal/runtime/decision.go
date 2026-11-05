@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/decision"
@@ -42,10 +41,6 @@ func (b Builder) withDecision(ctx context.Context, snapshot config.Snapshot, cli
 		}
 		opts.DM = decision.JevProvider{Client: &http.Client{Timeout: opts.DMTimeout}, Endpoint: dm.Endpoint, APIKey: key, Model: dm.Model, MinConfidence: threshold}
 	}
-	scope := strings.TrimSpace(snapshot.Runtime.AnswerPolicy.Scope)
-	if scope == "" {
-		scope = "未限制专业主题，允许普通有效请求；仍区分日常互动和主动答复必要性。"
-	}
-	b.Decisions, err = decision.New(decision.BuiltinTasks(scope), opts)
+	b.Decisions, err = decision.New(nil, opts)
 	return b, err
 }

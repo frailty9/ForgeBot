@@ -10,11 +10,10 @@ import (
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/group"
-	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 )
 
-func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
+func TestGroupReviewUsesOneBotWithoutProbingSupport(t *testing.T) {
 	var paths []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -25,14 +24,7 @@ func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
 		if r.URL.Path == "/set_group_add_request" && (payload["flag"] != "opaque" || payload["sub_type"] != "add" || payload["approve"] != true) {
 			t.Error("incorrect review payload", payload)
 		}
-		if r.URL.Path == "/_send_group_notice" && (payload["content"] != "notice" || payload["group_id"] != float64(8)) {
-			t.Error("incorrect announcement", payload)
-		}
-		data := any(nil)
-		if r.URL.Path == "/get_msg" {
-			data = map[string]any{"message_type": "group", "group_id": 8}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "retcode": 0, "data": data})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "retcode": 0, "data": nil})
 	}))
 	defer api.Close()
 	s := &Sender{cfg: testConfig(api.URL), client: api.Client(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -44,24 +36,15 @@ func TestGroupActionsUseOneBotAndVerifyRecallGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	support, err := registry.Support(context.Background(), "g")
-	if err != nil || !support.JoinEvents || !support.MemberEvents || !support.JoinReviewReason || !support.Announcement || support.Permission != "unknown" || len(paths) != 0 {
+	if err != nil || !support.JoinEvents || !support.MemberEvents || !support.JoinReviewReason || support.Permission != "unknown" || len(paths) != 0 {
 		t.Fatal("support query is incorrect or probed network", support, err)
 	}
 	reference, _ := json.Marshal(requestReference{Flag: "opaque", SubType: "add", Target: "8"})
 	if err := s.ReviewGroupRequest(context.Background(), "8", group.ReviewRequest{Reference: string(reference), Approve: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PublishGroupAnnouncement(context.Background(), "8", "notice"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RecallGroupMessage(context.Background(), "8", "1"); err != nil {
-		t.Fatal(err)
-	}
-	if len(paths) != 4 || paths[2] != "/get_msg" || paths[3] != "/delete_msg" {
+	if len(paths) != 1 || paths[0] != "/set_group_add_request" {
 		t.Fatal(paths)
-	}
-	if err := s.RecallGroupMessage(context.Background(), "9", "1"); err == nil || operation.Describe(err).Code != operation.PolicyDenied || len(paths) != 5 {
-		t.Fatal("cross-group recall allowed", err, paths)
 	}
 }
 

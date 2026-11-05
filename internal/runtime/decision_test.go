@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/config"
@@ -27,28 +28,29 @@ func TestDisabledDMUsesLLMWithoutResolvingCredential(t *testing.T) {
 	modelCalls := 0
 	client := moduleClient(func(context.Context, llm.Request) (llm.Response, error) {
 		modelCalls++
-		return llm.Response{Text: `{"scope":"in_domain","respond":"yes","evidence":"none"}`}, nil
+		return llm.Response{Text: `{"matches":"yes"}`}, nil
 	})
 	builder, err := (Builder{Secrets: forbiddenDMSecrets{t}}).withDecision(context.Background(), snapshot, client, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := builder.Decisions.Decide(context.Background(), decision.Request{TaskID: decision.AnswerTaskID, Version: 1, State: json.RawMessage(`{"message":"hello"}`)})
-	if err != nil || result.Source != "llm" || len(result.Attempts) != 1 || modelCalls != 1 {
-		t.Fatalf("disabled DM not bypassed: %+v %v", result, err)
+	matched, err := decision.DecideBool(context.Background(), builder.Decisions, "rule", json.RawMessage(`{"message":"hello"}`))
+	if err != nil || !matched || modelCalls != 1 {
+		t.Fatalf("disabled DM not bypassed: %v %v calls=%d", matched, err, modelCalls)
 	}
 }
 
-func TestNoDMUsesIsolatedLLMDecisionAndRejectsOutside(t *testing.T) {
+// 明确 @ 只请求回答模型一次，范围来自 system_prompt；无 DM 时决策走隔离的 LLM 路径。
+func TestMentionAnswersOnceAndNoDMDecisionStaysIsolated(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.AnswerPolicy.Scope = "配置文档"
+	snapshot.Runtime.Bot.SystemPrompt = "只回答配置文档相关问题"
 	calls := 0
 	client := moduleClient(func(_ context.Context, r llm.Request) (llm.Response, error) {
 		calls++
-		if len(r.Tools) != 0 || len(r.Messages) != 1 || r.MaxTokens != 512 {
-			t.Fatal("scope decision used chat path", r)
+		if !strings.Contains(r.Instructions, "配置文档") {
+			t.Error("system prompt missing from request instructions")
 		}
-		return llm.Response{Text: `{"scope":"outside","respond":"yes","evidence":"none"}`}, nil
+		return llm.Response{Text: "answer"}, nil
 	})
 	sender := registeredSender(t)
 	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, Secrets: configuredSecrets(t, "key"), ClientFactory: func(llm.ClientConfig) (llm.Client, error) { return client, nil }})
@@ -60,7 +62,21 @@ func TestNoDMUsesIsolatedLLMDecisionAndRejectsOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls != 1 || len(sender.sender.Sent()) != 1 {
-		t.Fatal("outside request reached answer model")
+		t.Fatalf("mention made %d model calls", calls)
+	}
+	isolated := moduleClient(func(_ context.Context, r llm.Request) (llm.Response, error) {
+		if len(r.Tools) != 0 || len(r.Messages) != 1 || r.MaxTokens != 512 {
+			t.Error("decision used chat path", r)
+		}
+		return llm.Response{Text: `{"matches":"no"}`}, nil
+	})
+	builder, err := (Builder{}).withDecision(context.Background(), snapshot, isolated, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := decision.DecideBool(context.Background(), builder.Decisions, "rule", json.RawMessage(`{"message":"hello"}`))
+	if err != nil || matched {
+		t.Fatalf("%v %v", matched, err)
 	}
 }
 
@@ -76,30 +92,14 @@ func TestDMCredentialReplacementRebuildsDecisionProvider(t *testing.T) {
 		}
 		answers := map[string]any{}
 		for name := range input.Questions {
-			task := decision.AnswerTask("scope")
-			options := task.Questions[name].Options
-			value := decision.Unknown
-			if name == "scope" {
-				value = "outside"
-			}
-			if name == "respond" {
-				value = "yes"
-			}
-			if name == "evidence" {
-				value = "none"
-			}
-			probabilities := map[string]float64{}
-			for option := range options {
-				probabilities[option] = 0
-			}
-			probabilities[value] = 1
+			probabilities := map[string]float64{"yes": 1, "no": 0, decision.Unknown: 0}
+			value := "yes"
 			answers[name] = map[string]any{"type": "choice", "choice": value, "confidence": 1, "probabilities": probabilities}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"answers": answers})
 	}))
 	defer api.Close()
 	snapshot := testSnapshot()
-	snapshot.Runtime.AnswerPolicy.Scope = "scope"
 	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Provider: "jev", Endpoint: api.URL, APIKeyRef: "dm/key"}
 	store := configuredSecrets(t, "answer-key")
 	candidate, err := store.Stage(context.Background(), "dm/key", "old-dm")
@@ -118,9 +118,12 @@ func TestDMCredentialReplacementRebuildsDecisionProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 直接调用当前代的共享服务，验证凭据替换后重建 DM 供应商。
 	send := func(id string) {
 		t.Helper()
-		if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "u", MessageID: id, Text: id, Mentioned: true}); err != nil {
+		current := manager.acquire()
+		defer current.mu.RUnlock()
+		if _, err := decision.DecideBool(context.Background(), current.decisions, "rule", json.RawMessage(`{"message":"`+id+`"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}

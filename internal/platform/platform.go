@@ -122,12 +122,6 @@ func (s *Set) Support(ctx context.Context, id string) (group.Support, error) {
 func (s *Set) Review(ctx context.Context, id string, request group.ReviewRequest) error {
 	return s.registry.Review(ctx, id, request)
 }
-func (s *Set) Announce(ctx context.Context, id, text string) error {
-	return s.registry.Announce(ctx, id, text)
-}
-func (s *Set) Recall(ctx context.Context, id, message string) error {
-	return s.registry.Recall(ctx, id, message)
-}
 
 func (s *Set) Start(ctx context.Context, handler Handler) error {
 	s.lifecycleMu.Lock()

@@ -12,20 +12,6 @@
     "llm_timeout": "8s",
     "max_concurrent": 16
   },
-  "answer_policy": {
-    "scope": "",
-    "allow_daily": true,
-    "refusal_text": "这个专业问题不在当前支持范围内，请咨询对应领域的支持。",
-    "clarification_text": "请说明这个问题与当前服务的关系，或补充必要信息。",
-    "evidence": {
-      "disabled": true,
-      "tool": "search_docs",
-      "query_argument": "query",
-      "arguments": {
-        "limit": 3
-      }
-    }
-  },
   "group_management": {
     "local": {
       "review_enabled": false,
@@ -34,9 +20,7 @@
       "review_regex": "\\S",
       "review_model_enabled": false,
       "review_combine": "and",
-      "reject_reason": "请填写符合本群要求的入群申请说明。",
-      "announcements": false,
-      "recall": false
+      "reject_reason": "请填写符合本群要求的入群申请说明。"
     }
   },
   "conversation_memory": {
@@ -80,6 +64,7 @@
     "native.proactive_reply": {
       "enabled": false,
       "options": {
+        "scope": "",
         "yield_duration": "5m",
         "silence": "4s",
         "max_window": "25s",

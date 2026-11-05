@@ -73,28 +73,6 @@ func (s *Sender) ReviewGroupRequest(ctx context.Context, target string, request 
 	return s.groupAPI(ctx, "set_group_add_request", payload, nil)
 }
 
-// _send_group_notice 是实现扩展；仅发布普通文本公告，不宣称 OneBot11 标准保证。
-// SnowLuma packages/onebot/src/actions/extended.ts（2026-11-03 核对）。
-func (s *Sender) PublishGroupAnnouncement(ctx context.Context, target, text string) error {
-	return s.groupAPI(ctx, "_send_group_notice", map[string]any{"group_id": numericOrString(target), "content": text}, nil)
-}
-func (s *Sender) RecallGroupMessage(ctx context.Context, target, message string) error {
-	var info struct {
-		GroupID     json.RawMessage `json:"group_id"`
-		MessageType string          `json:"message_type"`
-	}
-	if err := s.groupAPI(ctx, "get_msg", map[string]any{"message_id": numericOrString(message)}, &info); err != nil {
-		return err
-	}
-	if scalar(info.GroupID) == "" {
-		return operation.New(operation.Unsupported, "connector cannot confirm message group before recall")
-	}
-	if scalar(info.GroupID) != target || info.MessageType != "group" {
-		return operation.New(operation.PolicyDenied, "message does not belong to the requested group")
-	}
-	return s.groupAPI(ctx, "delete_msg", map[string]any{"message_id": numericOrString(message)}, nil)
-}
-
 func (s *Sender) groupAPI(ctx context.Context, action string, payload any, out any) error {
 	if err := ctx.Err(); err != nil {
 		return operation.Wrap("onebot."+action, operation.Canceled, operation.NotStarted, err)

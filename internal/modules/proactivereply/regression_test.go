@@ -83,7 +83,11 @@ func TestUnrelatedQuotedContentNeverDirectlyYieldsOrDropsPending(t *testing.T) {
 }
 
 func TestQuotedInflightQuestionYieldsAndInvalidatesGeneratedReply(t *testing.T) {
-	i, state := testInstance(t, nil, "1ms")
+	// 主动回复需先经决策放行；引用命中在途问题时直接让位，不再调用决策。
+	worth := decisionFunc(func(context.Context, decision.Request) (decision.Result, error) {
+		return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
+	})
+	i, state := testInstance(t, worth, "1ms")
 	entered, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(release) })
 	revision, _ := state.Snapshot("g")

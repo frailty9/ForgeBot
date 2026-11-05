@@ -14,7 +14,6 @@ import (
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/welcome"
-	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 )
 
@@ -71,18 +70,16 @@ func TestWelcomeOnlyActualJoinDeduplicatesAndHonorsPause(t *testing.T) {
 }
 
 func (*groupPort) Support(context.Context, string) (group.Support, error) {
-	return group.Support{JoinReview: true, Announcement: true, Recall: true, Permission: "unknown"}, nil
+	return group.Support{JoinReview: true, Permission: "unknown"}, nil
 }
 func (p *groupPort) Review(context.Context, string, group.ReviewRequest) error {
 	p.calls.Add(1)
 	return nil
 }
-func (p *groupPort) Announce(context.Context, string, string) error { p.calls.Add(1); return nil }
-func (p *groupPort) Recall(context.Context, string, string) error   { p.calls.Add(1); return nil }
 
-func TestGroupOperationsBoundAuthorizedAndIdempotent(t *testing.T) {
+func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`, Announcements: true, Recall: true}}
+	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`}}
 	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -101,22 +98,13 @@ func TestGroupOperationsBoundAuthorizedAndIdempotent(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatal(list, err)
 	}
-	request := group.ActionRequest{ID: "announce", ConversationID: "local", Text: "notice"}
-	if _, err = manager.PerformGroupAction(context.Background(), "announcement", request); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = manager.PerformGroupAction(context.Background(), "announcement", request); err != nil {
-		t.Fatal(err)
-	}
-	if port.calls.Load() != 2 {
-		t.Fatal("duplicate side effects", port.calls.Load())
+	if port.calls.Load() != 1 {
+		t.Fatal("review not executed exactly once", port.calls.Load())
 	}
 	manager.SetPaused(true)
-	request.ID = "paused"
-	if _, err = manager.PerformGroupAction(context.Background(), "announcement", request); err == nil || operation.Describe(err).Code != operation.Disabled {
-		t.Fatal("paused action executed", err)
-	}
-	if port.calls.Load() != 2 {
+	event.ID = "paused"
+	_, _ = manager.HandleGroupEvent(context.Background(), event)
+	if port.calls.Load() != 1 {
 		t.Fatal("paused runtime called connector")
 	}
 }

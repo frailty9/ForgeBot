@@ -235,14 +235,11 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		}
 	}
 	needsGroupStore := false
-	for _, policy := range cfg.Runtime.GroupManagement {
-		needsGroupStore = needsGroupStore || policy.Announcements || policy.Recall
-	}
 	if entry, ok := cfg.Runtime.Modules["native.welcome"]; ok && entry.Enabled != nil && *entry.Enabled {
 		needsGroupStore = true
 	}
 	if needsGroupStore && cfg.Static.GroupStorePath == "" {
-		add("group_store", operation.New(operation.NotConfigured, "group operation store required"), "启用群操作或欢迎语前配置 group_store_path")
+		add("group_store", operation.New(operation.NotConfigured, "group operation store required"), "启用欢迎语前配置 group_store_path")
 	}
 	apiKey := ""
 	var credentials interface {

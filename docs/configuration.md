@@ -76,7 +76,7 @@ admin_token: change-me
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
-| `group_store_path` | 空 | 公告、撤回等幂等动作和欢迎防重记录；入群自动审批不依赖此项；相对路径以 YAML 所在目录为基准 |
+| `group_store_path` | 空 | 欢迎语投递的防重记录；入群自动审批不依赖此项；相对路径以 YAML 所在目录为基准 |
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 
 YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。
@@ -87,7 +87,7 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 完整示例显式列出全部内置模块及其参数；只启用本地 Echo 渠道，可选功能（包括回复体验、短期记忆、主动介入、检索、反思、欢迎和群管理）明确关闭。需要的功能直接在对应位置启用；这属于完整示例的取值，不改变程序缺省行为或 `init` 生成的最小配置。
 
-可选的 `decision.dm` 与 `answer_policy.evidence` 也保留完整参数并设置 `disabled=true`。将对应值改为 false 即启用，省略整个对象等同于未配置；对象存在但不写 disabled 沿用启用语义。关闭 DM 时不解析其凭据、不发 DM 请求，直接用 LLM 作决策；已启用 DM 的调用失败直接返回错误，不改用 LLM；关闭 evidence 时不要求工具存在，也不触发预检索。关闭块的字段仍需通过结构校验，避免潜藏拼写错误。DM Key 可在关闭期间通过管理接口预先写入，启用前先准备好凭据。
+可选的 `decision.dm` 也保留完整参数并设置 `disabled=true`。将它改为 false 即启用，省略整个对象等同于未配置；对象存在但不写 disabled 沿用启用语义。关闭 DM 时不解析其凭据、不发 DM 请求，直接用 LLM 作决策；已启用 DM 的调用失败直接返回错误，不改用 LLM。关闭块的字段仍需通过结构校验，避免潜藏拼写错误。DM Key 可在关闭期间通过管理接口预先写入，启用前先准备好凭据。
 
 ```json
 {
@@ -172,9 +172,11 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 
 ### 5.4 `admission`
 
-### 业务范围与决策（`answer_policy` / `decision`）
+### 业务范围与决策（`bot.system_prompt` / `decision`）
 
-`answer_policy.scope` 缺省为空，表示通用问答；部署者填写业务说明后，全部问答都先判断范围，明确 @ 也不能绕过。`allow_daily` 缺省 true，只允许寒暄、自我介绍等日常互动，不代表短小或容易的域外专业问题可回答。`refusal_text`、`clarification_text` 可覆盖拒答与不确定时的说明。判断失败不会退到无限制回答，未 @ 主动判断不确定时保持沉默。
+业务范围直接写在 `bot.system_prompt` 中，例如“只回答本项目的接口、部署与故障排查；可简短回应寒暄；其他领域的专业问题请礼貌说明不在服务范围内”。明确 @ 的消息直接交给回答模型，宿主不预先分类、拒答或澄清。这是提示词约束，属于尽力遵守：刻意构造的输入仍可能让模型越界，需要用目标模型实测。
+
+未 @ 的主动插话另有一道判断，范围说明写在 `native.proactive_reply` 的 `scope` 选项里，见 6.6 节。
 
 `decision` 缺省不配置专用 DM，语义判断独立使用回答 LLM；`dm_timeout=3s`、`llm_timeout=8s`、`max_concurrent=16` 可调整。专用 Jev 示例：
 
@@ -188,17 +190,13 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
       "api_key_ref": "decision/default",
       "min_confidence": 0.6
     }
-  },
-  "answer_policy": {
-    "scope": "本项目的接口、部署与故障排查",
-    "allow_daily": true
   }
 }
 ```
 
-DM Key 与回答 Key 一样存入加密凭据仓储。配置 DM 后可以通过受认证的 `GET/PUT/DELETE /v1/admin/decision/api-key` 查看状态、写入或删除，PUT 格式为 `{"api_key":"..."}`；GET 不返回明文。缺少 DM Key、DM 超时或结构无效会受预算限制地回退 LLM；合法 unknown 或低置信不继续换模型争取肯定结果。图片判断先保留明确能力检查，当前 Jev 适配不启用图片资产，含图决策回退支持图片的回答 LLM。
+DM Key 与回答 Key 一样存入加密凭据仓储。配置 DM 后可以通过受认证的 `GET/PUT/DELETE /v1/admin/decision/api-key` 查看状态、写入或删除，PUT 格式为 `{"api_key":"..."}`；GET 不返回明文。缺少 DM Key、DM 超时或结构无效时直接返回错误，不改用 LLM；合法 unknown 或低置信也不换模型争取肯定结果。当前 Jev 适配不启用图片资产，选用 DM 时含图决策返回 unsupported，主动插话因此保持沉默。
 
-可选预检索通过 `answer_policy.evidence` 显式绑定工具，例如 `{"tool":"search_docs","query_argument":"query","arguments":{"limit":3}}`。只在允许范围内、决策要求依据时执行；工具不存在会拒绝候选配置，避免静默失效。它使用同一工具白名单、预算、Hook 与进度效果，结果计入 Agent Loop 上下文；不绑定则由提示词和模型按需选择工具。混合范围问题不预检索完整原问题，由回答模型在范围约束下选择工具。
+检索由回答模型按工具描述和系统提示词自行选择，宿主不做预检索。建议在 `bot.system_prompt` 中写明知识库覆盖哪些内容、涉及时先调用 `search_docs`，以及查不到时如何回答（例如说明不知道或建议联系管理员），减少模型不查就答的情况。
 
 顶层 `conversation_memory` 配置进程内短期问答：缺省启用（`disabled=false`），`ttl=20m`、`max_pairs=6`、`max_sessions=1000`、每会话等待队列 `max_pending=8`、`max_session_bytes=65536`、`max_total_bytes=8388608`。配置可以热更新；关闭会清空已有上下文，重新打开不恢复旧内容。
 
@@ -569,6 +567,7 @@ stdio 配置使用 `command`、`args`、`working_directory` 和 `environment`。
     "native.proactive_reply": {
       "enabled": false,
       "options": {
+        "scope": "本项目的接口、部署与故障排查",
         "silence": "4s",
         "max_window": "25s",
         "max_buffered": 50,
@@ -597,10 +596,14 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 
 `native.proactive_reply` 默认关闭。启用后仍需在 `options.groups` 中按逻辑群组 ID
 显式打开；`silence` 和 `max_window` 控制等待时间，`max_buffered`、
-`max_text_len` 和 `max_concurrent` 提供资源边界。可信管理员引用 ID 命中同群待处理或生成中问题作答
+`max_text_len` 和 `max_concurrent` 提供资源边界。
+
+每批待答消息在交给回答模型前先做一次决策（有 DM 用 DM，否则用回答 LLM），判断是否是一个值得主动回答、仍需帮助、尚无管理员接手的明确问题。填写 `scope`（最多 3072 字节）后，还要求问题属于该范围。只有明确“是”才继续；否、无法判断、决策故障或批次超过 3000 字符都保持沉默。通过后，回答模型的指令末尾还会附一句宿主提示：若问题不在服务范围内或不需要回答，就只输出空内容，空回复不会发送。`scope` 只供这次决策使用，不注入回答模型；回答的范围仍以 `bot.system_prompt` 为准，二者应保持一致。
+
+可信管理员引用 ID 命中同群待处理或生成中问题作答
 时，模块按群暂时让位，缺省 `yield_duration=5m`，可在模块 options 中调整。平台群主/管理员只作为可信接答身份，不自动授予 ForgeBot 配置或凭据权限。无待答问题的普通管理员闲聊不调用接答模型，也不刷新让位时长；有待答/生成中问题时可通过共享 Decision 判断语义接答。
 
-让位只暂停未 @ 的主动插话；同条消息引用问题并 @Bot 时仍走正常问答与范围检查。旧待答项丢弃，已生成的主动回复在发送前复查群版本，即使到期也不补发。状态跨无关热更新保留，进程重启清空。管理群的 `proactive` 运维命令增加 `/proactive yield`（本群让位 5 分钟）和 `/proactive resume`（提前恢复）；这与全局 pause/resume 相互独立。
+让位只暂停未 @ 的主动插话；同条消息引用问题并 @Bot 时仍走正常问答。旧待答项丢弃，已生成的主动回复在发送前复查群版本，即使到期也不补发。状态跨无关热更新保留，进程重启清空。管理群的 `proactive` 运维命令增加 `/proactive yield`（本群让位 5 分钟）和 `/proactive resume`（提前恢复）；这与全局 pause/resume 相互独立。
 
 检索预回复只在工具通过白名单和预算校验且实际准备执行时产生。
 每次请求最多尝试一次；发送失败不阻止检索。它是程序行为，不是开放给 LLM 的发送工具。

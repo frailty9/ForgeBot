@@ -208,29 +208,9 @@ func (b Builder) build(ctx context.Context, snapshot config.Snapshot, sender pla
 	}
 	policy := policyFrom(snapshot.Runtime)
 	policy.Loop = snapshot.Runtime.Agent.Defaults()
-	policy.Scope = snapshot.Runtime.AnswerPolicy.Scope
-	policy.AllowDaily = snapshot.Runtime.AnswerPolicy.DailyAllowed()
-	policy.RefusalText = snapshot.Runtime.AnswerPolicy.RefusalText
-	policy.ClarificationText = snapshot.Runtime.AnswerPolicy.ClarificationText
-	if binding := snapshot.Runtime.AnswerPolicy.Evidence; snapshot.Runtime.AnswerPolicy.EvidenceEnabled() {
-		found := false
-		if executor != nil {
-			for _, definition := range executor.Definitions() {
-				if definition.Name == binding.Tool {
-					found = true
-				}
-			}
-		}
-		if !found {
-			return nil, operation.New(operation.NotConfigured, "answer_policy.evidence references an unavailable tool")
-		}
-		policy.EvidenceTool = binding.Tool
-		policy.EvidenceQueryArgument = binding.QueryArgument
-		policy.EvidenceArguments = binding.Arguments
-	}
 	policy.ImageUnderstanding = snapshot.Runtime.LLM.ImageUnderstanding
 	policy.ExtensionInstructions = extensionInstructions
-	return bot.NewEngine(ctx, bot.Dependencies{Decisions: b.Decisions, Memory: b.Memory, Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
+	return bot.NewEngine(ctx, bot.Dependencies{Memory: b.Memory, Sender: sender, LLM: client, Tools: executor, ToolBudgets: moduleSet.ToolBudgets(), Commands: moduleSet.Commands(), Policy: policy, Hooks: moduleSet.Chain(), Participants: moduleSet.Participants(), CloseHooks: moduleSet.Close, Generation: generationSequence.Add(1)}, nil)
 }
 
 func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secretRef, secretValue string) (llm.Client, error) {

@@ -22,11 +22,20 @@ import (
 
 const ID = "native.proactive_reply"
 
+// 决策规则上限 4096 字节，预留固定说明后 scope 最多 3072 字节。
+const maxScopeBytes = 3072
+
+// 待判断片段上限；连同 JSON 封装仍低于布尔决策的 16384 字节 state 上限。
+const maxDecisionRunes = 3000
+
 type GroupOptions struct {
 	Enabled bool `json:"enabled"`
 }
 
 type Options struct {
+	// Scope 只供主动插话决策判断话题是否值得介入，不注入回答模型；
+	// 回答的范围约束由部署者写在 bot.system_prompt 中。
+	Scope         string
 	YieldDuration time.Duration
 	Silence       time.Duration
 	MaxWindow     time.Duration
@@ -64,6 +73,7 @@ func parse(raw json.RawMessage) (Options, error) {
 		return result, nil
 	}
 	var value struct {
+		Scope         string                  `json:"scope"`
 		YieldDuration string                  `json:"yield_duration"`
 		Silence       string                  `json:"silence"`
 		MaxWindow     string                  `json:"max_window"`
@@ -80,6 +90,10 @@ func parse(raw json.RawMessage) (Options, error) {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return Options{}, errors.New("invalid options suffix")
+	}
+	result.Scope = strings.TrimSpace(value.Scope)
+	if len(result.Scope) > maxScopeBytes {
+		return Options{}, errors.New("scope must not exceed 3072 bytes")
 	}
 	var err error
 	if value.YieldDuration != "" {
@@ -137,6 +151,7 @@ func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return map[string]any{
+		"scope":          options.Scope,
 		"yield_duration": options.YieldDuration.String(),
 		"silence":        options.Silence.String(), "max_window": options.MaxWindow.String(),
 		"max_buffered": options.MaxBuffered, "max_text_len": options.MaxTextLen,
@@ -253,12 +268,35 @@ func (i *instance) flush(ctx context.Context, batch proactive.Batch) {
 	if !i.yield.CanSend(batch.ConversationID, trigger.Revision) {
 		return
 	}
+	text := batch.Transcript(i.options.MaxTextLen)
+	if !i.worthReplying(ctx, text) {
+		return
+	}
 	responder(ctx, messaging.InboundMessage{
 		ProactiveRevision: trigger.Revision,
 		ConversationID:    batch.ConversationID, UserID: trigger.UserID,
 		UserName: trigger.UserName, MessageID: trigger.MsgID,
-		Text: batch.Transcript(i.options.MaxTextLen), PromptSuffix: trigger.PromptSuffix,
+		Text: text, PromptSuffix: trigger.PromptSuffix,
 	})
+}
+
+// worthReplying 是主动插话的唯一一次决策：没有用户在等回复，误判就是打扰，
+// 因此未配置决策服务、故障、无法判断或输入被截断时一律沉默。
+func (i *instance) worthReplying(ctx context.Context, text string) bool {
+	if i.decisions == nil || strings.TrimSpace(text) == "" {
+		return false
+	}
+	runes := []rune(text)
+	if len(runes) > maxDecisionRunes {
+		return false
+	}
+	rule := "data.messages 是群聊中未 @ 机器人的消息。判断是否值得机器人谨慎地主动回答：应是一个明确的、仍需要帮助的问题，且没有可信管理员已经接手。闲聊、感叹、已被解答或无需回复的内容都不符合。"
+	if i.options.Scope != "" {
+		rule += "此外，问题必须属于以下服务范围，范围外的专业问题不符合：" + i.options.Scope
+	}
+	state, _ := json.Marshal(map[string]string{"messages": text})
+	worth, err := decision.DecideBool(ctx, i.decisions, rule, state)
+	return err == nil && worth
 }
 
 func (i *instance) Stats() proactive.Stats { return i.pool.Stats() }

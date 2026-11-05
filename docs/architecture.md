@@ -11,7 +11,7 @@ external platform
   -> core Admission (validation and deduplication)
   -> native module observers / participants / commands
   -> bot.Engine
-  -> scope decision / bounded agent loop / tools / llm
+  -> bounded agent loop / tools / llm
   -> messaging.OutboundMessage
   -> group registry (logical group -> connector target)
   -> connector sender
@@ -33,8 +33,8 @@ conversation memory and proactive yielding belong to the process Runtime,
 not an individual generation. A generation leases those services without
 closing them when its own Engine retires.
 
-Group requests and member events are separate from chat messages. Optional
-connector operations handle review, announcements and recall; native event
+Group requests and member events are separate from chat messages. The only
+optional connector operation is join review; native event
 modules return restricted reply intents for the current event. The host owns
 delivery, authorization, durable idempotency and execution certainty.
 

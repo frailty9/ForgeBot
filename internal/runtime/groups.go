@@ -101,12 +101,6 @@ func (m *Manager) Review(ctx context.Context, id string, request group.ReviewReq
 		return actions.Review(ctx, id, request)
 	})
 }
-func (m *Manager) Announce(ctx context.Context, id, text string) error {
-	return m.groupAction(ctx, id, "", "announcement", nil, func(ctx context.Context, actions group.Actions) error { return actions.Announce(ctx, id, text) })
-}
-func (m *Manager) Recall(ctx context.Context, id, message string) error {
-	return m.groupAction(ctx, id, "", "recall", nil, func(ctx context.Context, actions group.Actions) error { return actions.Recall(ctx, id, message) })
-}
 func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string, expected *group.Policy, call func(context.Context, group.Actions) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -129,7 +123,7 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 	if expected != nil && !policy.Equal(*expected) {
 		return operation.New(operation.Conflict, "group review policy changed")
 	}
-	if (kind == "review" && (!policy.ReviewEnabled || !policy.AutoReview)) || (kind == "announcement" && !policy.Announcements) || (kind == "recall" && !policy.Recall) {
+	if kind == "review" && (!policy.ReviewEnabled || !policy.AutoReview) {
 		return operation.New(operation.Disabled, "group operation disabled by current configuration")
 	}
 	if m.Paused() {
@@ -147,7 +141,4 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 
 func (m *Manager) ListGroupOperations(ctx context.Context, limit int) ([]group.Record, error) {
 	return m.groups.List(ctx, limit)
-}
-func (m *Manager) PerformGroupAction(ctx context.Context, kind string, request group.ActionRequest) (group.Record, error) {
-	return m.groups.Perform(ctx, kind, request)
 }

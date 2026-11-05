@@ -14,10 +14,10 @@ The project is preparing a `v0.1.0` source preview and has not been released. On
 - Bounded multi-round tool execution through native Tools and MCP over Streamable HTTP or stdio; local Skills contribute instructions.
 - On-demand MD, MDX and TXT retrieval through tools, without searching for every message.
 - Short-term context isolated by group and user, held in memory without persisting full group history.
-- Shared model decisions using DM when enabled or an isolated answer LLM otherwise, with at most one request per decision, configurable business scope and evidence collection.
+- Shared model decisions using DM when enabled or an isolated answer LLM otherwise, with at most one request per decision, used for proactive replies, administrator takeover and join review; business scope is passed to the answer model as instructions.
 - Cautious proactive participation with group-level yielding when a trusted administrator answers; explicit mentions retain normal processing rules.
 - Periodic reflection that turns administrator answers into Markdown at a configurable location.
-- Optional join review, text announcements, message recall and welcome templates, with explicit unsupported results.
+- Optional automatic join review and welcome templates, with explicit unsupported results.
 - Versioned configuration, history, rollback, component replacement, encrypted write-only credential management and a read-only capability catalog.
 
 Implementation and live acceptance are tracked separately in the [default behavior matrix](docs/default-behavior.md) and [version tasks](specs/v0.1.0/tasks.md).
@@ -79,4 +79,4 @@ Track `docs/` for current usage and boundaries, and `specs/` for requirements, d
 
 ## License and acceptance status
 
-Licensed under [Apache-2.0](LICENSE). Third-party components retain their [own licenses and notices](THIRD_PARTY_NOTICES.md). `v0.1.0` has not been published; real QQ join review, announcements, recall, welcome events and optional DM behavior still require live acceptance. Controlled-service tests do not establish actual account permissions.
+Licensed under [Apache-2.0](LICENSE). Third-party components retain their [own licenses and notices](THIRD_PARTY_NOTICES.md). `v0.1.0` has not been published; real QQ join review, welcome events, how well the target model follows scope instructions and tool retrieval, and optional DM behavior still require live acceptance. Group announcements and message recall are suspended and out of scope for this release. Controlled-service tests do not establish actual account permissions.

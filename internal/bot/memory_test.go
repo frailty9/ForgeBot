@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/conversation"
-	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -83,7 +82,7 @@ func TestProactiveReplyDoesNotWritePrivateContext(t *testing.T) {
 	}
 }
 
-func TestDecisionAndAnswerKeepSameHistorySnapshotAcrossHotPolicyChange(t *testing.T) {
+func TestAnswerKeepsHistorySnapshotAcrossHotMemoryChange(t *testing.T) {
 	memory := conversation.NewMemory(conversation.MemoryPolicy{})
 	lease, err := memory.Acquire(context.Background(), "c", "u")
 	if err != nil {
@@ -91,13 +90,11 @@ func TestDecisionAndAnswerKeepSameHistorySnapshotAcrossHotPolicyChange(t *testin
 	}
 	lease.Commit(llm.TextMessage(llm.RoleUser, "earlier question"), "earlier answer")
 	lease.Release()
-	model := &fakeLLM{response: llm.Response{Text: "followup answer"}}
-	policy := testPolicy()
-	policy.Scope = "business"
-	engine, err := NewEngine(context.Background(), Dependencies{Sender: newRecordedSender(), LLM: model, Memory: memory, Policy: policy, Decisions: decisionFunc(func(context.Context, decision.Request) (decision.Result, error) {
+	model := &configuringLLM{fakeLLM: fakeLLM{response: llm.Response{Text: "followup answer"}}, configure: func() {
 		memory.Configure(conversation.MemoryPolicy{Disabled: true})
-		return decision.Result{Answer: decision.Answer{"scope": "in_domain", "respond": "yes", "evidence": "none"}}, nil
-	})}, nil)
+	}}
+	policy := testPolicy()
+	engine, err := NewEngine(context.Background(), Dependencies{Sender: newRecordedSender(), LLM: model, Memory: memory, Policy: policy}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,4 +114,15 @@ func TestDecisionAndAnswerKeepSameHistorySnapshotAcrossHotPolicyChange(t *testin
 	if len(lease.History()) != 0 {
 		t.Fatal("old run repopulated cleared history")
 	}
+}
+
+// configuringLLM 在回答请求期间修改会话策略，验证本次 run 仍使用开始时的快照。
+type configuringLLM struct {
+	fakeLLM
+	configure func()
+}
+
+func (f *configuringLLM) Complete(ctx context.Context, request llm.Request) (llm.Response, error) {
+	f.configure()
+	return f.fakeLLM.Complete(ctx, request)
 }

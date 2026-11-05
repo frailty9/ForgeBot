@@ -5,42 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/operation"
 )
 
-type actions struct {
-	mu    sync.Mutex
-	calls int
-	fail  error
-}
-
-func (a *actions) Support(context.Context, string) (group.Support, error) {
-	return group.Support{JoinReview: true, Announcement: true, Recall: true, Permission: "unknown"}, nil
-}
-func (a *actions) Review(context.Context, string, group.ReviewRequest) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.calls++
-	return a.fail
-}
-func (a *actions) Announce(context.Context, string, string) error {
-	return a.Review(context.Background(), "", group.ReviewRequest{})
-}
-func (a *actions) Recall(context.Context, string, string) error {
-	return a.Review(context.Background(), "", group.ReviewRequest{})
-}
-
-func policy(d decision.Decider) group.Policies {
-	return func(string) (group.Policy, decision.Decider, bool) {
-		return group.Policy{ReviewEnabled: true, Announcements: true, Recall: true, AutoReview: d != nil, ReviewRule: "rule"}, d, true
-	}
-}
 func fixture(t *testing.T) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "groups.json")
@@ -53,33 +24,34 @@ func fixture(t *testing.T) (*Store, string) {
 
 func TestTimeoutIsUnknownAndNeverAutomaticallyReplayed(t *testing.T) {
 	store, path := fixture(t)
-	port := &actions{fail: operation.Wrap("remote", operation.Timeout, operation.EffectUnknown, context.DeadlineExceeded)}
-	s := group.New(store, port, policy(nil))
-	request := group.ActionRequest{ID: "idempotent", ConversationID: "g", Text: "notice"}
-	r, err := s.Perform(context.Background(), "announcement", request)
-	if !errors.Is(err, context.DeadlineExceeded) || r.Status != group.Uncertain {
-		t.Fatal(r, err)
+	s := group.New(store, nil, nil)
+	calls := 0
+	send := func(context.Context, string) error {
+		calls++
+		return operation.Wrap("remote", operation.Timeout, operation.EffectUnknown, context.DeadlineExceeded)
 	}
-	if _, err = s.Perform(context.Background(), "announcement", request); err == nil || port.calls != 1 {
-		t.Fatal("unknown action replayed", err)
+	event := group.Event{ID: "e1", Kind: group.MemberJoined, ConversationID: "g", ConnectorID: "qq", UserID: "u", At: time.Now()}
+	result, err := s.DeliverEvent(context.Background(), event, "native.welcome", group.EventReply{Text: "welcome"}, send)
+	if !errors.Is(err, context.DeadlineExceeded) || result.Verdict != "send_failed" {
+		t.Fatal(result, err)
+	}
+	if result, err = s.DeliverEvent(context.Background(), event, "native.welcome", group.EventReply{Text: "welcome"}, send); err != nil || result.Verdict != "duplicate" || calls != 1 {
+		t.Fatal("unknown delivery replayed", result, err)
 	}
 	loaded, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err = loaded.Get(context.Background(), r.ID); err != nil || r.Status != group.Uncertain {
-		t.Fatal(r, err)
-	}
-	request.Text = "different"
-	if _, err = s.Perform(context.Background(), "announcement", request); err == nil || operation.Describe(err).Code != operation.Conflict {
-		t.Fatal("reused key accepted", err)
+	records, err := loaded.List(context.Background(), 10)
+	if err != nil || len(records) != 1 || records[0].Status != group.Uncertain {
+		t.Fatal(records, err)
 	}
 }
 
 func TestExecutingStateRecoversUnknownAndRevisionIsolated(t *testing.T) {
 	store, path := fixture(t)
 	ctx := context.Background()
-	r, _, err := store.Create(ctx, group.Record{ID: "action", Kind: "recall", ConversationID: "g", Status: group.Executing, CreatedAt: time.Now()})
+	r, _, err := store.Create(ctx, group.Record{ID: "action", Kind: "event_reply", ConversationID: "g", Status: group.Executing, CreatedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}

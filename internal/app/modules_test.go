@@ -43,10 +43,7 @@ func TestExampleDeclaresEveryNativeModule(t *testing.T) {
 	if dm := cfg.Runtime.Decision.DM; dm == nil || !dm.Disabled || dm.Provider == "" || dm.Endpoint == "" || dm.Model == "" || dm.APIKeyRef == "" || dm.MinConfidence == nil {
 		t.Fatal("example must declare complete disabled DM configuration")
 	}
-	if evidence := cfg.Runtime.AnswerPolicy.Evidence; evidence == nil || !evidence.Disabled || evidence.Tool == "" || evidence.QueryArgument == "" || len(evidence.Arguments) == 0 {
-		t.Fatal("example must declare complete disabled evidence binding")
-	}
-	// 完整示例关闭的DM和检索不得使构建访问供应商或依赖未挂载工具。
+	// 完整示例关闭的 DM 不得使构建访问供应商。
 	engine, err := (runtimecfg.Builder{Modules: registry, Sender: exampleSender{}}).Build(context.Background(), cfg)
 	if err != nil {
 		t.Fatal("disabled example blocks runtime construction", err)

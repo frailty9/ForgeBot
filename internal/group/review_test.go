@@ -39,10 +39,6 @@ func (a *reviewActions) Review(_ context.Context, _ string, request ReviewReques
 	a.requests = append(a.requests, request)
 	return a.fail
 }
-func (*reviewActions) Announce(context.Context, string, string) error {
-	panic("unexpected announcement")
-}
-func (*reviewActions) Recall(context.Context, string, string) error { panic("unexpected recall") }
 
 func boolValue(value bool) *bool { return &value }
 func joinEvent() Event {
