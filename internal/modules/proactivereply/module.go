@@ -192,7 +192,7 @@ type instance struct {
 
 func (i *instance) Registrations() hooks.Registrations {
 	return hooks.Registrations{BeforeReply: []hooks.Registration[hooks.ReplyInput, hooks.ReplyResult]{{ID: "yield_before_send", Handle: func(_ context.Context, info hooks.Info, _ hooks.ReplyInput) (hooks.ReplyResult, error) {
-		return hooks.ReplyResult{Suppress: info.Trigger == "proactive" && !i.yield.CanSend(info.ConversationID, info.ProactiveRevision)}, nil
+		return hooks.ReplyResult{Suppress: info.Trigger == hooks.TriggerProactive && !i.yield.CanSend(info.ConversationID, info.ProactiveRevision)}, nil
 	}}}}
 }
 

@@ -103,14 +103,14 @@ func (l Loop) Run(ctx context.Context, request llm.Request) (llm.Response, error
 				return llm.Response{}, operation.Wrap("agent.run", operation.Canceled, effect, err)
 			}
 			total++
-			result := tooling.Result{Code: "tool_not_allowed"}
+			result := tooling.Result{Code: tooling.CodeToolNotAllowed}
 			budget := l.ToolBudgets[call.Name]
 			if budget <= 0 {
 				budget = limits.MaxToolCalls
 			}
 			if allowed[call.Name] && l.Execute != nil {
 				if used[call.Name] >= budget {
-					result = tooling.Result{Code: "budget_exhausted"}
+					result = tooling.Result{Code: tooling.CodeBudgetExhausted}
 				} else {
 					used[call.Name]++
 					result, err = l.Execute(ctx, tooling.Call{Name: call.Name, Arguments: call.Arguments})
@@ -127,7 +127,7 @@ func (l Loop) Run(ctx context.Context, request llm.Request) (llm.Response, error
 			}
 			if len(encoded) > limits.MaxResultBytes {
 				// 用完整合法的 JSON 失败信封替换超限结果，不能截断成误导性证据。
-				encoded, _ = json.Marshal(tooling.Normalize(tooling.Result{Code: "budget_exhausted", Payload: fmt.Sprintf("tool result exceeds %d bytes", limits.MaxResultBytes)}))
+				encoded, _ = json.Marshal(tooling.Normalize(tooling.Result{Code: tooling.CodeBudgetExhausted, Payload: fmt.Sprintf("tool result exceeds %d bytes", limits.MaxResultBytes)}))
 			}
 			message := llm.ToolResultMessage(call.ID, call.Name, string(encoded))
 			wire, _ := json.Marshal(message)

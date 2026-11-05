@@ -206,7 +206,7 @@ func (i *instance) Registrations() hooks.Registrations { return hooks.Registrati
 func (i *instance) Close(context.Context) error        { return nil }
 func (i *instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	return modules.ExtendedRegistrations{
-		Tools:        []modules.ToolRegistration{{ID: "search_docs", Tool: searchdocs.New(i.search, i.options.DefaultResults, i.options.MaxResults, i.options.MaxContextChars), MaxCalls: i.options.MaxQueriesPerTurn}},
+		Tools:        []modules.ToolRegistration{{ID: searchdocs.Name, Tool: searchdocs.New(i.search, i.options.DefaultResults, i.options.MaxResults, i.options.MaxContextChars), MaxCalls: i.options.MaxQueriesPerTurn}},
 		Capabilities: []modules.CapabilityRegistration{{ID: searchcontract.ControlKey.ID(), Value: i.search}, {ID: knowledge.PublisherFactoryKey.ID(), Value: publisherFactory{root: i.options.DocumentRoot, maxBytes: i.options.MaxFileBytes, markdown: supportsMarkdown(i.options.Extensions)}}},
 		Status:       func() any { return i.search.Status() },
 	}

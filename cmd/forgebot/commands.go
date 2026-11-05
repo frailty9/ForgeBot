@@ -19,6 +19,7 @@ import (
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
+	"github.com/soleapi/forgebot/internal/modules/welcome"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -110,9 +111,9 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	cfg.LLM.Model = strings.TrimSpace(model)
 	cfg.LLM.BaseURL = strings.TrimSpace(endpoint)
 	cfg.LLM.ImageUnderstanding = images
-	cfg.LLM.Authentication = "api_key"
+	cfg.LLM.Authentication = config.AuthenticationAPIKey
 	if anonymous {
-		cfg.LLM.Authentication = "none"
+		cfg.LLM.Authentication = config.AuthenticationNone
 	}
 	runtimeData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -234,7 +235,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		}
 	}
 	needsGroupStore := false
-	if entry, ok := cfg.Runtime.Modules["native.welcome"]; ok && entry.Enabled != nil && *entry.Enabled {
+	if entry, ok := cfg.Runtime.Modules[welcome.ID]; ok && entry.Enabled != nil && *entry.Enabled {
 		needsGroupStore = true
 	}
 	if needsGroupStore && cfg.Static.GroupStorePath == "" {
@@ -248,13 +249,13 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 	if cfg.Static.SecretStorePath == "" && cfg.Static.SecretKey != "" {
 		add("credential_store", operation.New(operation.NotConfigured, "master key set without store path"), "设置secret_store_path，或移除 secret_key 与 FORGEBOT_SECRET_KEY")
 	}
-	if cfg.Runtime.LLM.Authentication != "none" || cfg.Static.SecretStorePath != "" {
+	if cfg.Runtime.LLM.Authentication != config.AuthenticationNone || cfg.Static.SecretStorePath != "" {
 		key, err := secret.ParseKey(cfg.Static.SecretKey)
 		add("master_key", err, "读取 YAML secret_key 或 FORGEBOT_SECRET_KEY（后者优先），仅验证格式，不显示值")
 		if err == nil {
 			credentials, err = secret.InspectFile(cfg.Static.SecretStorePath, key)
 			add("credential_store", err, "只读验证加密仓储，不执行恢复或格式升级")
-			if err == nil && cfg.Runtime.LLM.Authentication != "none" {
+			if err == nil && cfg.Runtime.LLM.Authentication != config.AuthenticationNone {
 				apiKey, err = credentials.Get(context.Background(), cfg.Runtime.LLM.APIKeyRef)
 				add("answer_credential", err, "先执行 -init-api-key <llm.api_key_ref> 配置回答凭据")
 			}

@@ -25,6 +25,18 @@ type Result struct {
 	Failure *operation.Failure `json:"failure,omitempty"`
 }
 
+// 工具领域原因码。产生方与 Normalize 必须共用这些常量；写错的码会被归为
+// unknown 且执行状态未知，导致无副作用的拒绝被误报为“可能已执行”。
+const (
+	CodeToolNotAllowed    = "tool_not_allowed"
+	CodeModuleDenied      = "module_denied"
+	CodeInvalidArguments  = "invalid_arguments"
+	CodeInvalidToolName   = "invalid_tool_name"
+	CodeBudgetExhausted   = "budget_exhausted"
+	CodeSearchTimeout     = "search_timeout"
+	CodeSearchUnavailable = "search_unavailable"
+)
+
 // Normalize 保留领域原因码，并为失败补充 Core 分类；成功空结果不生成 Failure。
 // 未知插件结果默认执行未知，不能自动解释成“没有副作用，可重试”。
 func Normalize(result Result) Result {
@@ -37,15 +49,15 @@ func Normalize(result Result) Result {
 	}
 	code, effect := operation.Unknown, operation.EffectUnknown
 	switch result.Code {
-	case "tool_not_allowed", "module_denied":
+	case CodeToolNotAllowed, CodeModuleDenied:
 		code, effect = operation.PolicyDenied, operation.NotStarted
-	case "invalid_arguments", "invalid_tool_name":
+	case CodeInvalidArguments, CodeInvalidToolName:
 		code, effect = operation.Invalid, operation.NotStarted
-	case "budget_exhausted":
+	case CodeBudgetExhausted:
 		code, effect = operation.BudgetExhausted, operation.NotStarted
-	case "search_timeout":
+	case CodeSearchTimeout:
 		code, effect = operation.Timeout, operation.NotStarted
-	case "search_unavailable":
+	case CodeSearchUnavailable:
 		code, effect = operation.Unavailable, operation.NotStarted
 	}
 	result.Failure = &operation.Failure{Code: code, Operation: "tool.execute", Effect: effect}

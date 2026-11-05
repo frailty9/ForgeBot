@@ -161,22 +161,22 @@ func (c *Client) Execute(ctx context.Context, call tooling.Call) tooling.Result 
 	_, ok := c.tools[call.Name]
 	c.mu.Unlock()
 	if !ok {
-		return tooling.Result{Code: "tool_not_allowed"}
+		return tooling.Result{Code: tooling.CodeToolNotAllowed}
 	}
 	prefix := "mcp." + c.cfg.ID + "."
 	toolName := strings.TrimPrefix(call.Name, prefix)
 	if toolName == call.Name || toolName == "" {
-		return tooling.Result{Code: "invalid_tool_name"}
+		return tooling.Result{Code: tooling.CodeInvalidToolName}
 	}
 	var args map[string]any
 	decoder := json.NewDecoder(strings.NewReader(call.Arguments))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&args); err != nil {
-		return tooling.Result{Code: "invalid_arguments"}
+		return tooling.Result{Code: tooling.CodeInvalidArguments}
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return tooling.Result{Code: "invalid_arguments"}
+		return tooling.Result{Code: tooling.CodeInvalidArguments}
 	}
 	var result struct {
 		Content []struct {

@@ -123,7 +123,7 @@ func (e *Engine) HandleInbound(ctx context.Context, msg messaging.InboundMessage
 	if err := ctx.Err(); err != nil {
 		return platform.HandleResult{Verdict: "canceled"}, err
 	}
-	ctx = e.beginRun(ctx, msg, "direct")
+	ctx = e.beginRun(ctx, msg, hooks.TriggerDirect)
 	e.logger.DebugContext(ctx, "bot inbound message", "conversation_id", msg.ConversationID, "message_id", msg.MessageID, "user_id", msg.UserID, "mentioned", msg.Mentioned, "text_len", len([]rune(msg.Text)))
 	if err := validateInbound(msg); err != nil {
 		return platform.HandleResult{Accepted: false, Verdict: "invalid"}, operation.Wrap("message.validate", operation.Invalid, operation.NotStarted, err)
@@ -275,7 +275,7 @@ func (e *Engine) SendEventReply(ctx context.Context, id, text string) error {
 func (e *Engine) respondDeferred(ctx context.Context, in messaging.InboundMessage) {
 	ctx, cancel := context.WithTimeout(ctx, e.deps.Policy.Loop.Defaults().Timeout)
 	defer cancel()
-	ctx = e.beginRun(ctx, in, "proactive")
+	ctx = e.beginRun(ctx, in, hooks.TriggerProactive)
 	reply, err := e.replyText(ctx, in)
 	if err != nil {
 		if errors.Is(err, errModuleStopped) || errors.Is(err, errEmptyInput) {
@@ -360,7 +360,7 @@ func (e *Engine) replyText(ctx context.Context, in messaging.InboundMessage) (st
 	}
 	// 主动插话已由模块决策放行，但回答模型仍可能判断不该回复；空最终文本
 	// 会在投递时被抑制，避免对范围外问题主动插一句拒答。
-	if runFrom(ctx).info.Trigger == "proactive" {
+	if runFrom(ctx).info.Trigger == hooks.TriggerProactive {
 		instructions += "\n\n[宿主提示] 本次是未被 @ 的主动回复。若问题不在你的服务范围内，或不需要你回答，请只输出空内容。"
 	}
 	e.logger.DebugContext(ctx, "llm completion started", "model", e.deps.Policy.Model, "text_len", len([]rune(text)), "media_count", len(in.Media), "tools", len(e.toolDefinitions()))
@@ -399,7 +399,7 @@ func (e *Engine) executeTool(ctx context.Context, in messaging.InboundMessage, c
 		return tooling.Result{}, fmt.Errorf("%w: %w", errHookFailed, err)
 	}
 	if decision.Deny {
-		return tooling.Result{Code: "module_denied"}, nil
+		return tooling.Result{Code: tooling.CodeModuleDenied}, nil
 	}
 	if decision.Progress != nil && !run.progressAttempted {
 		run.progressAttempted = true

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/operations"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
@@ -117,7 +118,7 @@ func (s *Service) status() string {
 		}
 	}
 	proactiveEnabled := false
-	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {
+	if entry, ok := snapshot.Runtime.Modules[proactivereply.ID]; ok && entry.Enabled != nil {
 		proactiveEnabled = *entry.Enabled
 	}
 	return fmt.Sprintf("Runtime: %s\n版本: %d\nBot: %s\nProactive: %s\nSearch: %s\nConnector: %s",
@@ -140,7 +141,7 @@ func (s *Service) proactive(request operations.Request) (operations.Result, erro
 	}
 	snapshot, _ := s.runtime.Snapshot()
 	currentEnabled := false
-	if entry, ok := snapshot.Runtime.Modules["native.proactive_reply"]; ok && entry.Enabled != nil {
+	if entry, ok := snapshot.Runtime.Modules[proactivereply.ID]; ok && entry.Enabled != nil {
 		currentEnabled = *entry.Enabled
 	}
 	if len(request.Arguments) == 0 {
@@ -173,9 +174,9 @@ func (s *Service) proactive(request operations.Request) (operations.Result, erro
 			if next.Modules == nil {
 				next.Modules = make(map[string]config.ModuleConfig)
 			}
-			entry := next.Modules["native.proactive_reply"]
+			entry := next.Modules[proactivereply.ID]
 			entry.Enabled = &enabledValue
-			next.Modules["native.proactive_reply"] = entry
+			next.Modules[proactivereply.ID] = entry
 			_, err := s.runtime.CommitRuntime(ctx, next, func() (config.Snapshot, error) {
 				return s.settings.Update(ctx, settings.UpdateRequest{
 					ExpectedVersion: current.Version, Runtime: next,

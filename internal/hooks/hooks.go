@@ -52,6 +52,12 @@ type Info struct {
 	ProactiveRevision uint64
 }
 
+// Trigger 取值：模块按此区分明确寻址与主动插话，写错会使让位抑制等策略静默失效。
+const (
+	TriggerDirect    = "direct"
+	TriggerProactive = "proactive"
+)
+
 type Input struct {
 	Text          string
 	Mentioned     bool

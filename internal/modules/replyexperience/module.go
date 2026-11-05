@@ -11,6 +11,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/tooling/searchdocs"
 )
 
 const ID = "native.reply_experience"
@@ -97,7 +98,7 @@ func (i *instance) prepare(_ context.Context, _ hooks.Info, input hooks.Input) (
 	return hooks.InputResult{Text: &text}, nil
 }
 func (i *instance) tool(_ context.Context, _ hooks.Info, input hooks.ToolInput) (hooks.ToolResult, error) {
-	if input.Name != "search_docs" {
+	if input.Name != searchdocs.Name {
 		return hooks.ToolResult{}, nil
 	}
 	return hooks.ToolResult{Progress: &hooks.ProgressEffect{Text: i.options.SearchProgressText}}, nil

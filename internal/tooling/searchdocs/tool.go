@@ -42,7 +42,7 @@ func (t *Tool) Definition() tooling.Definition {
 
 func (t *Tool) Execute(ctx context.Context, call tooling.Call) tooling.Result {
 	if t == nil || t.retriever == nil || call.Name != Name {
-		return tooling.Result{Code: "tool_not_allowed"}
+		return tooling.Result{Code: tooling.CodeToolNotAllowed}
 	}
 	var arguments struct {
 		Query string `json:"query"`
@@ -51,15 +51,15 @@ func (t *Tool) Execute(ctx context.Context, call tooling.Call) tooling.Result {
 	decoder := json.NewDecoder(bytes.NewBufferString(call.Arguments))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&arguments); err != nil {
-		return tooling.Result{Code: "invalid_arguments"}
+		return tooling.Result{Code: tooling.CodeInvalidArguments}
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return tooling.Result{Code: "invalid_arguments"}
+		return tooling.Result{Code: tooling.CodeInvalidArguments}
 	}
 	arguments.Query = strings.TrimSpace(arguments.Query)
 	if arguments.Query == "" || arguments.Limit < 0 {
-		return tooling.Result{Code: "invalid_arguments"}
+		return tooling.Result{Code: tooling.CodeInvalidArguments}
 	}
 	if arguments.Limit == 0 {
 		arguments.Limit = t.defaultResults
@@ -71,11 +71,11 @@ func (t *Tool) Execute(ctx context.Context, call tooling.Call) tooling.Result {
 	if err != nil {
 		code := "search_failed"
 		if errors.Is(err, context.DeadlineExceeded) {
-			code = "search_timeout"
+			code = tooling.CodeSearchTimeout
 		} else if errors.Is(err, searchcontract.ErrInvalidQuery) {
-			code = "invalid_arguments"
+			code = tooling.CodeInvalidArguments
 		} else if errors.Is(err, searchcontract.ErrDisabled) || errors.Is(err, searchcontract.ErrNoIndex) {
-			code = "search_unavailable"
+			code = tooling.CodeSearchUnavailable
 		}
 		return tooling.Result{Code: code}
 	}

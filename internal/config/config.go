@@ -172,6 +172,12 @@ type BotConfig struct {
 	SystemPrompt string `json:"system_prompt,omitempty" yaml:"system_prompt,omitempty"`
 }
 
+// LLM 认证方式。匿名本地服务必须显式声明 none，缺少 Key 不能被当作匿名。
+const (
+	AuthenticationAPIKey = "api_key"
+	AuthenticationNone   = "none"
+)
+
 // LLMConfig selects one supported protocol family and model settings.
 type LLMConfig struct {
 	Authentication     string        `json:"authentication,omitempty" yaml:"authentication,omitempty"`
@@ -840,7 +846,7 @@ func (c PlatformConfig) Validate() error {
 func (c Snapshot) Validate() error { return errors.Join(c.Static.Validate(), c.Runtime.Validate()) }
 
 func (c LLMConfig) Validate() error {
-	if c.Authentication != "" && c.Authentication != "api_key" && c.Authentication != "none" {
+	if c.Authentication != "" && c.Authentication != AuthenticationAPIKey && c.Authentication != AuthenticationNone {
 		return errors.New("llm.authentication must be api_key or none")
 	}
 	if !c.Protocol.Valid() {

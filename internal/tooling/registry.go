@@ -68,7 +68,7 @@ func (m *multiExecutor) Definitions() []Definition {
 
 func (m *multiExecutor) Execute(ctx context.Context, call Call) Result {
 	if m == nil {
-		return Result{Code: "tool_not_allowed"}
+		return Result{Code: CodeToolNotAllowed}
 	}
 	for _, executor := range m.executors {
 		for _, definition := range executor.Definitions() {
@@ -77,7 +77,7 @@ func (m *multiExecutor) Execute(ctx context.Context, call Call) Result {
 			}
 		}
 	}
-	return Result{Code: "tool_not_allowed"}
+	return Result{Code: CodeToolNotAllowed}
 }
 
 func (m *multiExecutor) Close() error {
@@ -128,11 +128,11 @@ func (r *Registry) Definitions() []Definition {
 
 func (r *Registry) Execute(ctx context.Context, call Call) Result {
 	if r == nil {
-		return Result{Code: "tool_not_allowed"}
+		return Result{Code: CodeToolNotAllowed}
 	}
 	tool, exists := r.tools[call.Name]
 	if !exists {
-		return Result{Code: "tool_not_allowed"}
+		return Result{Code: CodeToolNotAllowed}
 	}
 	return Normalize(tool.Execute(ctx, call))
 }

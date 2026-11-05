@@ -222,7 +222,7 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 	}
 	apiKey := ""
 	var err error
-	if snapshot.Runtime.LLM.Authentication == "none" {
+	if snapshot.Runtime.LLM.Authentication == config.AuthenticationNone {
 		// 无认证必须显式声明；不能将丢失 API Key 自动解释为匿名服务。
 	} else if secretRef == snapshot.Runtime.LLM.APIKeyRef {
 		apiKey = secretValue
@@ -232,7 +232,7 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 	if err != nil && !errors.Is(err, secret.ErrNotFound) {
 		return nil, fmt.Errorf("resolve LLM API key: %w", err)
 	}
-	if apiKey == "" && snapshot.Runtime.LLM.Authentication != "none" {
+	if apiKey == "" && snapshot.Runtime.LLM.Authentication != config.AuthenticationNone {
 		if b.RequireLLM {
 			return nil, operation.New(operation.NotConfigured, "llm API key is not configured")
 		}

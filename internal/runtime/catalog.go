@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/catalog"
+	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/secret"
 )
@@ -49,7 +50,7 @@ func (m *Manager) Capabilities(ctx context.Context) catalog.Snapshot {
 		result.Entries = append(result.Entries, catalog.Entry{ID: binding.ID, Kind: "group", Source: binding.ConnectorID, Enabled: true, Configured: true, Loaded: true, Health: "not_probed", Permission: support.Permission, GroupSupport: &support, Documentation: "docs/group-management.md"})
 	}
 	configured := strings.TrimSpace(g.snapshot.Runtime.LLM.Model) != ""
-	if g.snapshot.Runtime.LLM.Authentication != "none" {
+	if g.snapshot.Runtime.LLM.Authentication != config.AuthenticationNone {
 		configured = configured && m.credentialConfigured(ctx, g.snapshot.Runtime.LLM.APIKeyRef)
 	}
 	result.Entries = append(result.Entries, catalog.Entry{ID: "answer", Kind: "model", Source: string(g.snapshot.Runtime.LLM.Protocol), Enabled: true, Configured: configured, Loaded: g.engine.HasModel(), Health: "not_probed", Documentation: "docs/configuration.md"})
