@@ -18,6 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
+	"github.com/soleapi/forgebot/internal/secret"
 )
 
 func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
@@ -50,11 +51,13 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Static.Server.Addr = "127.0.0.1:0"
-	key, err := os.ReadFile(filepath.Join(dir, "master.local.key"))
-	if err != nil {
-		t.Fatal(err)
+	// init 把主密钥写进 YAML，无需再设置环境变量。
+	if _, err = secret.ParseKey(cfg.Static.SecretKey); err != nil {
+		t.Fatal("init did not write a usable secret_key", err)
 	}
-	t.Setenv("FORGEBOT_SECRET_KEY", strings.TrimSpace(string(key)))
+	if _, err = os.Stat(filepath.Join(dir, "master.local.key")); !os.IsNotExist(err) {
+		t.Fatal("init still wrote a separate key file")
+	}
 	t.Setenv("FORGEBOT_LLM_API_KEY", "temporary-test-key")
 	if err = doctor(cfg, false, false, &output); err == nil {
 		t.Fatal("uninitialized credential marked ready")
@@ -78,7 +81,7 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if err = doctor(approvalConfig, false, false, &approvalOutput); err != nil {
 		t.Fatal("automatic approval incorrectly requires an operation store", approvalOutput.String(), err)
 	}
-	if strings.Contains(output.String(), "temporary-test-key") || strings.Contains(output.String(), strings.TrimSpace(string(key))) {
+	if strings.Contains(output.String(), "temporary-test-key") || strings.Contains(output.String(), cfg.Static.SecretKey) {
 		t.Fatal("doctor exposed credentials")
 	}
 	if err = doctor(cfg, true, false, &output); err != nil || calls.Load() != 1 {
@@ -120,7 +123,7 @@ func TestInitRefusesExistingCredentialsEvenWithoutConfig(t *testing.T) {
 	if err := initializeProject(dir, "model", "", llm.OpenAIResponses, false, false, io.Discard); err == nil {
 		t.Fatal("init replaced credential key")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "master.local.key")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "forgebot.local.yaml")); !os.IsNotExist(err) {
 		t.Fatal("new key created over existing credentials")
 	}
 }

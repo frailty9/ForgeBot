@@ -87,7 +87,7 @@ func Open(static config.StaticConfig, key []byte) (Backend, error) {
 	}
 	if static.SecretStorePath != "" {
 		if len(key) == 0 {
-			return nil, operation.New(operation.NotConfigured, "FORGEBOT_SECRET_KEY is required when secret_store_path is set")
+			return nil, operation.New(operation.NotConfigured, "secret_key (YAML or FORGEBOT_SECRET_KEY) is required when secret_store_path is set")
 		}
 		store, err := secret.NewFileStore(static.SecretStorePath, key)
 		if err != nil {
@@ -95,7 +95,7 @@ func Open(static config.StaticConfig, key []byte) (Backend, error) {
 		}
 		b.credentials = store
 	} else if len(key) > 0 {
-		return nil, operation.New(operation.NotConfigured, "secret_store_path is required when FORGEBOT_SECRET_KEY is set")
+		return nil, operation.New(operation.NotConfigured, "secret_store_path is required when secret_key is set")
 	}
 	return b, nil
 }

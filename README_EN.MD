@@ -28,7 +28,6 @@ Use Go 1.25.5 or a newer version capable of building the project, plus an answer
 
 ```powershell
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol openai_completions -base-url https://YOUR_API_ROOT
-$env:FORGEBOT_SECRET_KEY = (Get-Content -Raw configs/master.local.key).Trim()
 $env:FORGEBOT_LLM_API_KEY = 'YOUR_PROVIDER_API_KEY'
 go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key llm/default
 Remove-Item Env:FORGEBOT_LLM_API_KEY
@@ -36,7 +35,7 @@ go run ./cmd/forgebot doctor -config configs/forgebot.local.yaml
 go run ./cmd/forgebot -config configs/forgebot.local.yaml
 ```
 
-Replace the uppercase placeholders. `base-url` is the protocol API root; ForgeBot appends the protocol endpoint. Image understanding defaults to false; pass `-images` for a vision-capable model. Use `-anonymous` only for an explicitly unauthenticated local service. Back up the master key and encrypted credentials, storing them separately; never commit `master.local.key`.
+Replace the uppercase placeholders. `base-url` is the protocol API root; ForgeBot appends the protocol endpoint. Image understanding defaults to false; pass `-images` for a vision-capable model. Use `-anonymous` only for an explicitly unauthenticated local service. `init` writes the master key and admin token into `forgebot.local.yaml`; back up that file and the encrypted credentials, and never commit them.
 
 The default Echo connector logs outbound replies and does not connect to a social platform. Send a UTF-8 test request:
 

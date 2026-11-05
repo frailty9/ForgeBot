@@ -195,3 +195,12 @@
 - 运行配置严格解析，旧配置若仍含上述字段会加载失败，需手动删除。
 - 验证（2026-11-05）：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 均通过；修改的 Go 文件格式检查通过，docs/specs 本地链接均存在。未提交。
 
+
+## 2026-11-05 主密钥可写入 YAML
+
+用户指出主密钥只能用环境变量的要求没有依据：`admin_token` 同为启动期敏感项却允许写在 YAML，`secret_store_path` 也能把密文放到配置目录之外。调整为：
+
+- 静态 YAML 增加 `secret_key`，`FORGEBOT_SECRET_KEY` 优先；与 `admin_token` 一样 `json:"-"`，配置查询与 doctor 不输出。
+- 进程入口、`-init-api-key` 与 doctor 统一读取 `cfg.Static.SecretKey`，不再直接读环境变量。
+- `init` 把主密钥写进 `forgebot.local.yaml`，不再生成 `master.local.key`，也不再提示 PowerShell 加载步骤。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

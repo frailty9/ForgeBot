@@ -20,12 +20,12 @@ func TestInitializeAPIKeyCreatesEncryptedSecret(t *testing.T) {
 	for index := range key {
 		key[index] = byte(index + 1)
 	}
-	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
 	t.Setenv("FORGEBOT_LLM_API_KEY", "initial-provider-key")
 	t.Setenv("FORGEBOT_SECRET_STORE", storePath)
 
 	cfg := config.DefaultSnapshot()
 	cfg.Static.SecretStorePath = storePath
+	cfg.Static.SecretKey = base64.StdEncoding.EncodeToString(key)
 	cfg.Runtime.LLM.APIKeyRef = "llm/default"
 	if err := initializeAPIKey(cfg, "llm/default", ""); err != nil {
 		t.Fatal(err)
@@ -54,9 +54,9 @@ func TestInitializeAPIKeyCreatesEncryptedSecret(t *testing.T) {
 
 func TestInitializeAPIKeySupportsIndependentReferences(t *testing.T) {
 	key := make([]byte, 32)
-	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
 	cfg := config.DefaultSnapshot()
 	cfg.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
+	cfg.Static.SecretKey = base64.StdEncoding.EncodeToString(key)
 	for _, ref := range []string{"decision/default", "mcp/custom", "llm/replacement"} {
 		t.Setenv("FORGEBOT_LLM_API_KEY", "value-for-"+ref)
 		if err := initializeAPIKey(cfg, ref, ""); err != nil {
@@ -92,10 +92,10 @@ func TestInitializeAPIKeySupportsIndependentReferences(t *testing.T) {
 
 func TestInlineAPIKeyTakesPriorityAndStaysEncrypted(t *testing.T) {
 	key := make([]byte, 32)
-	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
 	t.Setenv("FORGEBOT_LLM_API_KEY", "environment-value")
 	cfg := config.DefaultSnapshot()
 	cfg.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
+	cfg.Static.SecretKey = base64.StdEncoding.EncodeToString(key)
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	ref := flags.String("init-api-key", "", "")

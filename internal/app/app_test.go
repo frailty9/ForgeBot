@@ -48,7 +48,7 @@ func configuredAppSnapshot(t *testing.T) config.Snapshot {
 	snapshot.Runtime.LLM.BaseURL = api.URL
 	snapshot.Static.SecretStorePath = filepath.Join(t.TempDir(), "secrets.json")
 	key := make([]byte, 32)
-	t.Setenv("FORGEBOT_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	snapshot.Static.SecretKey = base64.StdEncoding.EncodeToString(key)
 	store, err := secret.NewFileStore(snapshot.Static.SecretStorePath, key)
 	if err != nil {
 		t.Fatal(err)

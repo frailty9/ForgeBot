@@ -28,7 +28,6 @@ ForgeBot 是面向群组协作的通用 AI Bot：通过配置组合问答、知�
 
 ```powershell
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol openai_completions -base-url https://YOUR_API_ROOT
-$env:FORGEBOT_SECRET_KEY = (Get-Content -Raw configs/master.local.key).Trim()
 $env:FORGEBOT_LLM_API_KEY = 'YOUR_PROVIDER_API_KEY'
 go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key llm/default
 Remove-Item Env:FORGEBOT_LLM_API_KEY
@@ -36,7 +35,7 @@ go run ./cmd/forgebot doctor -config configs/forgebot.local.yaml
 go run ./cmd/forgebot -config configs/forgebot.local.yaml
 ```
 
-替换大写占位值。`base-url` 是协议 API 根地址，程序追加对应端点；初始化缺省图片能力关闭，支持图片的模型可增加 `-images`。无认证本地服务用 `-anonymous`，不要假填 Key。主密钥与加密凭据应一起备份、分开保管；不提交 `master.local.key`。
+替换大写占位值。`base-url` 是协议 API 根地址，程序追加对应端点；初始化缺省图片能力关闭，支持图片的模型可增加 `-images`。无认证本地服务用 `-anonymous`，不要假填 Key。`init` 把主密钥和管理令牌写进 `forgebot.local.yaml`；请单独备份该文件和加密凭据，不要提交。
 
 首次启动默认使用 Echo：它接收入站测试并将出站结果写到日志，不连接社交平台。测试请求使用 UTF-8 字节，避免 PowerShell 编码变成问号：
 

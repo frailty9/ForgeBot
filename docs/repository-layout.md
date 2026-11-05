@@ -8,7 +8,7 @@
 | `docs/` | 当前使用、配置、架构、排障和边界 | 是 |
 | `specs/` | 需求、设计、任务、验收、历史交接 | 是 |
 | 测试包内夹具 | 可公开的确定性测试输入 | 是 |
-| `configs/*local*`、`master.local.key` | 本地部署配置与主密钥 | 否 |
+| `configs/*local*` | 本地部署配置，`forgebot.local.yaml` 含主密钥与管理令牌 | 否 |
 | `data/`、`logs/`、`cache/`、`tmp/`、`media/` | 运营状态、日志、索引、临时媒体 | 否 |
 | 部署知识库、自动沉淀目录 | 用户数据；建议放工作区外或明确忽略的部署目录 | 否 |
 | `.claude/settings.local.json` 等 | 个人工具设置 | 否 |

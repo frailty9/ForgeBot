@@ -83,7 +83,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if err != nil {
 		return err
 	}
-	paths := []string{"forgebot.local.yaml", "runtime.local.json", "master.local.key"}
+	paths := []string{"forgebot.local.yaml", "runtime.local.json"}
 	for _, name := range paths {
 		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {
 			return fmt.Errorf("refusing to overwrite %s", name)
@@ -118,7 +118,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if err != nil {
 		return err
 	}
-	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n", base64.RawURLEncoding.EncodeToString(token))
+	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 			}
 		}
 	}()
-	for index, data := range [][]byte{[]byte(yaml), runtimeData, []byte(keyText + "\n")} {
+	for index, data := range [][]byte{[]byte(yaml), runtimeData} {
 		path := filepath.Join(root, paths[index])
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
@@ -151,11 +151,10 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	success = true
 	// 私人初始化目录单独带忽略规则；已有 .gitignore 不擅自改写。
 	if file, err := os.OpenFile(filepath.Join(root, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600); err == nil {
-		_, _ = file.WriteString("/forgebot.local.yaml\n/runtime.local.json*\n/master.local.key\n/secrets.local.json*\n/data/\n")
+		_, _ = file.WriteString("/forgebot.local.yaml\n/runtime.local.json*\n/secrets.local.json*\n/data/\n")
 		_ = file.Close()
 	}
-	fmt.Fprintf(out, "已初始化 %s\n请配置模型与凭据。加载本地主密钥后再启动（不要提交 master.local.key）：\n", root)
-	fmt.Fprintf(out, "PowerShell: $env:FORGEBOT_SECRET_KEY = (Get-Content -Raw '%s').Trim()\n", strings.ReplaceAll(filepath.Join(root, "master.local.key"), "'", "''"))
+	fmt.Fprintf(out, "已初始化 %s\n主密钥与管理令牌已写入 forgebot.local.yaml，请单独备份该文件且不要提交。\n", root)
 	fmt.Fprintf(out, "随后设置 FORGEBOT_LLM_API_KEY，执行 -config '%s' -init-api-key %s；doctor 可在尚未配置模型时运行并列出缺项。\n", filepath.Join(root, "forgebot.local.yaml"), cfg.LLM.APIKeyRef)
 	return nil
 }
@@ -246,13 +245,12 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		secret.Reader
 		secret.StatusReader
 	}
-	if cfg.Static.SecretStorePath == "" && strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY")) != "" {
-		add("credential_store", operation.New(operation.NotConfigured, "master key set without store path"), "设置secret_store_path或移除无关环境变量")
+	if cfg.Static.SecretStorePath == "" && cfg.Static.SecretKey != "" {
+		add("credential_store", operation.New(operation.NotConfigured, "master key set without store path"), "设置secret_store_path，或移除 secret_key 与 FORGEBOT_SECRET_KEY")
 	}
 	if cfg.Runtime.LLM.Authentication != "none" || cfg.Static.SecretStorePath != "" {
-		encoded := strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY"))
-		key, err := secret.ParseKey(encoded)
-		add("master_key", err, "从环境读取，仅验证格式，不显示值")
+		key, err := secret.ParseKey(cfg.Static.SecretKey)
+		add("master_key", err, "读取 YAML secret_key 或 FORGEBOT_SECRET_KEY（后者优先），仅验证格式，不显示值")
 		if err == nil {
 			credentials, err = secret.InspectFile(cfg.Static.SecretStorePath, key)
 			add("credential_store", err, "只读验证加密仓储，不执行恢复或格式升级")

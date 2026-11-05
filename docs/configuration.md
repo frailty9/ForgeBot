@@ -46,7 +46,7 @@ go run ./cmd/forgebot `
 | `FORGEBOT_RUNTIME_CONFIG` | 运行时 JSON 路径 | 被 `-runtime-config` 覆盖 |
 | `FORGEBOT_SECRET_STORE` | SecretStore 文件路径 | 覆盖 YAML 中的同类路径 |
 | `FORGEBOT_ADMIN_TOKEN` | 管理 API Bearer Token | 生产环境推荐；覆盖 YAML |
-| `FORGEBOT_SECRET_KEY` | SecretStore 主密钥 | Base64 编码的 32 字节随机值 |
+| `FORGEBOT_SECRET_KEY` | SecretStore 主密钥 | 覆盖 YAML 中的 `secret_key` |
 | `FORGEBOT_LLM_API_KEY` | 首次初始化时的一次性 API Key | 仅被 `-init-api-key` 读取，不会写入配置文件 |
 
 ## 4. 启动 YAML
@@ -63,8 +63,9 @@ server:
 runtime_config_path: runtime.json
 secret_store_path: secrets.json
 
-# 本地开发可使用；生产环境改用 FORGEBOT_ADMIN_TOKEN。
+# 管理 API 令牌与 SecretStore 主密钥；也可改由环境变量注入，环境变量优先。
 admin_token: change-me
+secret_key: base64-encoded-32-byte-master-key
 ```
 
 | 字段 | 默认值 | 说明 |
@@ -78,6 +79,7 @@ admin_token: change-me
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
 | `group_store_path` | 空 | 欢迎语投递的防重记录；入群自动审批不依赖此项；相对路径以 YAML 所在目录为基准 |
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
+| `secret_key` | 空 | SecretStore 主密钥，Base64 编码的 32 字节；设置 `secret_store_path` 时必填，不会出现在配置查询或 doctor 输出中 |
 
 YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。
 
@@ -414,25 +416,23 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 
 ## 6. 配置 LLM API Key
 
-先在 YAML 中配置 `secret_store_path`，再生成主密钥。以下 PowerShell 变量仅在当前终端进程中有效；生产环境应持久配置到进程管理器或密钥系统中。
+`init` 会自动生成主密钥并写入 YAML 的 `secret_key`。手动配置时，先在 YAML 中设置 `secret_store_path`，再生成主密钥写入 `secret_key`：
 
 ```powershell
 $keyBytes = New-Object byte[] 32
 [Security.Cryptography.RandomNumberGenerator]::Fill($keyBytes)
-$env:FORGEBOT_SECRET_KEY = [Convert]::ToBase64String($keyBytes)
-$env:FORGEBOT_ADMIN_TOKEN = "replace-with-a-strong-token"
+[Convert]::ToBase64String($keyBytes)
 ```
 
-必须妥善保管 `FORGEBOT_SECRET_KEY`。丢失后无法解密原 SecretStore；更换该值前应先规划密钥迁移。
+希望主密钥不落在配置文件里的部署，可以改用环境变量 `FORGEBOT_SECRET_KEY` 注入，它优先于 YAML。无论放在哪里都必须妥善备份：丢失后无法解密原 SecretStore；更换该值前应先规划密钥迁移。
 
 ### 6.1 进程启动前初始化
 
 不能提供一个可提交的 `secrets.json` 示例：该文件必须使用你自己的
-`FORGEBOT_SECRET_KEY` 加密，手写明文或复制他人的密文都不可用。首次启动
+主密钥加密，手写明文或复制他人的密文都不可用。首次启动
 前，使用一次性 CLI 引导命令创建并写入 SecretStore：
 
 ```powershell
-$env:FORGEBOT_SECRET_KEY = "base64-encoded-32-byte-master-key"
 $env:FORGEBOT_LLM_API_KEY = "replace-with-provider-key"
 
 go run ./cmd/forgebot `
@@ -717,8 +717,8 @@ Invoke-RestMethod `
 ## 9. 生产部署检查
 
 - 使用绝对路径配置 YAML、运行时 JSON、SecretStore 和文档库。
-- 使用强随机 `FORGEBOT_ADMIN_TOKEN`，不要在 YAML 中保存生产令牌。
-- 将 `FORGEBOT_SECRET_KEY` 交由部署环境或密钥系统保管并备份。
+- 使用强随机 `admin_token` 与 `secret_key`。可写在 YAML 中并限制文件权限，也可通过 `FORGEBOT_ADMIN_TOKEN` / `FORGEBOT_SECRET_KEY` 由进程管理器或密钥系统注入。
+- 单独备份主密钥；希望密钥与密文分开存放时，把 `secret_store_path` 指到配置目录之外，或改用环境变量注入主密钥。
 - 限制 YAML、JSON、SecretStore 及备份文件的操作系统访问权限。
 - 管理 API 不直接暴露到公网；使用防火墙、反向代理和 TLS 限制访问。
 - 设置明确的 HTTP、LLM、检索超时与资源上限。

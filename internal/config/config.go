@@ -28,6 +28,7 @@ const (
 	envRuntimeConfig   = "FORGEBOT_RUNTIME_CONFIG"
 	envSecretStorePath = "FORGEBOT_SECRET_STORE"
 	envAdminToken      = "FORGEBOT_ADMIN_TOKEN"
+	envSecretKey       = "FORGEBOT_SECRET_KEY"
 	defaultAPIKeyRef   = "llm/default"
 )
 
@@ -63,6 +64,9 @@ type StaticConfig struct {
 	RuntimeConfigPath string        `json:"runtime_config_path" yaml:"runtime_config_path"`
 	SecretStorePath   string        `json:"secret_store_path" yaml:"secret_store_path"`
 	AdminToken        string        `json:"-" yaml:"admin_token"`
+	// SecretKey 是 SecretStore 主密钥（Base64 编码的 32 字节）。与 admin_token
+	// 同属进程级敏感项：可写在 YAML，环境变量优先；任何配置查询都不输出。
+	SecretKey string `json:"-" yaml:"secret_key"`
 }
 
 // StorageConfig 是进程级单选项，不允许运行时混用多个权威后端。
@@ -450,6 +454,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		RuntimeConfigPath string           `yaml:"runtime_config_path"`
 		SecretStorePath   string           `yaml:"secret_store_path"`
 		AdminToken        string           `yaml:"admin_token"`
+		SecretKey         string           `yaml:"secret_key"`
 	}
 	var raw rawStaticConfig
 	decoder := yaml.NewDecoder(file)
@@ -496,6 +501,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 	out.GroupStorePath = raw.GroupStorePath
 	out.SecretStorePath = raw.SecretStorePath
 	out.AdminToken = raw.AdminToken
+	out.SecretKey = strings.TrimSpace(raw.SecretKey)
 	*target = out
 	return nil
 }
@@ -533,6 +539,9 @@ func applyStaticEnv(cfg *StaticConfig, lookupEnv func(string) string) {
 	}
 	if value := strings.TrimSpace(lookupEnv(envAdminToken)); value != "" {
 		cfg.AdminToken = value
+	}
+	if value := strings.TrimSpace(lookupEnv(envSecretKey)); value != "" {
+		cfg.SecretKey = value
 	}
 }
 

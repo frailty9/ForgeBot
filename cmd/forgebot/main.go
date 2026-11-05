@@ -124,9 +124,9 @@ func initializeAPIKey(cfg config.Snapshot, requested, value string) error {
 	if strings.TrimSpace(cfg.Static.SecretStorePath) == "" {
 		return fmt.Errorf("secret_store_path must be configured in YAML or FORGEBOT_SECRET_STORE")
 	}
-	encodedKey := strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY"))
+	encodedKey := cfg.Static.SecretKey
 	if encodedKey == "" {
-		return fmt.Errorf("FORGEBOT_SECRET_KEY is required")
+		return fmt.Errorf("secret_key must be configured in YAML or FORGEBOT_SECRET_KEY")
 	}
 	if value == "" {
 		value = os.Getenv("FORGEBOT_LLM_API_KEY")

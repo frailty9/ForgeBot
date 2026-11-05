@@ -368,3 +368,34 @@ func TestAdministrationConfigScopesUsersToBoundConversations(t *testing.T) {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
+
+// secret_key 与 admin_token 一样可写在 YAML，环境变量优先，且任何序列化都不输出。
+func TestSecretKeyFromYAMLWithEnvPrecedenceAndRedaction(t *testing.T) {
+	dir := t.TempDir()
+	staticPath := filepath.Join(dir, "forgebot.yaml")
+	if err := os.WriteFile(staticPath, []byte("secret_key: '  yaml-master-key  '\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(string) string { return "" }})
+	if err != nil || snapshot.Static.SecretKey != "yaml-master-key" {
+		t.Fatalf("yaml secret_key = %q, %v", snapshot.Static.SecretKey, err)
+	}
+	snapshot, _, err = Load(LoadOptions{Path: staticPath, LookupEnv: func(key string) string {
+		if key == envSecretKey {
+			return "env-master-key"
+		}
+		return ""
+	}})
+	if err != nil || snapshot.Static.SecretKey != "env-master-key" {
+		t.Fatalf("env did not override secret_key: %q, %v", snapshot.Static.SecretKey, err)
+	}
+	for _, value := range []any{snapshot, snapshot.Public(true), snapshot.Public(false)} {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "master-key") || strings.Contains(string(data), "secret_key") {
+			t.Fatalf("secret key exposed: %s", data)
+		}
+	}
+}

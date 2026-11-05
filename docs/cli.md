@@ -6,12 +6,11 @@
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol anthropic_messages -base-url https://YOUR_API_ROOT
 ```
 
-支持三种既有 LLM 协议。图片能力缺省 false，模型支持图片时加 `-images`；无认证本地模型加 `-anonymous`，不能靠漏填 Key 自动启用匿名。目录会生成 `forgebot.local.yaml`、`runtime.local.json`、`master.local.key` 和本地忽略规则（已有 `.gitignore` 不覆盖）。Key 文件与配置使用受限文件模式；Windows 权限仍由所在目录的 ACL 决定。已有目标文件或凭据时拒绝覆盖，不替换密钥。
+支持三种既有 LLM 协议。图片能力缺省 false，模型支持图片时加 `-images`；无认证本地模型加 `-anonymous`，不能靠漏填 Key 自动启用匿名。目录会生成 `forgebot.local.yaml`、`runtime.local.json` 和本地忽略规则（已有 `.gitignore` 不覆盖）。主密钥写在 `forgebot.local.yaml` 的 `secret_key` 中，配置文件使用受限文件模式；Windows 权限仍由所在目录的 ACL 决定。已有目标文件或凭据时拒绝覆盖，不替换密钥。
 
-加载本地主密钥，再首次写入回答 Key：
+首次写入回答 Key：
 
 ```powershell
-$env:FORGEBOT_SECRET_KEY = (Get-Content -Raw configs/master.local.key).Trim()
 $env:FORGEBOT_LLM_API_KEY = 'YOUR_PROVIDER_API_KEY'
 go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key llm/default
 Remove-Item Env:FORGEBOT_LLM_API_KEY
@@ -33,7 +32,7 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key decision
 
 格式为 `-init-api-key <key_ref> [api_key]`。引用参数必填，可指定 `llm/default`、`decision/default`、`mcp/custom` 等任意合法引用；不再隐式采用 `llm.api_key_ref`。原值参数优先，省略时读取 `FORGEBOT_LLM_API_KEY`，两者都没有则报错。所有配置开关放在原值之前，原值建议用单引号包裹。该命令只写入加密仓储，不修改 JSON 配置；对应功能的 `api_key_ref` 需指向相同引用。已有引用拒绝覆盖，成功提示不回显原值。
 
-主密钥文件应单独备份，不提交 Git；迁移部署时应连同加密凭据一起保留。正式启动仍通过环境变量读取主密钥，不会自行读取任意 key 文件。
+`forgebot.local.yaml` 含主密钥，应单独备份且不提交 Git；迁移部署时连同加密凭据一起保留。设置 `FORGEBOT_SECRET_KEY` 时它优先于 YAML 中的 `secret_key`。
 
 ```powershell
 go run ./cmd/forgebot doctor -config configs/forgebot.local.yaml

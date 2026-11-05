@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/admin"
@@ -45,7 +43,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 		logger = slog.Default()
 	}
 	var key []byte
-	if encodedKey := strings.TrimSpace(os.Getenv("FORGEBOT_SECRET_KEY")); encodedKey != "" {
+	if encodedKey := cfg.Static.SecretKey; encodedKey != "" {
 		var err error
 		key, err = secret.ParseKey(encodedKey)
 		if err != nil {
