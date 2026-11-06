@@ -167,8 +167,27 @@ type ServerConfig struct {
 type LogConfig struct {
 	Level  string `json:"level" yaml:"level"`
 	Format string `json:"format" yaml:"format"`
-	// File 为空时输出到 stdout；填写后只追加写入该文件，轮转交给外部工具。
+	// File 为空时输出到 stdout；填写后只写入该文件，并按下列规则轮转。
 	File string `json:"file,omitempty" yaml:"file,omitempty"`
+	// MaxSizeMB 是单个日志文件上限；写满即轮转。
+	MaxSizeMB int `json:"max_size_mb" yaml:"max_size_mb"`
+	// RotateAfterDays 是单个文件最长写入天数，0 表示只按大小轮转。
+	RotateAfterDays int `json:"rotate_after_days" yaml:"rotate_after_days"`
+	// MaxAgeDays 按备份的轮转时间清理，0 表示永久保留。
+	MaxAgeDays int `json:"max_age_days" yaml:"max_age_days"`
+	// Compress 决定轮转出的备份是否压缩为 .gz，当前文件始终不压缩。
+	Compress bool `json:"compress" yaml:"compress"`
+}
+
+// rawLogConfig 用指针区分“未填写”和“填了默认值”，以便发现未配置 file 却填了轮转项。
+type rawLogConfig struct {
+	Level           string `yaml:"level"`
+	Format          string `yaml:"format"`
+	File            string `yaml:"file"`
+	MaxSizeMB       *int   `yaml:"max_size_mb"`
+	RotateAfterDays *int   `yaml:"rotate_after_days"`
+	MaxAgeDays      *int   `yaml:"max_age_days"`
+	Compress        *bool  `yaml:"compress"`
 }
 
 type BotConfig struct {
@@ -260,7 +279,7 @@ func DefaultStatic() StaticConfig {
 	return StaticConfig{Storage: StorageConfig{Backend: FileBackend}, Server: ServerConfig{
 		Addr: "127.0.0.1:8080", ReadTimeout: 10 * time.Second,
 		WriteTimeout: 100 * time.Second, ShutdownTimeout: 15 * time.Second,
-	}, Log: LogConfig{Level: "info", Format: "text"}}
+	}, Log: LogConfig{Level: "info", Format: "text", MaxSizeMB: 10, RotateAfterDays: 7, MaxAgeDays: 60}}
 }
 
 func DefaultRuntime() RuntimeConfig {
@@ -467,7 +486,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		SecretStorePath   string           `yaml:"secret_store_path"`
 		AdminToken        string           `yaml:"admin_token"`
 		SecretKey         string           `yaml:"secret_key"`
-		Log               *LogConfig       `yaml:"log"`
+		Log               *rawLogConfig    `yaml:"log"`
 	}
 	var raw rawStaticConfig
 	decoder := yaml.NewDecoder(file)
@@ -524,6 +543,22 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 			out.Log.Format = raw.Log.Format
 		}
 		out.Log.File = strings.TrimSpace(raw.Log.File)
+		rotation := false
+		if raw.Log.MaxSizeMB != nil {
+			out.Log.MaxSizeMB, rotation = *raw.Log.MaxSizeMB, true
+		}
+		if raw.Log.RotateAfterDays != nil {
+			out.Log.RotateAfterDays, rotation = *raw.Log.RotateAfterDays, true
+		}
+		if raw.Log.MaxAgeDays != nil {
+			out.Log.MaxAgeDays, rotation = *raw.Log.MaxAgeDays, true
+		}
+		if raw.Log.Compress != nil {
+			out.Log.Compress, rotation = *raw.Log.Compress, true
+		}
+		if rotation && out.Log.File == "" {
+			return errors.New("log rotation settings require log.file")
+		}
 	}
 	*target = out
 	return nil
@@ -891,6 +926,19 @@ func (c LogConfig) Validate() error {
 	case "text", "json":
 	default:
 		return errors.New("log.format must be text or json")
+	}
+	if c.MaxSizeMB < 1 || c.MaxSizeMB > 10240 {
+		return errors.New("log.max_size_mb must be 1..10240")
+	}
+	if c.RotateAfterDays < 0 || c.RotateAfterDays > 3650 {
+		return errors.New("log.rotate_after_days must be 0..3650")
+	}
+	if c.MaxAgeDays < 0 || c.MaxAgeDays > 36500 {
+		return errors.New("log.max_age_days must be 0..36500")
+	}
+	// 保留期短于轮转周期时，刚轮转出的备份会立刻被清理，等于没有历史。
+	if c.MaxAgeDays > 0 && c.RotateAfterDays > 0 && c.MaxAgeDays < c.RotateAfterDays {
+		return errors.New("log.max_age_days must be 0 or at least log.rotate_after_days")
 	}
 	return nil
 }

@@ -8,11 +8,16 @@ server:
   shutdown_timeout: 15s
 
 # Changing log settings requires a restart. FORGEBOT_LOG_LEVEL overrides level.
-# Leave file empty to write to stdout; a set file is appended to, rotate it externally.
+# Leave file empty to write to stdout. With file set, ForgeBot rotates it in-process
+# (works on Windows too); rotation options are only accepted together with file.
 log:
   level: info
   format: text
   # file: ../logs/forgebot.log
+  # max_size_mb: 10        # rotate when the file reaches this size
+  # rotate_after_days: 7   # also rotate after this many days; 0 = size only
+  # max_age_days: 60       # delete backups older than this; 0 = keep forever
+  # compress: false        # gzip rotated backups
 
 runtime_config_path: runtime.example.json
 

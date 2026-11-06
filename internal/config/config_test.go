@@ -415,7 +415,7 @@ func TestLogConfigLivesInStaticYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LogConfig{Level: "debug", Format: "json", File: filepath.Join(dir, "logs", "forgebot.log")}
+	want := LogConfig{Level: "debug", Format: "json", File: filepath.Join(dir, "logs", "forgebot.log"), MaxSizeMB: 10, RotateAfterDays: 7, MaxAgeDays: 60}
 	if snapshot.Static.Log != want {
 		t.Fatalf("log = %+v, want %+v", snapshot.Static.Log, want)
 	}
@@ -428,5 +428,42 @@ func TestLogConfigLivesInStaticYAML(t *testing.T) {
 	var runtime RuntimeConfig
 	if err := decodeStrictJSON([]byte(`{"log":{"level":"debug","format":"text"}}`), &runtime); err == nil {
 		t.Fatal("runtime JSON still accepts log")
+	}
+}
+
+// 轮转默认 10MB / 7 天 / 保留 60 天；未配置 log.file 却填写轮转项、或保留期短于轮转周期时拒绝。
+func TestLogRotationDefaultsAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	staticPath := filepath.Join(dir, "forgebot.yaml")
+	load := func(body string) (Snapshot, error) {
+		if err := os.WriteFile(staticPath, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(string) string { return "" }})
+		return snapshot, err
+	}
+	snapshot, err := load("log:\n  file: forgebot.log\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.Static.Log; got.MaxSizeMB != 10 || got.RotateAfterDays != 7 || got.MaxAgeDays != 60 || got.Compress {
+		t.Fatalf("rotation defaults = %+v", got)
+	}
+	snapshot, err = load("log:\n  file: forgebot.log\n  max_size_mb: 20\n  rotate_after_days: 0\n  max_age_days: 0\n  compress: true\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.Static.Log; got.MaxSizeMB != 20 || got.RotateAfterDays != 0 || got.MaxAgeDays != 0 || !got.Compress {
+		t.Fatalf("explicit rotation settings = %+v", got)
+	}
+	for _, body := range []string{
+		"log:\n  max_size_mb: 10\n",
+		"log:\n  file: forgebot.log\n  max_size_mb: 0\n",
+		"log:\n  file: forgebot.log\n  rotate_after_days: -1\n",
+		"log:\n  file: forgebot.log\n  rotate_after_days: 7\n  max_age_days: 3\n",
+	} {
+		if _, err := load(body); err == nil {
+			t.Fatalf("invalid rotation config accepted:\n%s", body)
+		}
 	}
 }

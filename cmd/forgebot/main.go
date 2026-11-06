@@ -77,18 +77,25 @@ func main() {
 		"runtime_path", report.RuntimePath,
 	)
 
+	// 日志写文件时控制台看不到 logger 输出，致命错误另写一行到 stderr。
+	fatal := func(message string, err error) {
+		logger.Error(message, "err", err)
+		if cfg.Static.Log.File != "" {
+			fmt.Fprintf(os.Stderr, "%s: %v (details in %s)\n", message, err, cfg.Static.Log.File)
+		}
+		_ = closeLog()
+		os.Exit(1)
+	}
 	root, err := app.New(cfg, logger)
 	if err != nil {
-		logger.Error("initialize app", "err", err)
-		os.Exit(1)
+		fatal("initialize app", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := root.Run(ctx); err != nil {
-		logger.Error("run app", "err", err)
-		os.Exit(1)
+		fatal("run app", err)
 	}
 }
 

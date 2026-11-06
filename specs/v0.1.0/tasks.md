@@ -214,3 +214,13 @@
 - 删除日志热更新：`logging.Controller`、`Builder.ApplyLog` 与 `ActionUpdateLog`。`app.New` 不再接收日志控制器。
 - 旧运行配置若仍含 `log` 会加载失败，需手动移到 YAML。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-06 日志文件进程内轮转
+
+外部轮转在 Windows 上不可用（打开中的文件不能被改名或删除），改为进程内轮转：
+
+- 引入 `gopkg.in/natefinch/lumberjack.v2` v2.2.1（MIT，无第三方依赖），先关闭再改名，Windows 与 Linux 都可用。
+- `log` 新增 `max_size_mb`（默认 10）、`rotate_after_days`（默认 7，0 为只按大小）、`max_age_days`（默认 60，0 为永久）、`compress`（默认 false）；只能与 `log.file` 一起使用。
+- 按周期轮转约每小时检查一次，空文件不轮转；当前文件开始时间取最新备份时间，重启后取第一条日志时间。
+- 日志写文件时，启动失败另写一行到 stderr。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过；按大小轮转在 Windows 本机实测通过。

@@ -7,27 +7,27 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
 )
 
 // New returns the process logger and a close function for its output. With
 // cfg.File empty the logger writes to stdout and close is a no-op. Otherwise
-// the file is opened for append so restarts never truncate earlier logs;
-// rotation is left to external tools.
+// it appends to that file and rotates it in-process when it reaches
+// MaxSizeMB or has been written for RotateAfterDays, deleting backups older
+// than MaxAgeDays. Rotation runs inside the process, so it also works on
+// Windows where an open file cannot be renamed by other programs.
 func New(cfg config.LogConfig) (*slog.Logger, func() error, error) {
 	var out io.Writer = os.Stdout
 	closeOutput := func() error { return nil }
 	if path := strings.TrimSpace(cfg.File); path != "" {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return nil, nil, err
-		}
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+		file, err := newRotatingFile(path, cfg.MaxSizeMB, cfg.RotateAfterDays, cfg.MaxAgeDays, cfg.Compress, time.Now())
 		if err != nil {
 			return nil, nil, err
 		}
+		file.run()
 		out, closeOutput = file, file.Close
 	}
 	return slog.New(buildHandler(cfg, out)), closeOutput, nil
