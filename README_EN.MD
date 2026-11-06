@@ -24,7 +24,7 @@ Implementation and live acceptance are tracked separately in the [default behavi
 
 ## First run
 
-Use Go 1.25.5 or a newer version capable of building the project, plus an answer-model endpoint. Run these PowerShell commands from the repository root:
+Use Go 1.27 or newer, plus an answer-model endpoint. Run these PowerShell commands from the repository root:
 
 ```powershell
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol openai_completions -base-url https://YOUR_API_ROOT

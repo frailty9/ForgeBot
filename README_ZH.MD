@@ -24,7 +24,7 @@ ForgeBot 是面向群组协作的通用 AI Bot：通过配置组合问答、知�
 
 ## 首次启动
 
-需要 Go 1.25.5 或可构建本项目的更新版本，以及一个可用的回答模型服务。以下为 PowerShell 示例，在仓库根目录执行：
+需要 Go 1.27 或更新版本，以及一个可用的回答模型服务。以下为 PowerShell 示例，在仓库根目录执行：
 
 ```powershell
 go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol openai_completions -base-url https://YOUR_API_ROOT

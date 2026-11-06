@@ -10,6 +10,6 @@ The current application dependency list was checked with `go list -deps` on 2026
 | golang.org/x/text | v0.28.0 | [BSD-style license](docs/third-party-licenses/go-text.txt), Copyright 2009 The Go Authors |
 | gopkg.in/natefinch/lumberjack.v2 | v2.2.1 | [MIT](docs/third-party-licenses/lumberjack.txt), Copyright (c) 2014 Nate Finch |
 | gopkg.in/yaml.v3 | v3.0.1 | [Original combined MIT and Apache notice](docs/third-party-licenses/yaml-v3.txt), including the libyaml port notices |
-| Go standard library / runtime | build toolchain: go1.25.5 | [Go license](docs/third-party-licenses/go-runtime.txt) |
+| Go standard library / runtime | minimum toolchain: go1.27 (verified with go1.27.3) | [Go license](docs/third-party-licenses/go-runtime.txt) |
 
 These files preserve the license text from the locally resolved module versions and Go toolchain. When dependencies or distribution contents change, recheck this list and ship the relevant notices with the release. This is a dependency notice record, not a claim that arbitrary downstream additions have been audited.
