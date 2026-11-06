@@ -87,7 +87,7 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if err = doctor(cfg, true, false, &output); err != nil || calls.Load() != 1 {
 		t.Fatal("explicit model probe", err, calls.Load())
 	}
-	root, err := app.New(cfg, nil, nil)
+	root, err := app.New(cfg, nil)
 	if err != nil {
 		t.Fatal("generated config cannot construct app", err)
 	}

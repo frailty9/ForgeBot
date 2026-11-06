@@ -29,6 +29,7 @@ const (
 	envSecretStorePath = "FORGEBOT_SECRET_STORE"
 	envAdminToken      = "FORGEBOT_ADMIN_TOKEN"
 	envSecretKey       = "FORGEBOT_SECRET_KEY"
+	envLogLevel        = "FORGEBOT_LOG_LEVEL"
 	defaultAPIKeyRef   = "llm/default"
 )
 
@@ -67,6 +68,8 @@ type StaticConfig struct {
 	// SecretKey 是 SecretStore 主密钥（Base64 编码的 32 字节）。与 admin_token
 	// 同属进程级敏感项：可写在 YAML，环境变量优先；任何配置查询都不输出。
 	SecretKey string `json:"-" yaml:"secret_key"`
+	// Log 属于进程级运维配置：输出位置在启动时确定，修改需重启。
+	Log LogConfig `json:"log" yaml:"log"`
 }
 
 // StorageConfig 是进程级单选项，不允许运行时混用多个权威后端。
@@ -91,7 +94,6 @@ type RuntimeConfig struct {
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
 	Agent              agent.Limits              `json:"agent"`
 	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
-	Log                LogConfig                 `json:"log"`
 	Bot                BotConfig                 `json:"bot"`
 	Admission          AdmissionConfig           `json:"admission"`
 	LLM                LLMConfig                 `json:"llm"`
@@ -165,6 +167,8 @@ type ServerConfig struct {
 type LogConfig struct {
 	Level  string `json:"level" yaml:"level"`
 	Format string `json:"format" yaml:"format"`
+	// File 为空时输出到 stdout；填写后只追加写入该文件，轮转交给外部工具。
+	File string `json:"file,omitempty" yaml:"file,omitempty"`
 }
 
 type BotConfig struct {
@@ -256,12 +260,11 @@ func DefaultStatic() StaticConfig {
 	return StaticConfig{Storage: StorageConfig{Backend: FileBackend}, Server: ServerConfig{
 		Addr: "127.0.0.1:8080", ReadTimeout: 10 * time.Second,
 		WriteTimeout: 100 * time.Second, ShutdownTimeout: 15 * time.Second,
-	}}
+	}, Log: LogConfig{Level: "info", Format: "text"}}
 }
 
 func DefaultRuntime() RuntimeConfig {
 	return RuntimeConfig{
-		Log:       LogConfig{Level: "info", Format: "text"},
 		Bot:       BotConfig{Name: "ForgeBot"},
 		LLM:       LLMConfig{Protocol: llm.OpenAIResponses, APIKeyRef: defaultAPIKeyRef, Timeout: 60 * time.Second},
 		Admission: AdmissionConfig{DedupTTL: 60 * time.Second, DedupMax: 10000},
@@ -319,6 +322,9 @@ func Load(opts LoadOptions) (Snapshot, LoadReport, error) {
 		runtimePath = filepath.Join(filepath.Dir(staticPath), runtimePath)
 	}
 	static.RuntimeConfigPath = runtimePath
+	if static.Log.File != "" && !filepath.IsAbs(static.Log.File) && staticPath != "" {
+		static.Log.File = filepath.Join(filepath.Dir(staticPath), static.Log.File)
+	}
 	if static.GroupStorePath != "" && !filepath.IsAbs(static.GroupStorePath) && staticPath != "" {
 		static.GroupStorePath = filepath.Join(filepath.Dir(staticPath), static.GroupStorePath)
 	}
@@ -461,6 +467,7 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		SecretStorePath   string           `yaml:"secret_store_path"`
 		AdminToken        string           `yaml:"admin_token"`
 		SecretKey         string           `yaml:"secret_key"`
+		Log               *LogConfig       `yaml:"log"`
 	}
 	var raw rawStaticConfig
 	decoder := yaml.NewDecoder(file)
@@ -508,6 +515,16 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 	out.SecretStorePath = raw.SecretStorePath
 	out.AdminToken = raw.AdminToken
 	out.SecretKey = strings.TrimSpace(raw.SecretKey)
+	if raw.Log != nil {
+		// 只覆盖填写的字段，未填写的等级和格式保留默认值。
+		if raw.Log.Level != "" {
+			out.Log.Level = raw.Log.Level
+		}
+		if raw.Log.Format != "" {
+			out.Log.Format = raw.Log.Format
+		}
+		out.Log.File = strings.TrimSpace(raw.Log.File)
+	}
 	*target = out
 	return nil
 }
@@ -549,12 +566,18 @@ func applyStaticEnv(cfg *StaticConfig, lookupEnv func(string) string) {
 	if value := strings.TrimSpace(lookupEnv(envSecretKey)); value != "" {
 		cfg.SecretKey = value
 	}
+	if value := strings.TrimSpace(lookupEnv(envLogLevel)); value != "" {
+		cfg.Log.Level = value
+	}
 }
 
 func (c StaticConfig) Validate() error {
 	var problems []string
 	if c.Storage.Kind() != FileBackend {
 		problems = append(problems, "storage.backend must be file; SQL/NoSQL backends are not implemented")
+	}
+	if err := c.Log.Validate(); err != nil {
+		problems = append(problems, err.Error())
 	}
 	if strings.TrimSpace(c.Server.Addr) == "" {
 		problems = append(problems, "server.addr is required")
@@ -599,9 +622,6 @@ func (c RuntimeConfig) Validate() error {
 	}
 	if strings.TrimSpace(c.Bot.Name) == "" {
 		problems = append(problems, "bot.name is required")
-	}
-	if err := c.Log.Validate(); err != nil {
-		problems = append(problems, err.Error())
 	}
 	if err := c.Admission.Validate(); err != nil {
 		problems = append(problems, err.Error())
@@ -901,13 +921,14 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"shutdown_timeout": c.Static.Server.ShutdownTimeout.String(),
 			},
 			"runtime_config_path": c.Static.RuntimeConfigPath,
+			"log":                 c.Static.Log,
 		},
 		"runtime": map[string]any{
 			"group_management":    c.Runtime.GroupManagement,
 			"decision":            c.Runtime.Decision.Public(),
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
 			"agent":               c.Runtime.Agent.Defaults(),
-			"log":                 c.Runtime.Log, "bot": c.Runtime.Bot,
+			"bot":                 c.Runtime.Bot,
 			"llm": map[string]any{
 				"protocol": c.Runtime.LLM.Protocol, "base_url": c.Runtime.LLM.BaseURL,
 				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion, "image_understanding": c.Runtime.LLM.ImageUnderstanding, "authentication": c.Runtime.LLM.Authentication,

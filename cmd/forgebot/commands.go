@@ -119,7 +119,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if err != nil {
 		return err
 	}
-	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
+	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nlog:\n  level: info\n  format: text\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return err
 	}

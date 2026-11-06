@@ -1,105 +1,51 @@
-// Package logging provides a dynamically configurable slog handler used by
-// the runtime generation and management API.
+// Package logging builds the process logger from the startup YAML. The level,
+// format and output are fixed for the life of the process; changing them
+// requires a restart.
 package logging
 
 import (
-	"context"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/soleapi/forgebot/internal/config"
 )
 
-type Controller struct {
-	mu      sync.RWMutex
-	handler slog.Handler
-}
-
-func New(cfg config.LogConfig) (*slog.Logger, *Controller, error) {
-	controller := &Controller{handler: buildHandler(cfg)}
-	return slog.New(controller), controller, nil
-}
-
-func (c *Controller) Apply(cfg config.LogConfig) {
-	c.mu.Lock()
-	c.handler = buildHandler(cfg)
-	c.mu.Unlock()
-}
-
-func (c *Controller) Enabled(ctx context.Context, level slog.Level) bool {
-	c.mu.RLock()
-	handler := c.handler
-	c.mu.RUnlock()
-	return handler.Enabled(ctx, level)
-}
-
-func (c *Controller) Handle(ctx context.Context, record slog.Record) error {
-	c.mu.RLock()
-	handler := c.handler
-	c.mu.RUnlock()
-	return handler.Handle(ctx, record)
-}
-
-func (c *Controller) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &dynamicHandler{controller: c, attrs: append([]slog.Attr(nil), attrs...)}
-}
-
-func (c *Controller) WithGroup(name string) slog.Handler {
-	return &dynamicHandler{controller: c, groups: []string{name}}
-}
-
-type dynamicHandler struct {
-	controller *Controller
-	attrs      []slog.Attr
-	groups     []string
-}
-
-func (h *dynamicHandler) current() slog.Handler {
-	h.controller.mu.RLock()
-	handler := h.controller.handler
-	h.controller.mu.RUnlock()
-	for _, group := range h.groups {
-		handler = handler.WithGroup(group)
+// New returns the process logger and a close function for its output. With
+// cfg.File empty the logger writes to stdout and close is a no-op. Otherwise
+// the file is opened for append so restarts never truncate earlier logs;
+// rotation is left to external tools.
+func New(cfg config.LogConfig) (*slog.Logger, func() error, error) {
+	var out io.Writer = os.Stdout
+	closeOutput := func() error { return nil }
+	if path := strings.TrimSpace(cfg.File); path != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, nil, err
+		}
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+		if err != nil {
+			return nil, nil, err
+		}
+		out, closeOutput = file, file.Close
 	}
-	if len(h.attrs) > 0 {
-		handler = handler.WithAttrs(h.attrs)
-	}
-	return handler
-}
-func (h *dynamicHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.current().Enabled(ctx, level)
-}
-func (h *dynamicHandler) Handle(ctx context.Context, record slog.Record) error {
-	return h.current().Handle(ctx, record)
-}
-func (h *dynamicHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	copy := *h
-	copy.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
-	return &copy
-}
-func (h *dynamicHandler) WithGroup(name string) slog.Handler {
-	copy := *h
-	copy.groups = append(append([]string(nil), h.groups...), name)
-	return &copy
+	return slog.New(buildHandler(cfg, out)), closeOutput, nil
 }
 
-func buildHandler(cfg config.LogConfig) slog.Handler {
-	level := new(slog.LevelVar)
+func buildHandler(cfg config.LogConfig, out io.Writer) slog.Handler {
+	level := slog.LevelInfo
 	switch strings.ToLower(cfg.Level) {
 	case "debug":
-		level.Set(slog.LevelDebug)
+		level = slog.LevelDebug
 	case "warn":
-		level.Set(slog.LevelWarn)
+		level = slog.LevelWarn
 	case "error":
-		level.Set(slog.LevelError)
-	default:
-		level.Set(slog.LevelInfo)
+		level = slog.LevelError
 	}
 	options := &slog.HandlerOptions{Level: level}
 	if strings.ToLower(cfg.Format) == "json" {
-		return slog.NewJSONHandler(os.Stdout, options)
+		return slog.NewJSONHandler(out, options)
 	}
-	return slog.NewTextHandler(os.Stdout, options)
+	return slog.NewTextHandler(out, options)
 }

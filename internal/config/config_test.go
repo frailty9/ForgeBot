@@ -39,7 +39,6 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
 	legacy := `{
-		"log":{"level":"info","format":"text"},
 		"bot":{"name":"ForgeBot"},
 		"admission":{"dedup_ttl":"60s","dedup_max":10000},
 		"llm":{"protocol":"openai_responses","api_key_ref":"llm/default","model":"","timeout":"60s"},
@@ -76,7 +75,6 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	runtimePath := filepath.Join(dir, "runtime.json")
 	staticBody := []byte("server:\n  addr: 127.0.0.1:9000\n  read_timeout: 2s\n  write_timeout: 3s\n  shutdown_timeout: 4s\nruntime_config_path: runtime.json\nsecret_store_path: secrets.json\n")
 	runtimeBody := []byte(`{
-		"log": {"level": "info", "format": "json"},
 		"bot": {"name": "TestBot"},
 		"admission": {"dedup_ttl": "5s", "dedup_max": 7},
 		"llm": {"protocol": "anthropic_messages", "base_url": "https://api.example.test", "api_key_ref": "llm/test", "model": "claude", "timeout": "9s"},
@@ -110,8 +108,8 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	if snapshot.Static.Server.WriteTimeout != 3*time.Second {
 		t.Fatalf("write timeout = %s", snapshot.Static.Server.WriteTimeout)
 	}
-	if snapshot.Runtime.Log.Level != "info" {
-		t.Fatalf("runtime log unexpectedly overridden: %q", snapshot.Runtime.Log.Level)
+	if snapshot.Static.Log.Level != "info" || snapshot.Static.Log.Format != "text" || snapshot.Static.Log.File != "" {
+		t.Fatalf("log defaults changed: %+v", snapshot.Static.Log)
 	}
 	if snapshot.Runtime.Admission.DedupTTL != 5*time.Second {
 		t.Fatalf("admission dedup ttl = %s", snapshot.Runtime.Admission.DedupTTL)
@@ -397,5 +395,38 @@ func TestSecretKeyFromYAMLWithEnvPrecedenceAndRedaction(t *testing.T) {
 		if strings.Contains(string(data), "master-key") || strings.Contains(string(data), "secret_key") {
 			t.Fatalf("secret key exposed: %s", data)
 		}
+	}
+}
+
+// log 属于启动 YAML：可只填部分字段，FORGEBOT_LOG_LEVEL 覆盖等级，相对文件路径以 YAML 目录为基准；
+// 运行时 JSON 不再接受 log。
+func TestLogConfigLivesInStaticYAML(t *testing.T) {
+	dir := t.TempDir()
+	staticPath := filepath.Join(dir, "forgebot.yaml")
+	if err := os.WriteFile(staticPath, []byte("log:\n  format: json\n  file: logs/forgebot.log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(key string) string {
+		if key == envLogLevel {
+			return "debug"
+		}
+		return ""
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LogConfig{Level: "debug", Format: "json", File: filepath.Join(dir, "logs", "forgebot.log")}
+	if snapshot.Static.Log != want {
+		t.Fatalf("log = %+v, want %+v", snapshot.Static.Log, want)
+	}
+	if err := os.WriteFile(staticPath, []byte("log:\n  level: verbose\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = Load(LoadOptions{Path: staticPath, LookupEnv: func(string) string { return "" }}); err == nil {
+		t.Fatal("invalid log level accepted")
+	}
+	var runtime RuntimeConfig
+	if err := decodeStrictJSON([]byte(`{"log":{"level":"debug","format":"text"}}`), &runtime); err == nil {
+		t.Fatal("runtime JSON still accepts log")
 	}
 }

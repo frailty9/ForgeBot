@@ -29,7 +29,7 @@ import (
 func TestNewWithoutSecretStore(t *testing.T) {
 	snapshot := config.DefaultSnapshot()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	_, err := New(snapshot, logger, nil)
+	_, err := New(snapshot, logger)
 	if err == nil || operation.Describe(err).Code != operation.NotConfigured {
 		t.Fatalf("missing LLM accepted: %v", err)
 	}

@@ -62,7 +62,7 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 			enabled := false
 			snapshot.Runtime.Modules = map[string]config.ModuleConfig{replyexperience.ID: {Enabled: &enabled}}
 		}
-		root, err := New(snapshot, nil, nil)
+		root, err := New(snapshot, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 func TestAppRejectsInvalidModuleBeforeServing(t *testing.T) {
 	snapshot := config.DefaultSnapshot()
 	snapshot.Runtime.Modules = map[string]config.ModuleConfig{replyexperience.ID: {Options: json.RawMessage(`{"typo":true}`)}}
-	if _, err := New(snapshot, nil, nil); err == nil {
+	if _, err := New(snapshot, nil); err == nil {
 		t.Fatal("invalid module accepted")
 	}
 }

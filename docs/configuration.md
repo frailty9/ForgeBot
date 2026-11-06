@@ -8,8 +8,8 @@ ForgeBot 将启动所必需且不应频繁变化的配置放在 YAML 中，将�
 
 | 层级 | 介质 | 是否热更新 | 内容 |
 | --- | --- | --- | --- |
-| 启动配置 | YAML / 少量环境变量 | 否，修改后重启进程 | HTTP 监听、运行时配置路径、密钥库路径、管理令牌 |
-| 运行时配置 | JSON / 管理 API | 是 | 日志、Bot、LLM、消息门控、检索、平台、管理员、反思和运维群组 |
+| 启动配置 | YAML / 少量环境变量 | 否，修改后重启进程 | HTTP 监听、日志、运行时配置路径、密钥库路径、管理令牌、主密钥 |
+| 运行时配置 | JSON / 管理 API | 是 | Bot、LLM、消息门控、检索、平台、管理员、反思和运维群组 |
 | LLM 密钥 | 加密 SecretStore | 是 | `llm.api_key_ref` 指向的 API Key |
 
 ForgeBot 不加载 `.env` 文件。生产部署应由进程管理器、容器编排系统或操作系统注入环境变量。
@@ -47,6 +47,7 @@ go run ./cmd/forgebot `
 | `FORGEBOT_SECRET_STORE` | SecretStore 文件路径 | 覆盖 YAML 中的同类路径 |
 | `FORGEBOT_ADMIN_TOKEN` | 管理 API Bearer Token | 生产环境推荐；覆盖 YAML |
 | `FORGEBOT_SECRET_KEY` | SecretStore 主密钥 | 覆盖 YAML 中的 `secret_key` |
+| `FORGEBOT_LOG_LEVEL` | 日志等级 | 覆盖 YAML 中的 `log.level` |
 | `FORGEBOT_LLM_API_KEY` | 首次初始化时的一次性 API Key | 仅被 `-init-api-key` 读取，不会写入配置文件 |
 
 ## 4. 启动 YAML
@@ -59,6 +60,11 @@ server:
   read_timeout: 10s
   write_timeout: 100s
   shutdown_timeout: 15s
+
+log:
+  level: info
+  format: text
+  # file: logs/forgebot.log
 
 runtime_config_path: runtime.json
 secret_store_path: secrets.json
@@ -74,6 +80,9 @@ secret_key: base64-encoded-32-byte-master-key
 | `server.read_timeout` | `10s` | HTTP 请求读取超时，必须大于 0 |
 | `server.write_timeout` | `100s` | HTTP 响应写入超时，必须大于 0；调大 agent.timeout 时同步检查此静态限制 |
 | `server.shutdown_timeout` | `15s` | 优雅停止期限，必须大于 0 |
+| `log.level` | `info` | `debug`、`info`、`warn` 或 `error` |
+| `log.format` | `text` | `text` 或 `json` |
+| `log.file` | 空 | 为空时输出到 stdout；填写后只写入该文件（追加，不截断），相对路径以 YAML 所在目录为基准，目录不存在时自动创建。不内置轮转，交给 logrotate 等外部工具 |
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
@@ -81,7 +90,7 @@ secret_key: base64-encoded-32-byte-master-key
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 | `secret_key` | 空 | SecretStore 主密钥，Base64 编码的 32 字节；设置 `secret_store_path` 时必填，不会出现在配置查询或 doctor 输出中 |
 
-YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。
+YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。日志设置在进程启动时确定，修改后需要重启；排障时可临时设置 `FORGEBOT_LOG_LEVEL=debug` 再启动。
 
 ## 5. 运行时 JSON
 
@@ -93,7 +102,6 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 ```json
 {
-  "log": {"level": "info", "format": "text"},
   "bot": {"name": "ForgeBot", "system_prompt": ""},
   "llm": {
     "protocol": "openai_responses",
@@ -121,14 +129,7 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 写入采用原子替换，保留最近 10 个历史版本，并将上一个有效文件保存在 `runtime.json.bak`。启动时主文件损坏而备份有效，ForgeBot 会加载备份并把配置来源报告为 `json_backup`。
 
-### 5.1 `log`
-
-```json
-{"level": "info", "format": "text"}
-```
-
-- `level`：`debug`、`info`、`warn` 或 `error`。
-- `format`：`text` 或 `json`。
+日志配置已移到启动 YAML 的 `log`，见第 4 节；运行时 JSON 不再接受 `log` 字段。
 
 ### 5.2 `bot`
 

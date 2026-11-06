@@ -62,7 +62,6 @@ type Action string
 
 const (
 	ActionNone              Action = "none"
-	ActionUpdateLog         Action = "update_log"
 	ActionReplaceLLM        Action = "replace_llm"
 	ActionReplaceSecret     Action = "replace_secret"
 	ActionReplaceModules    Action = "replace_modules"
@@ -107,7 +106,6 @@ type Builder struct {
 	Logger             *slog.Logger
 	ConnectorProviders []platform.ConnectorProvider
 	ConnectorFactory   ConnectorFactory
-	ApplyLog           func(config.LogConfig)
 	Notifications      notification.Publisher
 	// 正式应用必须配置回答模型；诊断与边界测试可显式构建无模型实例，
 	// 但 Engine 不会将该实例伪装为成功问答或本地回显。
@@ -754,7 +752,7 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 		return ApplyResult{}, errors.New("runtime is stopped")
 	}
 	action := m.classify(current.snapshot.Runtime, runtimeConfig)
-	if action == ActionNone || action == ActionUpdateLog {
+	if action == ActionNone {
 		persisted, err := persist()
 		if err != nil {
 			return ApplyResult{}, err
@@ -766,9 +764,6 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 		current.snapshot = persisted.Clone()
 		current.mu.Unlock()
 		m.storeSnapshot(persisted)
-		if action == ActionUpdateLog && m.builder.ApplyLog != nil {
-			m.builder.ApplyLog(persisted.Runtime.Log)
-		}
 		m.setStatus(StateReady, action, persisted.Version, "")
 		return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: persisted}, nil
 	}
@@ -797,9 +792,6 @@ func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.Runtim
 	if err != nil {
 		m.setStatus(StateReady, action, current.snapshot.Version, err.Error())
 		return ApplyResult{}, err
-	}
-	if m.builder.ApplyLog != nil {
-		m.builder.ApplyLog(persisted.Runtime.Log)
 	}
 	m.setStatus(StateReady, action, persisted.Version, "")
 	return ApplyResult{Action: action, Status: m.readStatus(), Snapshot: persisted}, nil
@@ -1092,11 +1084,6 @@ func (m *Manager) readStatus() Status {
 func (m *Manager) classify(current, next config.RuntimeConfig) Action {
 	if reflect.DeepEqual(current, next) {
 		return ActionNone
-	}
-	withoutLogCurrent, withoutLogNext := current, next
-	withoutLogCurrent.Log, withoutLogNext.Log = config.LogConfig{}, config.LogConfig{}
-	if reflect.DeepEqual(withoutLogCurrent, withoutLogNext) {
-		return ActionUpdateLog
 	}
 	if !reflect.DeepEqual(current.Platforms, next.Platforms) {
 		return ActionRestartConnectors

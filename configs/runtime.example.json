@@ -130,10 +130,6 @@
       }
     }
   },
-  "log": {
-    "level": "info",
-    "format": "text"
-  },
   "bot": {
     "name": "ForgeBot",
     "system_prompt": ""

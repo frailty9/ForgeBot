@@ -63,11 +63,12 @@ func main() {
 		return
 	}
 
-	logger, logController, err := logging.New(cfg.Runtime.Log)
+	logger, closeLog, err := logging.New(cfg.Static.Log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
 		os.Exit(1)
 	}
+	defer closeLog()
 	slog.SetDefault(logger)
 	logger.Info("configuration loaded",
 		"static_source", report.StaticSource,
@@ -76,7 +77,7 @@ func main() {
 		"runtime_path", report.RuntimePath,
 	)
 
-	root, err := app.New(cfg, logger, logController)
+	root, err := app.New(cfg, logger)
 	if err != nil {
 		logger.Error("initialize app", "err", err)
 		os.Exit(1)

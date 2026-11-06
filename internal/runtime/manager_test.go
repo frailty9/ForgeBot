@@ -98,30 +98,6 @@ func TestCommitRuntimeNoopStillUsesPersistence(t *testing.T) {
 	}
 }
 
-func TestCommitRuntimeUpdatesLogInPlace(t *testing.T) {
-	snapshot := testSnapshot()
-	sender := registeredSender(t)
-	applied := config.LogConfig{}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, ApplyLog: func(cfg config.LogConfig) { applied = cfg }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nextRuntime := snapshot.Runtime
-	nextRuntime.Log.Level = "debug"
-	result, err := manager.CommitRuntime(context.Background(), nextRuntime, func() (config.Snapshot, error) {
-		next := snapshot
-		next.Version = 2
-		next.Runtime = nextRuntime
-		return next, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Action != ActionUpdateLog || applied.Level != "debug" {
-		t.Fatalf("result=%+v applied=%+v", result, applied)
-	}
-}
-
 func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *testing.T) {
 	snapshot := testSnapshot()
 	var sets []*fakeConnectorSet

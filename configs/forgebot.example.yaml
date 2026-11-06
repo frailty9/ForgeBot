@@ -7,6 +7,13 @@ server:
   write_timeout: 100s
   shutdown_timeout: 15s
 
+# Changing log settings requires a restart. FORGEBOT_LOG_LEVEL overrides level.
+# Leave file empty to write to stdout; a set file is appended to, rotate it externally.
+log:
+  level: info
+  format: text
+  # file: ../logs/forgebot.log
+
 runtime_config_path: runtime.example.json
 
 # Used when enabling group operations or native.welcome; no actions enabled by default.

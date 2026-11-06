@@ -11,7 +11,6 @@ import (
 	"github.com/soleapi/forgebot/internal/admin"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/hooks"
-	"github.com/soleapi/forgebot/internal/logging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
@@ -38,7 +37,7 @@ type App struct {
 }
 
 // New constructs all process-level services from the validated snapshot.
-func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Controller) (*App, error) {
+func New(cfg config.Snapshot, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -66,11 +65,7 @@ func New(cfg config.Snapshot, logger *slog.Logger, logController *logging.Contro
 	if err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, ApplyLog: func(logConfig config.LogConfig) {
-		if logController != nil {
-			logController.Apply(logConfig)
-		}
-	}, RequireLLM: true}
+	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, RequireLLM: true}
 	if secretStore != nil {
 		builder.Secrets = secretStore
 	}

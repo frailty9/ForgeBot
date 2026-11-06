@@ -204,3 +204,13 @@
 - 进程入口、`-init-api-key` 与 doctor 统一读取 `cfg.Static.SecretKey`，不再直接读环境变量。
 - `init` 把主密钥写进 `forgebot.local.yaml`，不再生成 `master.local.key`，也不再提示 PowerShell 加载步骤。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-06 日志配置迁到启动 YAML
+
+用户认为日志属于运维层面的进程配置，不应放在可热更新的运行配置里。调整为：
+
+- `log`（`level`、`format`）从运行时 JSON 移到启动 YAML，`FORGEBOT_LOG_LEVEL` 覆盖等级；运行时 JSON 不再接受 `log`。
+- 新增 `log.file`：为空时输出到 stdout，填写后只追加写入该文件，相对路径以 YAML 目录为基准，不内置轮转。
+- 删除日志热更新：`logging.Controller`、`Builder.ApplyLog` 与 `ActionUpdateLog`。`app.New` 不再接收日志控制器。
+- 旧运行配置若仍含 `log` 会加载失败，需手动移到 YAML。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
