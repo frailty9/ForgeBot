@@ -119,7 +119,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if err != nil {
 		return err
 	}
-	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nlog:\n  level: info\n  format: text\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
+	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nlog:\n  console:\n    enabled: true\n    level: info\n    format: text\n  file:\n    enabled: false\n    level: info\n    format: json\n    path: logs/forgebot.log\n    max_size_mb: 10\n    rotate_after_days: 7\n    max_age_days: 60\n    compress: false\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	success = true
 	// 私人初始化目录单独带忽略规则；已有 .gitignore 不擅自改写。
 	if file, err := os.OpenFile(filepath.Join(root, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600); err == nil {
-		_, _ = file.WriteString("/forgebot.local.yaml\n/runtime.local.json*\n/secrets.local.json*\n/data/\n")
+		_, _ = file.WriteString("/forgebot.local.yaml\n/runtime.local.json*\n/secrets.local.json*\n/data/\n/logs/\n")
 		_ = file.Close()
 	}
 	fmt.Fprintf(out, "已初始化 %s\n主密钥与管理令牌已写入 forgebot.local.yaml，请单独备份该文件且不要提交。\n", root)

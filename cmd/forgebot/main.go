@@ -77,11 +77,12 @@ func main() {
 		"runtime_path", report.RuntimePath,
 	)
 
-	// 日志写文件时控制台看不到 logger 输出，致命错误另写一行到 stderr。
+	// 控制台关闭时看不到 logger 输出，致命错误另写一行到 stderr；
+	// 控制台开启时 logger 已经输出，不再重复。
 	fatal := func(message string, err error) {
 		logger.Error(message, "err", err)
-		if cfg.Static.Log.File != "" {
-			fmt.Fprintf(os.Stderr, "%s: %v (details in %s)\n", message, err, cfg.Static.Log.File)
+		if !cfg.Static.Log.Console.Enabled {
+			fmt.Fprintf(os.Stderr, "%s: %v (details in %s)\n", message, err, cfg.Static.Log.File.Path)
 		}
 		_ = closeLog()
 		os.Exit(1)

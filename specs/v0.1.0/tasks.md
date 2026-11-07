@@ -224,3 +224,12 @@
 - 按周期轮转约每小时检查一次，空文件不轮转；当前文件开始时间取最新备份时间，重启后取第一条日志时间。
 - 日志写文件时，启动失败另写一行到 stderr。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过；按大小轮转在 Windows 本机实测通过。
+
+## 2026-11-07 日志控制台与文件分区
+
+- `log` 改为 `console` / `file` 两段，各自设置 `enabled`、`level`、`format`；轮转字段移到 `log.file` 下。默认控制台开（info/text）、文件关（info/json），不写 `log` 时行为不变。
+- 两路至少开启一路；文件开启时必须填写 `path`；文件关闭时保留路径与轮转设置。等级不区分大小写。`FORGEBOT_LOG_LEVEL` 同时覆盖两路等级。
+- 两路都开时使用 Go 1.26 起提供的 `slog.NewMultiHandler`，各路按自己的等级过滤；只开一路时直接使用该 handler。
+- 控制台关闭时，启动失败另写一行到 stderr；控制台开启时不再重复。init 生成的 YAML 带两段配置，忽略规则增加 `/logs/`。
+- 旧的平铺写法（`log.level`、`log.file: 路径` 等）不再接受，需手动迁移。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

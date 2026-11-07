@@ -108,7 +108,7 @@ func TestLoadYAMLRuntimeJSONAndStaticEnv(t *testing.T) {
 	if snapshot.Static.Server.WriteTimeout != 3*time.Second {
 		t.Fatalf("write timeout = %s", snapshot.Static.Server.WriteTimeout)
 	}
-	if snapshot.Static.Log.Level != "info" || snapshot.Static.Log.Format != "text" || snapshot.Static.Log.File != "" {
+	if snapshot.Static.Log != DefaultStatic().Log {
 		t.Fatalf("log defaults changed: %+v", snapshot.Static.Log)
 	}
 	if snapshot.Runtime.Admission.DedupTTL != 5*time.Second {
@@ -398,43 +398,41 @@ func TestSecretKeyFromYAMLWithEnvPrecedenceAndRedaction(t *testing.T) {
 	}
 }
 
-// log 属于启动 YAML：可只填部分字段，FORGEBOT_LOG_LEVEL 覆盖等级，相对文件路径以 YAML 目录为基准；
-// 运行时 JSON 不再接受 log。
-func TestLogConfigLivesInStaticYAML(t *testing.T) {
+// log 分 console / file 两段：可只填部分字段，等级不区分大小写，FORGEBOT_LOG_LEVEL
+// 同时覆盖两路，相对路径以 YAML 目录为基准；运行时 JSON 与旧平铺写法都不再接受。
+func TestLogConfigSplitsConsoleAndFile(t *testing.T) {
 	dir := t.TempDir()
 	staticPath := filepath.Join(dir, "forgebot.yaml")
-	if err := os.WriteFile(staticPath, []byte("log:\n  format: json\n  file: logs/forgebot.log\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(key string) string {
-		if key == envLogLevel {
-			return "debug"
+	load := func(body string, env map[string]string) (Snapshot, error) {
+		if err := os.WriteFile(staticPath, []byte(body), 0600); err != nil {
+			t.Fatal(err)
 		}
-		return ""
-	}})
+		snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(key string) string { return env[key] }})
+		return snapshot, err
+	}
+	snapshot, err := load("log:\n  console:\n    level: DEBUG\n  file:\n    enabled: true\n    level: Warn\n    path: logs/forgebot.log\n    compress: true\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LogConfig{Level: "debug", Format: "json", File: filepath.Join(dir, "logs", "forgebot.log"), MaxSizeMB: 10, RotateAfterDays: 7, MaxAgeDays: 60}
+	want := DefaultStatic().Log
+	want.Console.Level = "debug"
+	want.File.Enabled, want.File.Level, want.File.Compress = true, "warn", true
+	want.File.Path = filepath.Join(dir, "logs", "forgebot.log")
 	if snapshot.Static.Log != want {
 		t.Fatalf("log = %+v, want %+v", snapshot.Static.Log, want)
 	}
-	if err := os.WriteFile(staticPath, []byte("log:\n  level: verbose\n"), 0600); err != nil {
+	snapshot, err = load("log:\n  console:\n    level: warn\n  file:\n    level: error\n", map[string]string{envLogLevel: "Debug"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = Load(LoadOptions{Path: staticPath, LookupEnv: func(string) string { return "" }}); err == nil {
-		t.Fatal("invalid log level accepted")
-	}
-	var runtime RuntimeConfig
-	if err := decodeStrictJSON([]byte(`{"log":{"level":"debug","format":"text"}}`), &runtime); err == nil {
-		t.Fatal("runtime JSON still accepts log")
+	if got := snapshot.Static.Log; got.Console.Level != "debug" || got.File.Level != "debug" {
+		t.Fatalf("env override did not apply to both sinks: %+v", got)
 	}
 }
 
-// 轮转默认 10MB / 7 天 / 保留 60 天；未配置 log.file 却填写轮转项、或保留期短于轮转周期时拒绝。
-func TestLogRotationDefaultsAndValidation(t *testing.T) {
-	dir := t.TempDir()
-	staticPath := filepath.Join(dir, "forgebot.yaml")
+// 只开文件、关闭控制台可用；两路都关、文件开启却无路径、旧平铺写法、非法取值都拒绝。
+func TestLogConfigValidation(t *testing.T) {
+	staticPath := filepath.Join(t.TempDir(), "forgebot.yaml")
 	load := func(body string) (Snapshot, error) {
 		if err := os.WriteFile(staticPath, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -442,28 +440,29 @@ func TestLogRotationDefaultsAndValidation(t *testing.T) {
 		snapshot, _, err := Load(LoadOptions{Path: staticPath, LookupEnv: func(string) string { return "" }})
 		return snapshot, err
 	}
-	snapshot, err := load("log:\n  file: forgebot.log\n")
+	snapshot, err := load("log:\n  console:\n    enabled: false\n  file:\n    enabled: true\n    path: forgebot.log\n    max_size_mb: 20\n    rotate_after_days: 0\n    max_age_days: 0\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := snapshot.Static.Log; got.MaxSizeMB != 10 || got.RotateAfterDays != 7 || got.MaxAgeDays != 60 || got.Compress {
-		t.Fatalf("rotation defaults = %+v", got)
-	}
-	snapshot, err = load("log:\n  file: forgebot.log\n  max_size_mb: 20\n  rotate_after_days: 0\n  max_age_days: 0\n  compress: true\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := snapshot.Static.Log; got.MaxSizeMB != 20 || got.RotateAfterDays != 0 || got.MaxAgeDays != 0 || !got.Compress {
-		t.Fatalf("explicit rotation settings = %+v", got)
+	if got := snapshot.Static.Log; got.Console.Enabled || got.File.MaxSizeMB != 20 || got.File.RotateAfterDays != 0 || got.File.MaxAgeDays != 0 {
+		t.Fatalf("explicit settings = %+v", got)
 	}
 	for _, body := range []string{
-		"log:\n  max_size_mb: 10\n",
-		"log:\n  file: forgebot.log\n  max_size_mb: 0\n",
-		"log:\n  file: forgebot.log\n  rotate_after_days: -1\n",
-		"log:\n  file: forgebot.log\n  rotate_after_days: 7\n  max_age_days: 3\n",
+		"log:\n  level: debug\n",
+		"log:\n  file: logs/forgebot.log\n",
+		"log:\n  console:\n    enabled: false\n",
+		"log:\n  file:\n    enabled: true\n",
+		"log:\n  console:\n    level: verbose\n",
+		"log:\n  file:\n    format: xml\n",
+		"log:\n  file:\n    max_size_mb: 0\n",
+		"log:\n  file:\n    rotate_after_days: 7\n    max_age_days: 3\n",
 	} {
 		if _, err := load(body); err == nil {
-			t.Fatalf("invalid rotation config accepted:\n%s", body)
+			t.Fatalf("invalid log config accepted:\n%s", body)
 		}
+	}
+	var runtime RuntimeConfig
+	if err := decodeStrictJSON([]byte(`{"log":{"level":"debug","format":"text"}}`), &runtime); err == nil {
+		t.Fatal("runtime JSON still accepts log")
 	}
 }

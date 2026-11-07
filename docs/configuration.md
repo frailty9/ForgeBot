@@ -47,7 +47,7 @@ go run ./cmd/forgebot `
 | `FORGEBOT_SECRET_STORE` | SecretStore 文件路径 | 覆盖 YAML 中的同类路径 |
 | `FORGEBOT_ADMIN_TOKEN` | 管理 API Bearer Token | 生产环境推荐；覆盖 YAML |
 | `FORGEBOT_SECRET_KEY` | SecretStore 主密钥 | 覆盖 YAML 中的 `secret_key` |
-| `FORGEBOT_LOG_LEVEL` | 日志等级 | 覆盖 YAML 中的 `log.level` |
+| `FORGEBOT_LOG_LEVEL` | 日志等级 | 同时覆盖 `log.console.level` 与 `log.file.level` |
 | `FORGEBOT_LLM_API_KEY` | 首次初始化时的一次性 API Key | 仅被 `-init-api-key` 读取，不会写入配置文件 |
 
 ## 4. 启动 YAML
@@ -62,14 +62,19 @@ server:
   shutdown_timeout: 15s
 
 log:
-  level: info
-  format: text
-  # 以下为写文件与轮转设置，填写 file 后生效
-  # file: logs/forgebot.log
-  # max_size_mb: 10
-  # rotate_after_days: 7
-  # max_age_days: 60
-  # compress: false
+  console:
+    enabled: true
+    level: info
+    format: text
+  file:
+    enabled: false
+    level: info
+    format: json
+    path: logs/forgebot.log
+    max_size_mb: 10
+    rotate_after_days: 7
+    max_age_days: 60
+    compress: false
 
 runtime_config_path: runtime.json
 secret_store_path: secrets.json
@@ -85,13 +90,17 @@ secret_key: base64-encoded-32-byte-master-key
 | `server.read_timeout` | `10s` | HTTP 请求读取超时，必须大于 0 |
 | `server.write_timeout` | `100s` | HTTP 响应写入超时，必须大于 0；调大 agent.timeout 时同步检查此静态限制 |
 | `server.shutdown_timeout` | `15s` | 优雅停止期限，必须大于 0 |
-| `log.level` | `info` | `debug`、`info`、`warn` 或 `error` |
-| `log.format` | `text` | `text` 或 `json` |
-| `log.file` | 空 | 为空时输出到 stdout；填写后只写入该文件并按下面四项轮转。相对路径以 YAML 所在目录为基准，目录不存在时自动创建 |
-| `log.max_size_mb` | `10` | 单个日志文件上限（MB），写满即轮转，范围 1–10240 |
-| `log.rotate_after_days` | `7` | 单个文件最长写入天数，到期即使未写满也轮转；`0` 表示只按大小轮转 |
-| `log.max_age_days` | `60` | 备份保留天数，`0` 表示永久保留；不能小于 `rotate_after_days` |
-| `log.compress` | `false` | 轮转出的备份是否压缩为 `.gz`，当前文件始终不压缩 |
+| `log.console.enabled` | `true` | 是否输出到 stdout |
+| `log.console.level` | `info` | `debug`、`info`、`warn` 或 `error`，不区分大小写 |
+| `log.console.format` | `text` | `text` 或 `json` |
+| `log.file.enabled` | `false` | 是否写入日志文件；关闭时仍保留下面的路径与轮转设置 |
+| `log.file.level` | `info` | 同 `log.console.level` |
+| `log.file.format` | `json` | `text` 或 `json` |
+| `log.file.path` | 空 | 日志文件路径，开启文件输出时必填。相对路径以 YAML 所在目录为基准，目录不存在时自动创建 |
+| `log.file.max_size_mb` | `10` | 单个日志文件上限（MB），写满即轮转，范围 1–10240 |
+| `log.file.rotate_after_days` | `7` | 单个文件最长写入天数，到期即使未写满也轮转；`0` 表示只按大小轮转 |
+| `log.file.max_age_days` | `60` | 备份保留天数，`0` 表示永久保留；不能小于 `rotate_after_days` |
+| `log.file.compress` | `false` | 轮转出的备份是否压缩为 `.gz`，当前文件始终不压缩 |
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
@@ -99,11 +108,13 @@ secret_key: base64-encoded-32-byte-master-key
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 | `secret_key` | 空 | SecretStore 主密钥，Base64 编码的 32 字节；设置 `secret_store_path` 时必填，不会出现在配置查询或 doctor 输出中 |
 
-YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。轮转只在配置 `log.file` 后可用，未配置文件却填写轮转项会启动失败。
+YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML document 会导致启动失败。旧的平铺写法（`log.level`、`log.format`、`log.file: 路径` 等）已不再接受，需改为 `log.console` / `log.file` 两段。
 
-日志轮转在进程内完成：先关闭当前文件，再改名为 `forgebot-<UTC 时间>.log`（开启压缩时为 `.log.gz`），然后新建同名文件继续写，因此 Windows 与 Linux 都不需要 logrotate 等外部工具。按周期轮转约每小时检查一次；当前文件为空时不轮转。重启后沿用已有文件，开始时间取文件第一条日志的时间。备份按轮转时间清理，且只在发生轮转时清理，所以最旧的日志内容最多会比 `max_age_days` 再早一个轮转周期；长期无日志写入时旧备份也会暂时保留。同一个 `log.file` 只能由一个进程写入。
+控制台与文件两路至少开启一路，否则启动失败。两路都开启时，每条日志按各自等级分别过滤：例如控制台为 `debug`、文件为 `info` 时，debug 日志只出现在控制台。
 
-日志写文件时，启动失败的错误会另写一行到 stderr；Go 的 panic 堆栈始终输出到 stderr，不进入日志文件。日志设置在进程启动时确定，修改后需要重启；排障时可临时设置 `FORGEBOT_LOG_LEVEL=debug` 再启动。
+日志轮转在进程内完成：先关闭当前文件，再改名为 `forgebot-<UTC 时间>.log`（开启压缩时为 `.log.gz`），然后新建同名文件继续写，因此 Windows 与 Linux 都不需要 logrotate 等外部工具。按周期轮转约每小时检查一次；当前文件为空时不轮转。重启后沿用已有文件，开始时间取文件第一条日志的时间。备份按轮转时间清理，且只在发生轮转时清理，所以最旧的日志内容最多会比 `max_age_days` 再早一个轮转周期；长期无日志写入时旧备份也会暂时保留。同一个 `log.file.path` 只能由一个进程写入。
+
+控制台关闭时，启动失败的错误会另写一行到 stderr；Go 的 panic 堆栈始终输出到 stderr，不进入日志文件。日志设置在进程启动时确定，修改后需要重启；排障时可临时设置 `FORGEBOT_LOG_LEVEL=debug` 再启动。
 
 ## 5. 运行时 JSON
 

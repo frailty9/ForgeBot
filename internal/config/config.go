@@ -164,11 +164,25 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration `json:"shutdown_timeout" yaml:"shutdown_timeout"`
 }
 
+// LogConfig 把控制台（stdout）与文件分成两路输出，各自设置开关、等级和格式；
+// 至少开启一路。两路都开启时，一条日志按各自等级分别写入。
 type LogConfig struct {
-	Level  string `json:"level" yaml:"level"`
-	Format string `json:"format" yaml:"format"`
-	// File 为空时输出到 stdout；填写后只写入该文件，并按下列规则轮转。
-	File string `json:"file,omitempty" yaml:"file,omitempty"`
+	Console LogConsoleConfig `json:"console" yaml:"console"`
+	File    LogFileConfig    `json:"file" yaml:"file"`
+}
+
+type LogConsoleConfig struct {
+	Enabled bool   `json:"enabled" yaml:"enabled"`
+	Level   string `json:"level" yaml:"level"`
+	Format  string `json:"format" yaml:"format"`
+}
+
+// LogFileConfig 关闭时仍保留路径与轮转设置，便于临时停用后再开启。
+type LogFileConfig struct {
+	Enabled bool   `json:"enabled" yaml:"enabled"`
+	Level   string `json:"level" yaml:"level"`
+	Format  string `json:"format" yaml:"format"`
+	Path    string `json:"path" yaml:"path"`
 	// MaxSizeMB 是单个日志文件上限；写满即轮转。
 	MaxSizeMB int `json:"max_size_mb" yaml:"max_size_mb"`
 	// RotateAfterDays 是单个文件最长写入天数，0 表示只按大小轮转。
@@ -179,11 +193,24 @@ type LogConfig struct {
 	Compress bool `json:"compress" yaml:"compress"`
 }
 
-// rawLogConfig 用指针区分“未填写”和“填了默认值”，以便发现未配置 file 却填了轮转项。
+// raw* 用指针区分“未填写”和“填了零值”，未填写的字段保留默认值。
+// 旧的平铺写法（log.level 等）不在其中，严格解析会直接报未知字段。
 type rawLogConfig struct {
+	Console *rawLogConsoleConfig `yaml:"console"`
+	File    *rawLogFileConfig    `yaml:"file"`
+}
+
+type rawLogConsoleConfig struct {
+	Enabled *bool  `yaml:"enabled"`
+	Level   string `yaml:"level"`
+	Format  string `yaml:"format"`
+}
+
+type rawLogFileConfig struct {
+	Enabled         *bool  `yaml:"enabled"`
 	Level           string `yaml:"level"`
 	Format          string `yaml:"format"`
-	File            string `yaml:"file"`
+	Path            string `yaml:"path"`
 	MaxSizeMB       *int   `yaml:"max_size_mb"`
 	RotateAfterDays *int   `yaml:"rotate_after_days"`
 	MaxAgeDays      *int   `yaml:"max_age_days"`
@@ -279,7 +306,10 @@ func DefaultStatic() StaticConfig {
 	return StaticConfig{Storage: StorageConfig{Backend: FileBackend}, Server: ServerConfig{
 		Addr: "127.0.0.1:8080", ReadTimeout: 10 * time.Second,
 		WriteTimeout: 100 * time.Second, ShutdownTimeout: 15 * time.Second,
-	}, Log: LogConfig{Level: "info", Format: "text", MaxSizeMB: 10, RotateAfterDays: 7, MaxAgeDays: 60}}
+	}, Log: LogConfig{
+		Console: LogConsoleConfig{Enabled: true, Level: "info", Format: "text"},
+		File:    LogFileConfig{Level: "info", Format: "json", MaxSizeMB: 10, RotateAfterDays: 7, MaxAgeDays: 60},
+	}}
 }
 
 func DefaultRuntime() RuntimeConfig {
@@ -341,8 +371,8 @@ func Load(opts LoadOptions) (Snapshot, LoadReport, error) {
 		runtimePath = filepath.Join(filepath.Dir(staticPath), runtimePath)
 	}
 	static.RuntimeConfigPath = runtimePath
-	if static.Log.File != "" && !filepath.IsAbs(static.Log.File) && staticPath != "" {
-		static.Log.File = filepath.Join(filepath.Dir(staticPath), static.Log.File)
+	if static.Log.File.Path != "" && !filepath.IsAbs(static.Log.File.Path) && staticPath != "" {
+		static.Log.File.Path = filepath.Join(filepath.Dir(staticPath), static.Log.File.Path)
 	}
 	if static.GroupStorePath != "" && !filepath.IsAbs(static.GroupStorePath) && staticPath != "" {
 		static.GroupStorePath = filepath.Join(filepath.Dir(staticPath), static.GroupStorePath)
@@ -535,33 +565,51 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 	out.AdminToken = raw.AdminToken
 	out.SecretKey = strings.TrimSpace(raw.SecretKey)
 	if raw.Log != nil {
-		// 只覆盖填写的字段，未填写的等级和格式保留默认值。
-		if raw.Log.Level != "" {
-			out.Log.Level = raw.Log.Level
-		}
-		if raw.Log.Format != "" {
-			out.Log.Format = raw.Log.Format
-		}
-		out.Log.File = strings.TrimSpace(raw.Log.File)
-		rotation := false
-		if raw.Log.MaxSizeMB != nil {
-			out.Log.MaxSizeMB, rotation = *raw.Log.MaxSizeMB, true
-		}
-		if raw.Log.RotateAfterDays != nil {
-			out.Log.RotateAfterDays, rotation = *raw.Log.RotateAfterDays, true
-		}
-		if raw.Log.MaxAgeDays != nil {
-			out.Log.MaxAgeDays, rotation = *raw.Log.MaxAgeDays, true
-		}
-		if raw.Log.Compress != nil {
-			out.Log.Compress, rotation = *raw.Log.Compress, true
-		}
-		if rotation && out.Log.File == "" {
-			return errors.New("log rotation settings require log.file")
-		}
+		mergeLog(&out.Log, *raw.Log)
 	}
 	*target = out
 	return nil
+}
+
+// mergeLog 只覆盖 YAML 中填写的字段；等级统一转为小写，DEBUG 与 debug 等价。
+func mergeLog(out *LogConfig, raw rawLogConfig) {
+	if c := raw.Console; c != nil {
+		if c.Enabled != nil {
+			out.Console.Enabled = *c.Enabled
+		}
+		if c.Level != "" {
+			out.Console.Level = strings.ToLower(strings.TrimSpace(c.Level))
+		}
+		if c.Format != "" {
+			out.Console.Format = strings.ToLower(strings.TrimSpace(c.Format))
+		}
+	}
+	f := raw.File
+	if f == nil {
+		return
+	}
+	if f.Enabled != nil {
+		out.File.Enabled = *f.Enabled
+	}
+	if f.Level != "" {
+		out.File.Level = strings.ToLower(strings.TrimSpace(f.Level))
+	}
+	if f.Format != "" {
+		out.File.Format = strings.ToLower(strings.TrimSpace(f.Format))
+	}
+	out.File.Path = strings.TrimSpace(f.Path)
+	if f.MaxSizeMB != nil {
+		out.File.MaxSizeMB = *f.MaxSizeMB
+	}
+	if f.RotateAfterDays != nil {
+		out.File.RotateAfterDays = *f.RotateAfterDays
+	}
+	if f.MaxAgeDays != nil {
+		out.File.MaxAgeDays = *f.MaxAgeDays
+	}
+	if f.Compress != nil {
+		out.File.Compress = *f.Compress
+	}
 }
 
 func decodeJSONFile(path string, target any) error {
@@ -601,8 +649,10 @@ func applyStaticEnv(cfg *StaticConfig, lookupEnv func(string) string) {
 	if value := strings.TrimSpace(lookupEnv(envSecretKey)); value != "" {
 		cfg.SecretKey = value
 	}
-	if value := strings.TrimSpace(lookupEnv(envLogLevel)); value != "" {
-		cfg.Log.Level = value
+	// 排障时临时调整等级，同时作用于两路输出，避免只改一边造成困惑。
+	if value := strings.ToLower(strings.TrimSpace(lookupEnv(envLogLevel))); value != "" {
+		cfg.Log.Console.Level = value
+		cfg.Log.File.Level = value
 	}
 }
 
@@ -917,28 +967,41 @@ func (c LLMConfig) Validate() error {
 }
 
 func (c LogConfig) Validate() error {
-	switch strings.ToLower(c.Level) {
-	case "debug", "info", "warn", "error":
-	default:
-		return errors.New("log.level must be one of debug, info, warn, error")
+	if !c.Console.Enabled && !c.File.Enabled {
+		return errors.New("log.console and log.file cannot both be disabled")
 	}
-	switch strings.ToLower(c.Format) {
-	case "text", "json":
-	default:
-		return errors.New("log.format must be text or json")
+	// 关闭的一路也校验，避免重新开启时才发现拼写错误。
+	for _, sink := range []struct{ name, level, format string }{
+		{"log.console", c.Console.Level, c.Console.Format},
+		{"log.file", c.File.Level, c.File.Format},
+	} {
+		switch sink.level {
+		case "debug", "info", "warn", "error":
+		default:
+			return fmt.Errorf("%s.level must be one of debug, info, warn, error", sink.name)
+		}
+		switch sink.format {
+		case "text", "json":
+		default:
+			return fmt.Errorf("%s.format must be text or json", sink.name)
+		}
 	}
-	if c.MaxSizeMB < 1 || c.MaxSizeMB > 10240 {
-		return errors.New("log.max_size_mb must be 1..10240")
+	f := c.File
+	if f.Enabled && f.Path == "" {
+		return errors.New("log.file.path is required when log.file is enabled")
 	}
-	if c.RotateAfterDays < 0 || c.RotateAfterDays > 3650 {
-		return errors.New("log.rotate_after_days must be 0..3650")
+	if f.MaxSizeMB < 1 || f.MaxSizeMB > 10240 {
+		return errors.New("log.file.max_size_mb must be 1..10240")
 	}
-	if c.MaxAgeDays < 0 || c.MaxAgeDays > 36500 {
-		return errors.New("log.max_age_days must be 0..36500")
+	if f.RotateAfterDays < 0 || f.RotateAfterDays > 3650 {
+		return errors.New("log.file.rotate_after_days must be 0..3650")
+	}
+	if f.MaxAgeDays < 0 || f.MaxAgeDays > 36500 {
+		return errors.New("log.file.max_age_days must be 0..36500")
 	}
 	// 保留期短于轮转周期时，刚轮转出的备份会立刻被清理，等于没有历史。
-	if c.MaxAgeDays > 0 && c.RotateAfterDays > 0 && c.MaxAgeDays < c.RotateAfterDays {
-		return errors.New("log.max_age_days must be 0 or at least log.rotate_after_days")
+	if f.MaxAgeDays > 0 && f.RotateAfterDays > 0 && f.MaxAgeDays < f.RotateAfterDays {
+		return errors.New("log.file.max_age_days must be 0 or at least log.file.rotate_after_days")
 	}
 	return nil
 }
