@@ -2,6 +2,8 @@
 
 ForgeBot 将启动所必需且不应频繁变化的配置放在 YAML 中，将应用层配置放在可写的 JSON 中。LLM API Key 不进入任一配置文件，而是通过管理 API 写入加密的 SecretStore。
 
+**一个部署对应一个业务。** 一个实例可以接入多个平台的多个群，但共用同一份业务范围（`bot.system_prompt`）、知识库、回答模型和模块规则；按群的配置只决定该群开启哪些功能，或填写群专属的展示内容（如欢迎语文本）。服务多个互不相关的业务时，请分别部署。
+
 首次使用建议从 [CLI 初始化](cli.md) 开始；[默认行为表](default-behavior.md)、[群管理与欢迎](group-management.md)、[存储恢复](storage.md)分别补充行为、事件操作和持久化边界。
 
 ## 1. 配置分层
@@ -755,7 +757,7 @@ Invoke-RestMethod `
 
 ## 入群自动审批
 
-入群自动审批由 `modules.native.join_review` 按群配置：模块启用且群出现在 `options.groups` 中即开启，默认关闭。每个群可设 `regex`（可选 Go 正则，RE2 语法，最多 4096 字节）、`model_enabled`（是否使用共享模型决策）、`rule`（模型判断标准，最多 4096 字节）、`combine`（`and` 默认或 `or`）与 `reject_reason`（最多 2048 字节的固定拒绝理由）。顶层 `group_management` 已删除。
+入群自动审批由 `modules.native.join_review` 配置，默认关闭。规则在模块 `options` 中统一写一份，所有开启的群共用：`regex`（可选 Go 正则，RE2 语法，最多 4096 字节）、`model_enabled`（是否使用共享模型决策）、`rule`（模型判断标准，最多 4096 字节）、`combine`（`and` 默认或 `or`）与 `reject_reason`（最多 2048 字节的固定拒绝理由）。`options.groups.<群ID>.enabled` 决定该群是否开启。顶层 `group_management` 已删除。
 
 正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
 

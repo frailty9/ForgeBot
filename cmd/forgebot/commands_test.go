@@ -75,7 +75,7 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	approvalConfig := cfg.Clone()
 	approvalConfig.Static.GroupStorePath = ""
 	on := true
-	reviewOptions, _ := json.Marshal(map[string]any{"groups": map[string]any{approvalConfig.Runtime.Platforms.Groups[0].ID: map[string]any{"regex": `\S`}}})
+	reviewOptions, _ := json.Marshal(map[string]any{"regex": `\S`, "groups": map[string]any{approvalConfig.Runtime.Platforms.Groups[0].ID: map[string]any{"enabled": true}}})
 	approvalConfig.Runtime.Modules = map[string]config.ModuleConfig{joinreview.ID: {Enabled: &on, Options: reviewOptions}}
 	var approvalOutput bytes.Buffer
 	if err = doctor(approvalConfig, false, false, &approvalOutput); err != nil {

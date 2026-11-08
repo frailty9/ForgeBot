@@ -4,6 +4,8 @@
 
 ForgeBot is a general-purpose AI Bot for group collaboration. Combine question answering, knowledge tools and community operations through configuration, backed by a Go runtime with replaceable connectors, feature modules and hot updates.
 
+**One deployment serves one business.** A single ForgeBot instance can join many groups across several platforms, but they all share one business scope (`bot.system_prompt`), one knowledge base, one answer model and one set of feature rules such as join review; individual groups only choose which features to turn on. To serve several unrelated businesses, run one instance per business.
+
 The project is preparing a `v0.1.0` source preview and has not been released. OneBot 11 and a local Echo connector are available. WebUI, FPP external plugins, Telegram, SQL/NoSQL backends and vector retrieval are deferred.
 
 ## Capabilities

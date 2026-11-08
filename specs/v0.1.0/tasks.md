@@ -252,3 +252,12 @@
 - 删除顶层 `group_management` 及 `group.Policy.AutoReview`；残留的 `group_management` 会被严格解析拒绝。
 - 统一校验：`native.join_review`、`native.welcome`、`native.proactive_reply` 的 `groups` 与 `native.knowledge_reflection` 的 `conversation_ids` 必须引用已绑定的群，关闭的模块同样检查。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 明确“一个部署对应一个业务”，入群审批规则改为模块级
+
+用户确认 v0.1.0 定位为一个部署服务一个业务：多个平台的多个群共用业务范围、知识库、回答模型与模块规则，各群只决定开启哪些功能。多业务需求出现较多时再考虑。据此：
+
+- `native.join_review` 的规则字段（`regex`、`model_enabled`、`rule`、`combine`、`reject_reason`）移到模块 `options` 顶层，所有开启的群共用；`groups.<群ID>` 只保留 `enabled`。
+- `groups` 中列了群（含关闭的群）时规则必须可用；关闭的群同样检查是否已绑定。
+- 双语 README 与 configuration.md 写明部署定位；群管理文档改为模块级规则写法。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

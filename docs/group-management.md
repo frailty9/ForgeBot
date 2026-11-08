@@ -9,7 +9,7 @@ platforms.connectors[].id = "qq-main"          ← 一个 QQ 账号（OneBot 端
         ↓ connector_id
 platforms.groups[] = {id: "support", connector_id: "qq-main", target: "10001"}
         ↓ 逻辑群 ID "support"（target 10001 是 QQ 群号）
-modules.native.join_review.options.groups.support  ← 入群自动审批
+modules.native.join_review.options.groups.support  ← 入群自动审批（规则在模块层统一配置）
 modules.native.welcome.options.groups.support  ← 新人欢迎
 modules.native.proactive_reply.options.groups.support  ← 主动插话
 administration.administrators[].conversation_id = "support"  ← 可信管理员
@@ -60,7 +60,7 @@ group_store_path: ../data/group-operations.json
 
 ## 入群自动审批
 
-入群审批由 `native.join_review` 模块按群配置。**模块启用、且群出现在 `options.groups` 中，即表示该群开启自动审批**，没有单独的开关；不想审批某个群，从 `groups` 中删掉它即可。模块关闭或群不在列表中时，Bot 不处理入群申请，全部由管理员在原平台处理。
+入群审批由 `native.join_review` 模块配置。一个部署对应一个业务，所以**审批规则在模块层统一写一份，所有开启的群共用**；`groups` 只决定哪些群开启。模块启用且群的 `enabled` 为 `true` 时，Bot 按规则自动同意或拒绝该群的入群申请；模块关闭、群关闭或不在列表中时，Bot 不处理入群申请，全部由管理员在原平台处理。
 
 ```json
 {
@@ -68,14 +68,14 @@ group_store_path: ../data/group-operations.json
     "native.join_review": {
       "enabled": true,
       "options": {
+        "regex": "\\S",
+        "model_enabled": false,
+        "rule": "申请内容须说明入群目的，并符合本群主题。",
+        "combine": "and",
+        "reject_reason": "请填写符合本群要求的入群申请说明。",
         "groups": {
-          "support": {
-            "regex": "\\S",
-            "model_enabled": false,
-            "rule": "申请内容须说明入群目的，并符合本群主题。",
-            "combine": "and",
-            "reject_reason": "请填写符合本群要求的入群申请说明。"
-          }
+          "support": {"enabled": true},
+          "support-backup": {"enabled": false}
         }
       }
     }
@@ -83,9 +83,9 @@ group_store_path: ../data/group-operations.json
 }
 ```
 
-每个群至少启用一种判断：非空 `regex`、启用模型判断，或两者组合，否则加载配置时报错。模块只提供规则；判断、去重、执行前复核与调用连接器都由宿主完成。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
+只要 `groups` 中列了群（包括关闭的群），规则就必须至少启用一种判断：非空 `regex`、启用模型判断，或两者组合，否则加载配置时报错。不同群需要完全不同的审批标准时，通常说明它们属于不同业务，应分开部署。模块只提供规则；判断、去重、执行前复核与调用连接器都由宿主完成。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
 
-旧配置中顶层的 `group_management`（含 `auto_review`、`review_regex` 等字段）已删除，残留会导致配置加载失败。迁移方法：把 `group_management.<群ID>` 移到 `modules.native.join_review.options.groups.<群ID>`，字段去掉 `review_` 前缀（`review_model_enabled` 改为 `model_enabled`），删掉 `auto_review`，并把模块 `enabled` 设为 `true`。
+旧配置中顶层的 `group_management`（含 `auto_review`、`review_regex` 等字段）已删除，残留会导致配置加载失败。迁移方法：把规则字段移到 `modules.native.join_review.options` 下并去掉 `review_` 前缀（`review_model_enabled` 改为 `model_enabled`），删掉 `auto_review`；原来开启审批的群写成 `groups.<群ID>: {"enabled": true}`，并把模块 `enabled` 设为 `true`。原来各群规则不同的，需要合并为一份。
 
 - `regex`：Go regexp（RE2）表达式，匹配申请原文；例如 `\S` 要求至少一个非空白字符。不支持前瞻 `(?=...)`、后顾和反向引用。不自动去除空白或补锚点，完整匹配可显式使用 `^...$`。最多 4096 字节，无效表达式在加载/热更新时拒绝。
 - `model_enabled`：开启后使用共享 `DecideBool(ctx, rule, state)`，判断标准为 `rule`（非空，最多 4096 字节）。DM 已配置且启用时使用 DM，否则使用回答 LLM。每次最多一个模型请求，DM 故障直接返回错误，不转调 LLM。

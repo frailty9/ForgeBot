@@ -38,14 +38,13 @@
     "native.join_review": {
       "enabled": true,
       "options": {
+        "regex": "^.{4,}$",
+        "model_enabled": false,
+        "rule": "申请内容须说明入群目的，并符合本群主题。",
+        "combine": "and",
+        "reject_reason": "请填写至少 4 个字的入群申请说明。",
         "groups": {
-          "support": {
-            "regex": "^.{4,}$",
-            "model_enabled": false,
-            "rule": "申请内容须说明入群目的，并符合本群主题。",
-            "combine": "and",
-            "reject_reason": "请填写至少 4 个字的入群申请说明。"
-          }
+          "support": {"enabled": true}
         }
       }
     },

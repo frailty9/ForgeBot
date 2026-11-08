@@ -92,13 +92,14 @@
     "native.join_review": {
       "enabled": false,
       "options": {
+        "regex": "\\S",
+        "model_enabled": false,
+        "rule": "申请内容须说明入群目的，并符合本群主题。",
+        "combine": "and",
+        "reject_reason": "请填写符合本群要求的入群申请说明。",
         "groups": {
           "local": {
-            "regex": "\\S",
-            "model_enabled": false,
-            "rule": "申请内容须说明入群目的，并符合本群主题。",
-            "combine": "and",
-            "reject_reason": "请填写符合本群要求的入群申请说明。"
+            "enabled": false
           }
         }
       }

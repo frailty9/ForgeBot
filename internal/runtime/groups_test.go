@@ -83,7 +83,7 @@ func joinReviewSnapshot(t *testing.T, regex string) (config.Snapshot, *modules.R
 	t.Helper()
 	snapshot := testSnapshot()
 	on := true
-	options, _ := json.Marshal(map[string]any{"groups": map[string]any{"local": map[string]any{"regex": regex}}})
+	options, _ := json.Marshal(map[string]any{"regex": regex, "groups": map[string]any{"local": map[string]any{"enabled": true}}})
 	snapshot.Runtime.Modules = map[string]config.ModuleConfig{joinreview.ID: {Enabled: &on, Options: options}}
 	return snapshot, moduleRegistry(t, joinreview.Factory{})
 }

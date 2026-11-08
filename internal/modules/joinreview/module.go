@@ -1,5 +1,6 @@
-// Package joinreview 按群提供入群自动审批规则。模块启用且群在配置中即开启
-// 自动审批；模块只提供规则，判断、去重、执行前复核与调用连接器都由宿主完成。
+// Package joinreview 提供入群自动审批规则。一个部署对应一个业务，规则在模块层
+// 统一配置，groups 只决定哪些群开启；模块只提供规则，判断、去重、执行前复核
+// 与调用连接器都由宿主完成。
 package joinreview
 
 import (
@@ -22,20 +23,23 @@ const ID = "native.join_review"
 // maxGroups 限制单个模块配置的群数量，避免超大配置拖慢校验。
 const maxGroups = 1000
 
-// GroupOptions 是一个群的审批规则；字段含义见 docs/group-management.md。
+// GroupOptions 只决定该群是否开启审批。一个部署对应一个业务，规则在模块层
+// 统一配置；保留对象形式便于将来增加群级字段而不改格式。
 type GroupOptions struct {
-	Regex        string `json:"regex,omitempty"`
-	ModelEnabled *bool  `json:"model_enabled,omitempty"`
-	Rule         string `json:"rule,omitempty"`
-	Combine      string `json:"combine,omitempty"`
-	RejectReason string `json:"reject_reason,omitempty"`
+	Enabled bool `json:"enabled"`
 }
 
+// Options 的规则字段对所有开启的群生效；字段含义见 docs/group-management.md。
 type Options struct {
-	Groups map[string]GroupOptions `json:"groups"`
+	Regex        string                  `json:"regex,omitempty"`
+	ModelEnabled *bool                   `json:"model_enabled,omitempty"`
+	Rule         string                  `json:"rule,omitempty"`
+	Combine      string                  `json:"combine,omitempty"`
+	RejectReason string                  `json:"reject_reason,omitempty"`
+	Groups       map[string]GroupOptions `json:"groups"`
 }
 
-func (o GroupOptions) policy() group.Policy {
+func (o Options) policy() group.Policy {
 	return group.Policy{ReviewRegex: o.Regex, ReviewModelEnabled: o.ModelEnabled, ReviewRule: o.Rule, ReviewCombine: o.Combine, RejectReason: o.RejectReason}
 }
 
@@ -64,12 +68,15 @@ func parse(raw json.RawMessage) (Options, error) {
 	if len(result.Groups) > maxGroups {
 		return Options{}, fmt.Errorf("join review supports at most %d groups", maxGroups)
 	}
-	for id, options := range result.Groups {
+	for id := range result.Groups {
 		if strings.TrimSpace(id) == "" {
 			return Options{}, errors.New("join review group id is required")
 		}
-		if err := options.policy().Validate(); err != nil {
-			return Options{}, fmt.Errorf("join review group %q: %w", id, err)
+	}
+	// 列了群或填了规则就校验规则；关闭的群同样校验，避免重新开启时才发现错误。
+	if policy := result.policy(); len(result.Groups) > 0 || policy != (group.Policy{}) {
+		if err := policy.Validate(); err != nil {
+			return Options{}, fmt.Errorf("join review: %w", err)
 		}
 	}
 	return result, nil
@@ -96,21 +103,29 @@ func (Factory) Build(_ context.Context, raw json.RawMessage) (modules.Instance, 
 	if err != nil {
 		return nil, err
 	}
-	policies := make(map[string]group.Policy, len(options.Groups))
+	enabled := make(map[string]bool, len(options.Groups))
 	for id, groupOptions := range options.Groups {
-		policies[id] = groupOptions.policy()
+		if groupOptions.Enabled {
+			enabled[id] = true
+		}
 	}
-	return &instance{policies: policies}, nil
+	return &instance{policy: options.policy(), enabled: enabled}, nil
 }
 
 // instance 构建后只读，规则随运行代替换，不在热更新中原地修改。
-type instance struct{ policies map[string]group.Policy }
+// 所有开启的群共用同一份规则。
+type instance struct {
+	policy  group.Policy
+	enabled map[string]bool
+}
 
 func (*instance) Registrations() hooks.Registrations { return hooks.Registrations{} }
 func (*instance) Close(context.Context) error        { return nil }
 func (i *instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	return modules.ExtendedRegistrations{JoinReview: &modules.JoinReviewRegistration{Policy: func(conversationID string) (group.Policy, bool) {
-		policy, ok := i.policies[conversationID]
-		return policy, ok
+		if !i.enabled[conversationID] {
+			return group.Policy{}, false
+		}
+		return i.policy, true
 	}}}
 }
