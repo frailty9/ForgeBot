@@ -74,7 +74,6 @@ type EventReporter interface {
 }
 
 type Policy struct {
-	ReviewEnabled      bool   `json:"review_enabled"`
 	AutoReview         bool   `json:"auto_review"`
 	ReviewRule         string `json:"review_rule,omitempty"`
 	ReviewRegex        string `json:"review_regex,omitempty"`

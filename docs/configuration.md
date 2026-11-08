@@ -753,7 +753,7 @@ Invoke-RestMethod `
 
 ## 入群自动审批
 
-`group_management.<逻辑群ID>` 沿用 `review_enabled` 和 `auto_review` 两个开关，均默认关闭。`review_regex` 是可选 Go 正则（最多 4096 字节），`review_model_enabled` 控制是否使用共享模型决策，`review_rule` 为模型判断标准（最多 4096 字节），`review_combine` 为 `and`（默认）或 `or`，`reject_reason` 是最多 2048 字节的固定拒绝理由。
+`group_management.<逻辑群ID>` 用 `auto_review` 一个开关控制入群自动审批，默认关闭。`review_regex` 是可选 Go 正则（最多 4096 字节），`review_model_enabled` 控制是否使用共享模型决策，`review_rule` 为模型判断标准（最多 4096 字节），`review_combine` 为 `and`（默认）或 `or`，`reject_reason` 是最多 2048 字节的固定拒绝理由。
 
 正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `review_rule` 沿用启用模型的旧配置语义；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
 

@@ -123,7 +123,7 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 	if expected != nil && !policy.Equal(*expected) {
 		return operation.New(operation.Conflict, "group review policy changed")
 	}
-	if kind == "review" && (!policy.ReviewEnabled || !policy.AutoReview) {
+	if kind == "review" && !policy.AutoReview {
 		return operation.New(operation.Disabled, "group operation disabled by current configuration")
 	}
 	if m.Paused() {

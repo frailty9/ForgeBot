@@ -78,7 +78,7 @@ func TestAutomaticReviewCombinationAndShortCircuit(t *testing.T) {
 				}
 				return decision.Result{Answer: decision.Answer{"matches": tc.answer}}, nil
 			})
-			p := Policy{ReviewEnabled: true, AutoReview: true, ReviewRegex: tc.regex, ReviewRule: "must be allowed", ReviewModelEnabled: boolValue(tc.model), ReviewCombine: tc.combine}
+			p := Policy{AutoReview: true, ReviewRegex: tc.regex, ReviewRule: "must be allowed", ReviewModelEnabled: boolValue(tc.model), ReviewCombine: tc.combine}
 			port := &reviewActions{}
 			s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, d, true })
 			result, err := s.HandleEvent(context.Background(), joinEvent())
@@ -103,7 +103,7 @@ func TestReviewRejectReasonAndLogsWithoutPersistence(t *testing.T) {
 	for _, supportsReason := range []bool{true, false} {
 		var logs bytes.Buffer
 		port := &reviewActions{reason: supportsReason}
-		p := Policy{ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`, RejectReason: "请填写申请说明"}
+		p := Policy{AutoReview: true, ReviewRegex: `\S`, RejectReason: "请填写申请说明"}
 		s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, nil, true }, slog.New(slog.NewJSONHandler(&logs, nil)))
 		event := joinEvent()
 		event.Comment = " \t\n"
@@ -131,7 +131,7 @@ func TestReviewConcurrentDuplicatesAndExecutionFailureNeverReplay(t *testing.T) 
 		calls.Add(1)
 		return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
 	})
-	p := Policy{ReviewEnabled: true, AutoReview: true, ReviewRule: "rule"}
+	p := Policy{AutoReview: true, ReviewRule: "rule"}
 	s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, d, true })
 	event := joinEvent()
 	var wg sync.WaitGroup
@@ -150,7 +150,7 @@ func TestReviewConcurrentDuplicatesAndExecutionFailureNeverReplay(t *testing.T) 
 
 func TestReviewPolicyChangeAndEffectiveEquality(t *testing.T) {
 	for _, changed := range []bool{true, false} {
-		p := Policy{ReviewEnabled: true, AutoReview: true, ReviewRule: "rule", ReviewModelEnabled: boolValue(true)}
+		p := Policy{AutoReview: true, ReviewRule: "rule", ReviewModelEnabled: boolValue(true)}
 		port := &reviewActions{}
 		d := reviewDecider(func(context.Context, decision.Request) (decision.Result, error) {
 			p.ReviewModelEnabled = boolValue(true)
@@ -202,15 +202,13 @@ func TestReviewDedupExpiryCapacityAndGroupIsolation(t *testing.T) {
 }
 
 func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
-	for _, mode := range []string{"disabled", "manual-only", "expired", "future", "historical", "canceled", "missing-identity", "missing-model"} {
+	for _, mode := range []string{"disabled", "expired", "future", "historical", "canceled", "missing-identity", "missing-model"} {
 		t.Run(mode, func(t *testing.T) {
-			p := Policy{ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`}
+			p := Policy{AutoReview: true, ReviewRegex: `\S`}
 			event := joinEvent()
 			ctx := context.Background()
 			switch mode {
 			case "disabled":
-				p.ReviewEnabled, p.AutoReview = false, false
-			case "manual-only":
 				p.AutoReview = false
 			case "expired":
 				event.At = time.Now().Add(-25 * time.Hour)
@@ -240,9 +238,8 @@ func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
 
 func TestPolicyValidationLegacyDefaultsAndExplicitDisable(t *testing.T) {
 	for _, raw := range []string{
-		`{"review_enabled":true,"auto_review":true,"review_regex":"["}`,
-		`{"review_enabled":true,"auto_review":true}`,
-		`{"auto_review":true,"review_regex":"x"}`,
+		`{"auto_review":true,"review_regex":"["}`,
+		`{"auto_review":true}`,
 		`{"review_combine":"other"}`,
 		`{"review_model_enabled":true}`,
 	} {
@@ -251,7 +248,7 @@ func TestPolicyValidationLegacyDefaultsAndExplicitDisable(t *testing.T) {
 			t.Fatal("invalid policy accepted", raw)
 		}
 	}
-	legacy := Policy{ReviewEnabled: true, AutoReview: true, ReviewRule: "rule"}
+	legacy := Policy{AutoReview: true, ReviewRule: "rule"}
 	if err := legacy.Validate(); err != nil || !legacy.ModelEnabled() || legacy.Combine() != "and" {
 		t.Fatal(legacy, err)
 	}

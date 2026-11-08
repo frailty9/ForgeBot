@@ -39,7 +39,6 @@ group_store_path: ../data/group-operations.json
 {
   "group_management": {
     "support": {
-      "review_enabled": false,
       "auto_review": false,
       "review_regex": "\\S",
       "review_model_enabled": false,
@@ -53,7 +52,9 @@ group_store_path: ../data/group-operations.json
 
 ## 入群自动审批
 
-同时开启 `review_enabled` / `auto_review` 后，至少启用一种判断：非空 `review_regex`、启用模型判断，或两者组合。仅启用 `review_enabled` 不会保存申请或自动审批。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
+`auto_review` 是唯一的开关：开启后 Bot 按规则自动同意或拒绝该群的入群申请，关闭时 Bot 不处理入群申请，全部由管理员在原平台处理。开启时至少启用一种判断：非空 `review_regex`、启用模型判断，或两者组合，否则加载配置时报错。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
+
+旧配置中的 `review_enabled` 已并入 `auto_review` 并删除，残留该字段会导致配置加载失败，请直接删掉它。
 
 - `review_regex`：Go regexp 表达式，匹配申请原文；例如 `\S` 要求至少一个非空白字符。不自动去除空白或补锚点，完整匹配可显式使用 `^...$`。最多 4096 字节，无效表达式在加载/热更新时拒绝。
 - `review_model_enabled`：开启后使用共享 `DecideBool(ctx, rule, state)`，判断标准为 `review_rule`（非空，最多 4096 字节）。DM 已配置且启用时使用 DM，否则使用回答 LLM。每次最多一个模型请求，DM 故障直接返回错误，不转调 LLM。
@@ -71,7 +72,7 @@ group_store_path: ../data/group-operations.json
 
 注意 `review_regex` 与 `or` 的组合：正则一旦通过就直接同意，不再调用模型。示例里的 `\S` 只要求有任意非空白字符，若配合 `or` 等于几乎全部放行；使用 `or` 时应改成真正反映入群要求的表达式。模型失败、超时或无法判断时均不操作，管理员在原平台查看和处理申请。执行前再次核对当前策略、绑定、暂停和连接器能力，策略改变则放弃旧判断。
 
-旧配置省略 `review_model_enabled` 时，非空 `review_rule` 表示启用模型；显式 false 可保留规则文本而关闭模型。上例保留完整参数并关闭功能。纯正则审批仅需开启两个总开关，保持模型开关为 false；组合审批再将模型开关改为 true。
+旧配置省略 `review_model_enabled` 时，非空 `review_rule` 表示启用模型；显式 false 可保留规则文本而关闭模型。上例保留完整参数并关闭功能。纯正则审批只需开启 `auto_review`，保持模型开关为 false；组合审批再将模型开关改为 true。
 
 审批不持久化记录，也不提供 Bot 侧人工审批入口。进程内只保留连接器/群/事件 ID 的去重键，最长 24 小时、最多 10000 个；容量耗尽不执行新审批。去重跨热更新保留、重启清空。判断与执行结果写普通日志；网络失败、未知结果不自动重试，管理员可在原平台核实。
 

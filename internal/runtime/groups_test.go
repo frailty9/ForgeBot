@@ -79,7 +79,7 @@ func (p *groupPort) Review(context.Context, string, group.ReviewRequest) error {
 
 func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`}}
+	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {AutoReview: true, ReviewRegex: `\S`}}
 	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
 	if err != nil {
 		t.Fatal(err)

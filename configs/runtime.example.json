@@ -14,11 +14,10 @@
   },
   "group_management": {
     "local": {
-      "review_enabled": false,
       "auto_review": false,
-      "review_rule": "申请内容须说明入群目的，并符合本群主题。",
       "review_regex": "\\S",
       "review_model_enabled": false,
+      "review_rule": "申请内容须说明入群目的，并符合本群主题。",
       "review_combine": "and",
       "reject_reason": "请填写符合本群要求的入群申请说明。"
     }

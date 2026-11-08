@@ -233,3 +233,12 @@
 - 控制台关闭时，启动失败另写一行到 stderr；控制台开启时不再重复。init 生成的 YAML 带两段配置，忽略规则增加 `/logs/`。
 - 旧的平铺写法（`log.level`、`log.file: 路径` 等）不再接受，需手动迁移。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 入群审批开关合并
+
+`review_enabled` 原本控制“记录申请等待人工审批”，Bot 侧人工审批移除后单独开启已不起作用。合并为一个开关：
+
+- 删除 `group.Policy.ReviewEnabled`，只保留 `auto_review`：开启即按正则/模型自动审批，关闭则不处理入群申请。
+- 开启 `auto_review` 时仍要求至少一种判断（`review_regex` 或模型）。
+- 旧配置残留 `review_enabled` 会因严格解析报未知字段，需手动删除。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

@@ -48,7 +48,7 @@ func TestConfiguredDMFailureNeverInvokesAnswerLLM(t *testing.T) {
 
 func TestAutomaticReviewWithoutStoreAndDedupAcrossHotUpdate(t *testing.T) {
 	snapshot := testSnapshot()
-	p := group.Policy{ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`}
+	p := group.Policy{AutoReview: true, ReviewRegex: `\S`}
 	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": p}
 	port := &groupPort{Sender: registeredSender(t).registry}
 	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port})

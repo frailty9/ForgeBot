@@ -75,7 +75,7 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	approvalConfig := cfg.Clone()
 	approvalConfig.Static.GroupStorePath = ""
 	approvalConfig.Runtime.GroupManagement = map[string]group.Policy{
-		approvalConfig.Runtime.Platforms.Groups[0].ID: {ReviewEnabled: true, AutoReview: true, ReviewRegex: `\S`},
+		approvalConfig.Runtime.Platforms.Groups[0].ID: {AutoReview: true, ReviewRegex: `\S`},
 	}
 	var approvalOutput bytes.Buffer
 	if err = doctor(approvalConfig, false, false, &approvalOutput); err != nil {

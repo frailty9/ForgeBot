@@ -50,7 +50,7 @@ func (s *Service) HandleEvent(ctx context.Context, event Event) (result EventRes
 	if event.Kind != JoinRequested || event.Self || event.Historical {
 		return EventResult{Verdict: "ignored"}, nil
 	}
-	if !policy.ReviewEnabled || !policy.AutoReview {
+	if !policy.AutoReview {
 		return EventResult{Verdict: "disabled"}, nil
 	}
 	if err := policy.Validate(); err != nil {
