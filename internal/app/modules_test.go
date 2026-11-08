@@ -90,3 +90,32 @@ func TestAppRejectsInvalidModuleBeforeServing(t *testing.T) {
 		t.Fatal("invalid module accepted")
 	}
 }
+
+// QQ 完整示例展示“连接器 → 逻辑群 → 群级功能”的绑定链路，必须能直接加载并通过模块校验。
+func TestOneBotExampleBindsGroupsEndToEnd(t *testing.T) {
+	cfg, _, err := config.Load(config.LoadOptions{
+		Path:        filepath.Join("..", "..", "configs", "forgebot.example.yaml"),
+		RuntimePath: filepath.Join("..", "..", "configs", "runtime.onebot.example.json"),
+		LookupEnv:   func(string) string { return "" },
+	})
+	if err != nil {
+		t.Fatal("OneBot example no longer loads", err)
+	}
+	registry, err := NativeModules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Validate(cfg.Runtime.Modules); err != nil {
+		t.Fatal(err)
+	}
+	bound := map[string]string{}
+	for _, group := range cfg.Runtime.Platforms.Groups {
+		bound[group.ID] = group.ConnectorID
+	}
+	if bound["support"] != "qq-main" || bound["ops"] != "qq-main" {
+		t.Fatalf("example groups not bound to qq-main: %v", bound)
+	}
+	if !cfg.Runtime.GroupManagement["support"].AutoReview {
+		t.Fatal("example should show join review enabled on the support group")
+	}
+}

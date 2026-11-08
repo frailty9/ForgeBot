@@ -1,5 +1,30 @@
 # 群事件与管理操作
 
+## 先把群绑定到 Bot
+
+所有群级功能都写在**逻辑群 ID** 下，而不是平台群号下。逻辑群 ID 在 `platforms.groups` 中定义，把“哪个连接器的哪个群号”映射成一个 Bot 内部名字，其余配置都引用这个名字：
+
+```text
+platforms.connectors[].id = "qq-main"          ← 一个 QQ 账号（OneBot 端点）
+        ↓ connector_id
+platforms.groups[] = {id: "support", connector_id: "qq-main", target: "10001"}
+        ↓ 逻辑群 ID "support"（target 10001 是 QQ 群号）
+group_management.support                       ← 入群自动审批
+modules.native.welcome.options.groups.support  ← 新人欢迎
+modules.native.proactive_reply.options.groups.support  ← 主动插话
+administration.administrators[].conversation_id = "support"  ← 可信管理员
+operations.groups[].conversation_id            ← 运维命令与通知（可以是另一个群）
+```
+
+完整可加载的 QQ 示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)：一个 QQ 账号绑定两个群，`support` 开启入群审批、新人欢迎和主动插话，`ops` 只作为运维群。使用时把 `target` 换成你的 QQ 群号，`user_id` 换成管理员 QQ 号，并配置 OneBot 端点与回答模型。
+
+几条约束：
+
+- 逻辑群 ID 必须先出现在 `platforms.groups` 中。`group_management`、`administration` 和 `operations` 引用未绑定的 ID 时配置加载失败；`native.welcome` 与 `native.proactive_reply` 目前不检查，写错的群 ID 只会让该功能静默不生效，请核对拼写。
+- `connector_id` 必须指向已启用的连接器；启用的 OneBot 连接器至少要绑定一个群。
+- 同一个连接器与群号的组合不能重复绑定；一个连接器可以绑定多个群。
+- 默认示例 [`runtime.example.json`](../configs/runtime.example.json) 为了能直接在本地运行，只绑定了 Echo 测试群 `local`，QQ 连接器是关闭的。
+
 ## 新人欢迎
 
 启用 `native.welcome` 模块并按逻辑群设置模板：

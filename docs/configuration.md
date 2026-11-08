@@ -326,6 +326,8 @@ OneBot 表情若附带 `summary`、`description`、`text` 或 `name`，适配器
 }
 ```
 
+逻辑群 ID 如何被入群审批、欢迎、主动插话、管理员和运维群引用，见 [群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot)；完整可加载的 QQ 示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)。
+
 `connectors` 支持同时启用多个实例。`type` 是 Provider 的稳定查找键；当前内置
 `native.echo` 提供 `echo`，`native.onebot` 提供 `onebot`。连接器 ID 必须唯一。启用
 实例所需的 Provider 未启用或不存在时，配置校验会拒绝该配置；仅启用 Provider 而不
