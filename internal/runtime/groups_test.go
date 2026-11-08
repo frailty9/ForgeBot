@@ -3,14 +3,12 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/group"
-	groupfile "github.com/soleapi/forgebot/internal/group/filestore"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/joinreview"
@@ -23,7 +21,7 @@ type groupPort struct {
 	calls atomic.Int32
 }
 
-func TestWelcomeOnlyActualJoinDeduplicatesAndHonorsPause(t *testing.T) {
+func TestWelcomeSendsOnJoinAndIgnoresSelfHistoricalAndPause(t *testing.T) {
 	snapshot := testSnapshot()
 	on := true
 	snapshot.Runtime.Modules = map[string]config.ModuleConfig{welcome.ID: {Enabled: &on, Options: json.RawMessage(`{"groups":{"local":{"enabled":true,"text":"欢迎 {user_id}"}}}`)}}
@@ -31,28 +29,22 @@ func TestWelcomeOnlyActualJoinDeduplicatesAndHonorsPause(t *testing.T) {
 	if err := registry.Register(welcome.Factory{}, hooks.Native, 0, hooks.Continue); err != nil {
 		t.Fatal(err)
 	}
-	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	sender := registeredSender(t)
 	if err := sender.registry.BindConversation(platform.ConversationBinding{ConversationID: "local", ConnectorID: "echo", Target: "local"}); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, GroupStore: store, Modules: registry})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: sender.registry, Modules: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Shutdown(context.Background())
 	event := group.Event{ID: "joined", Kind: group.MemberJoined, ConversationID: "local", ConnectorID: "echo", UserID: "user", At: time.Now()}
 	manager.builder.Yield.Suspend("local", time.Minute)
-	for i := 0; i < 2; i++ {
-		if _, err = manager.HandleGroupEvent(context.Background(), event); err != nil {
-			t.Fatal(err)
-		}
+	if _, err = manager.HandleGroupEvent(context.Background(), event); err != nil {
+		t.Fatal(err)
 	}
 	if len(sender.sender.Sent()) != 1 || sender.sender.Sent()[0].Text != "欢迎 user" {
-		t.Fatal("welcome not sent once during proactive yield", sender.sender.Sent())
+		t.Fatal("welcome not sent during proactive yield", sender.sender.Sent())
 	}
 	event.ID = "self"
 	event.Self = true
@@ -90,12 +82,8 @@ func joinReviewSnapshot(t *testing.T, regex string) (config.Snapshot, *modules.R
 
 func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
 	snapshot, registry := joinReviewSnapshot(t, `\S`)
-	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	port := &groupPort{Sender: registeredSender(t).registry}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, GroupStore: store, Modules: registry})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, Modules: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +91,6 @@ func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
 	event := group.Event{ID: "request", Kind: group.JoinRequested, ConversationID: "local", ConnectorID: "echo", UserID: "u", Reference: "opaque", Comment: "application", At: time.Now()}
 	if r, err := manager.HandleGroupEvent(context.Background(), event); err != nil || r.Verdict != "approved" {
 		t.Fatal(r, err)
-	}
-	list, err := manager.ListGroupOperations(context.Background(), 10)
-	if err != nil || len(list) != 0 {
-		t.Fatal(list, err)
 	}
 	if port.calls.Load() != 1 {
 		t.Fatal("review not executed exactly once", port.calls.Load())

@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/group"
-	groupfile "github.com/soleapi/forgebot/internal/group/filestore"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/secret"
 	"github.com/soleapi/forgebot/internal/settings"
@@ -22,19 +20,16 @@ type Backend interface {
 	Kind() string
 	Configuration() settings.Store
 	Credentials() secret.Store
-	GroupOperations() group.Store
 }
 
 type fileBackend struct {
 	configuration settings.Store
 	credentials   secret.Store
-	groups        group.Store
 }
 
 func (*fileBackend) Kind() string                    { return config.FileBackend }
 func (b *fileBackend) Configuration() settings.Store { return b.configuration }
 func (b *fileBackend) Credentials() secret.Store     { return b.credentials }
-func (b *fileBackend) GroupOperations() group.Store  { return b.groups }
 
 // Open 是唯一生产选择入口；未来 SQL/NoSQL 在此加入同级实现。
 // key 由进程入口解析，不让仓储自行读取环境变量或接触管理 API。
@@ -56,28 +51,6 @@ func Open(static config.StaticConfig, key []byte) (Backend, error) {
 		}
 	}
 	b := &fileBackend{}
-	if static.GroupStorePath != "" {
-		path, err := filepath.Abs(static.GroupStorePath)
-		if err != nil {
-			return nil, err
-		}
-		for _, other := range []string{static.RuntimeConfigPath, static.SecretStorePath} {
-			if other != "" {
-				candidate, err := filepath.Abs(other)
-				if err != nil {
-					return nil, err
-				}
-				if strings.EqualFold(path, candidate) {
-					return nil, operation.New(operation.Invalid, "group operations must use a distinct file")
-				}
-			}
-		}
-		store, err := groupfile.Open(path)
-		if err != nil {
-			return nil, operation.Wrap("storage.group.open", operation.Unavailable, operation.NotStarted, err)
-		}
-		b.groups = store
-	}
 	if static.RuntimeConfigPath != "" {
 		store, err := settings.NewJSONFileStore(static.RuntimeConfigPath, static)
 		if err != nil {

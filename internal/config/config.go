@@ -58,7 +58,6 @@ type Snapshot struct {
 
 // StaticConfig contains process-level settings that require restart to change.
 type StaticConfig struct {
-	GroupStorePath    string        `json:"group_store_path" yaml:"group_store_path"`
 	Storage           StorageConfig `json:"storage" yaml:"storage"`
 	Server            ServerConfig  `json:"server" yaml:"server"`
 	RuntimeConfigPath string        `json:"runtime_config_path" yaml:"runtime_config_path"`
@@ -354,9 +353,6 @@ func Load(opts LoadOptions) (Snapshot, LoadReport, error) {
 	if static.Log.File.Path != "" && !filepath.IsAbs(static.Log.File.Path) && staticPath != "" {
 		static.Log.File.Path = filepath.Join(filepath.Dir(staticPath), static.Log.File.Path)
 	}
-	if static.GroupStorePath != "" && !filepath.IsAbs(static.GroupStorePath) && staticPath != "" {
-		static.GroupStorePath = filepath.Join(filepath.Dir(staticPath), static.GroupStorePath)
-	}
 	secretPathOverridden := strings.TrimSpace(lookupEnv(envSecretStorePath)) != ""
 	if static.SecretStorePath != "" && !secretPathOverridden && !filepath.IsAbs(static.SecretStorePath) && staticPath != "" {
 		static.SecretStorePath = filepath.Join(filepath.Dir(staticPath), static.SecretStorePath)
@@ -489,7 +485,6 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		ShutdownTimeout string `yaml:"shutdown_timeout"`
 	}
 	type rawStaticConfig struct {
-		GroupStorePath    string           `yaml:"group_store_path"`
 		Storage           *StorageConfig   `yaml:"storage"`
 		Server            *rawServerConfig `yaml:"server"`
 		RuntimeConfigPath string           `yaml:"runtime_config_path"`
@@ -540,7 +535,6 @@ func loadStaticYAML(path string, target *StaticConfig) error {
 		}
 	}
 	out.RuntimeConfigPath = raw.RuntimeConfigPath
-	out.GroupStorePath = raw.GroupStorePath
 	out.SecretStorePath = raw.SecretStorePath
 	out.AdminToken = raw.AdminToken
 	out.SecretKey = strings.TrimSpace(raw.SecretKey)

@@ -27,9 +27,6 @@ log:
 
 runtime_config_path: runtime.example.json
 
-# Used when enabling group operations or native.welcome; no actions enabled by default.
-group_store_path: ../data/group-operations.json
-
 # Enable together with secret_key (or FORGEBOT_SECRET_KEY, which takes precedence).
 # secret_store_path: secrets.json
 # secret_key: base64-encoded-32-byte-master-key

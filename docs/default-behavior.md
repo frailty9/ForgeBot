@@ -27,7 +27,7 @@
 | 不支持群操作 | unsupported；权限未知不能伪装成功。公告与撤回已挂起 | 可选接口 | [群操作路由](../internal/platform/groups.go) |
 | 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
 | 自动审核不确定 | 不同意也不拒绝，管理员在原平台处理 | 模型错误不映射为 false；无后备请求 | [审批测试](../internal/group/review_test.go) |
-| 新人欢迎 | 实际入群后去重发送；忽略自身/历史/过旧事件；超时记 unknown 不重发 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go)、[投递记录](../internal/group/filestore/service_test.go) |
+| 新人欢迎 | 收到入群事件即发送；忽略自身/历史事件；不去重、不落盘 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go) |
 | 自动沉淀生成失败 | 不发布文档，已有归组/扫描/发布链路保留 | native.knowledge_reflection | [沉淀](../internal/reflection/pipeline/pipeline_test.go) |
 | 能力目录 | 展示投影，not_probed不冒充健康 | 认证API与CLI同源 | [目录](../internal/runtime/catalog_test.go) |
 | 初次使用 | init不覆盖；doctor不要求先启动Bot | 远程与stdio探测须显式 | [CLI](../cmd/forgebot/commands_test.go) |

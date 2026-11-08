@@ -19,7 +19,6 @@ import (
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
-	"github.com/soleapi/forgebot/internal/modules/welcome"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -119,7 +118,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if err != nil {
 		return err
 	}
-	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nlog:\n  console:\n    enabled: true\n    level: info\n    format: text\n  file:\n    enabled: false\n    level: info\n    format: json\n    path: logs/forgebot.log\n    max_size_mb: 10\n    rotate_after_days: 7\n    max_age_days: 60\n    compress: false\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\ngroup_store_path: data/group-operations.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
+	yaml := fmt.Sprintf("storage:\n  backend: file\nserver:\n  addr: 127.0.0.1:8080\n  read_timeout: 10s\n  write_timeout: 100s\n  shutdown_timeout: 15s\nlog:\n  console:\n    enabled: true\n    level: info\n    format: text\n  file:\n    enabled: false\n    level: info\n    format: json\n    path: logs/forgebot.log\n    max_size_mb: 10\n    rotate_after_days: 7\n    max_age_days: 60\n    compress: false\nruntime_config_path: runtime.local.json\nsecret_store_path: secrets.local.json\nadmin_token: %s\n# SecretStore 主密钥，丢失后无法解密 secrets.local.json；FORGEBOT_SECRET_KEY 可覆盖此值。\nsecret_key: %s\n", base64.RawURLEncoding.EncodeToString(token), keyText)
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return err
 	}
@@ -222,7 +221,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		add("http_answer_deadline", operation.New(operation.Invalid, "HTTP write timeout is shorter than the agent run budget"), "server.write_timeout应大于agent.timeout，避免测试入站在回答完成前断开")
 	}
 	paths := map[string]bool{}
-	for _, path := range []string{cfg.Static.RuntimeConfigPath, cfg.Static.SecretStorePath, cfg.Static.GroupStorePath} {
+	for _, path := range []string{cfg.Static.RuntimeConfigPath, cfg.Static.SecretStorePath} {
 		if path != "" {
 			absolute, err := filepath.Abs(path)
 			if err == nil {
@@ -233,13 +232,6 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 			}
 			add("store_file:"+filepath.Base(path), err, "仓储路径彼此独立")
 		}
-	}
-	needsGroupStore := false
-	if entry, ok := cfg.Runtime.Modules[welcome.ID]; ok && entry.Enabled != nil && *entry.Enabled {
-		needsGroupStore = true
-	}
-	if needsGroupStore && cfg.Static.GroupStorePath == "" {
-		add("group_store", operation.New(operation.NotConfigured, "group operation store required"), "启用欢迎语前配置 group_store_path")
 	}
 	apiKey := ""
 	var credentials interface {

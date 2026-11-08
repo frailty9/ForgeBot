@@ -113,7 +113,7 @@
 
 - [x] 定义入群申请/成员入群事件、稳定引用、绑定与去重；事件不能混入聊天问答文本。
 - [x] 定义审核小接口、支持/权限查询与结果；不支持者不实现空方法，权限未知不伪装可用。公告与撤回接口 2026-11-05 删除。
-- [x] 欢迎使用单后端运营仓储；入群审批独立实现正则与布尔模型 AND/OR 短路，不持久化审批记录，不依赖仓储，不提供人工审批 API。仅内存事件键防重，执行未知不重放，拒绝理由不支持时忽略。
+- [x] 入群审批独立实现正则与布尔模型 AND/OR 短路，不持久化审批记录，不依赖任何持久仓储，不提供人工审批 API（欢迎语原先使用的运营仓储已于 2026-11-08 移除）。仅内存事件键防重，执行未知不重放，拒绝理由不支持时忽略。
 - [x] 核对 OneBot11 与 SnowLuma 官方源码并实现审核，支持矩阵见 docs/group-management.md。公告（非标准扩展）与撤回实现 2026-11-05 删除。
 - [ ] 真实 OneBot 账户权限与事件验收待用户提供测试窗口；已有受控 HTTP/仓储/API 测试覆盖重复申请/动作、跨群、冲突、故障未知与重启恢复，不能替代真实验收。
 
@@ -124,8 +124,8 @@
 ## 9. 新人欢迎语
 
 - [x] 内置 native.welcome 消费 MemberJoined，按群开关与有限变量模板插值，经模块 GroupEvents 注册返回受限回复意图，由宿主投递。
-- [x] 使用同一运营仓储防重，过滤 Bot 自己/历史快照/过旧事件；OneBot 文本段发送避免 CQ 字面量注入，发送错误归一化且不自动补发。
-- [ ] 受控测试已覆盖模板、关闭/历史/自身、重复入群、全局暂停与管理员让位；全量 -race/vet 通过。真实连接器成员事件链路留待与工作包 8 一并验收。
+- [x] 收到入群事件即发送，不去重、不落盘，只过滤 Bot 自己/历史快照（2026-11-08 简化）；OneBot 文本段发送避免 CQ 字面量注入，发送错误归一化且不自动补发。
+- [ ] 受控测试已覆盖模板、关闭/历史/自身、全局暂停与管理员让位；全量 -race/vet 通过。真实连接器成员事件链路留待与工作包 8 一并验收。
 
 验收：新成员实际入群后收到一次正确欢迎，不把审批通过当作入群事件。
 
@@ -148,7 +148,7 @@
 - [x] 完成核心中文边界注释、README_ZH.MD/README_EN.MD、配置/目录/故障/范围与扩展说明；双语启动示例与功能范围一致。
 - [x] 用户确认 Apache-2.0 后加入官方 LICENSE 和实际解析依赖的原许可证副本/归属记录；gitignore 验证共享文档保留、本地配置及备份/凭据不进提交。
 - [x] 按 R1–R16 交付受控行为证据与 docs/default-behavior.md，真实服务支持和未实现范围单列，不虚构覆盖率或性能收益。
-- [x] 自动验证已覆盖无 DM、域外拒答、图片关闭、工具预算、投递未知、存储恢复、欢迎去重与初始化流程；最终命令结果见下方收尾记录。
+- [x] 自动验证已覆盖无 DM、域外拒答、图片关闭、工具预算、投递未知、存储恢复与初始化流程；最终命令结果见下方收尾记录。
 - [ ] 真实 QQ 群聊/成员/审核与可选 DM 需实际服务版本、测试对象及权限验收；另需用目标回答模型验证范围提示词与工具检索的遵守程度。受控 HTTP 和模拟事件未替代该项；自动沉淀运营效果亦需真实群消息窗口。
 - [x] 按工作包维护独立提交历史与交接；本任务不自动合并 master、创建版本标签或向外发布。
 
@@ -191,7 +191,7 @@
 - @ 消息不再做范围决策；删除整个 `answer_policy`（含 `scope`、`allow_daily`、`refusal_text`、`clarification_text`），回答范围写在 `bot.system_prompt`。
 - 删除决策引导预检索：`answer_policy.evidence`、`bot.Policy.Evidence*`、`agent.Loop.Preparation`。
 - 删除 `bot.answer` 任务与 Engine 的决策依赖；主动插话决策移入 `native.proactive_reply`，用 `DecideBool` 加模块 `scope` 选项判断；回答模型对主动回复另附“范围外输出空内容”的宿主提示。
-- 删除群公告与消息撤回：`group.Announcer/Recaller`、`Support.Announcement/Recall`、`Policy.Announcements/Recall`、`Service.Perform` 与 `ActionRequest`、OneBot `_send_group_notice`/`delete_msg` 实现、`POST /v1/admin/groups/announcements|recall`。运营仓储保留给欢迎语。
+- 删除群公告与消息撤回：`group.Announcer/Recaller`、`Support.Announcement/Recall`、`Policy.Announcements/Recall`、`Service.Perform` 与 `ActionRequest`、OneBot `_send_group_notice`/`delete_msg` 实现、`POST /v1/admin/groups/announcements|recall`。运营仓储曾保留给欢迎语，后于 2026-11-08 一并移除。
 - 运行配置严格解析，旧配置若仍含上述字段会加载失败，需手动删除。
 - 验证（2026-11-05）：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 均通过；修改的 Go 文件格式检查通过，docs/specs 本地链接均存在。未提交。
 
@@ -284,4 +284,13 @@
 
 - OneBot 适配器取出第一处“\n答案：”之后的答案作为入群事件的申请内容；没有这个结构时原样返回。以第一处为界，申请人无法在答案里伪造“答案：”改变匹配内容。验证问题不参与匹配。
 - DEBUG 日志同时输出原始 comment 与提取后的 application。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 欢迎语简化：移除群操作仓储
+
+真实验收中欢迎语不触发，原因是未配置 `group_store_path`（欢迎语的防重记录依赖它，缺失时静默跳过）。需求本身只是“有人入群就发欢迎语”，仓储属于过度设计。处理：
+
+- 欢迎语收到成员入群事件即发送；只忽略 Bot 自己入群、历史快照、非入群事件和空模板。不去重、不判断事件新旧、不落盘。
+- 删除 `group_store_path`、`group.Store/Record/Status`、`group/filestore`、`Backend.GroupOperations`、`GET /v1/admin/groups/operations` 和 doctor 的 `group_store` 检查。旧配置里残留 `group_store_path` 会在严格解析时报未知字段，需要手动删除这一行。
+- 入群审批原本就不依赖该仓储，行为不变。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

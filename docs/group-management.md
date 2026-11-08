@@ -43,19 +43,13 @@ operator.conversation_id = "ops"               ← 唯一的运维群：运维�
 }
 ```
 
-支持 `{user}`、`{user_id}`、`{conversation_id}`，仅做一次确定性替换，不调用模型。OneBot 入群事件缺少显示名时用用户 ID。欢迎只基于实际 MemberJoined，申请批准不触发；Bot 自己、历史快照和超过 5 分钟的旧事件不欢迎。默认纯文本，不自动 @ 新人。
+支持 `{user}`、`{user_id}`、`{conversation_id}`，仅做一次确定性替换，不调用模型。OneBot 入群事件缺少显示名时用用户 ID。欢迎只基于实际 MemberJoined：收到入群事件就发送欢迎语，不做去重、不落盘；申请批准不触发，Bot 自己入群和历史快照不欢迎。默认纯文本，不自动 @ 新人。
 
-欢迎使用同一个 `group_store_path` 运营仓储防重，经模块群事件接口返回受限回复意图，宿主投递。关闭模块或群开关不发送；管理员接答让位不影响欢迎，全局 pause 则抑制。发送失败或未知不自动补发。OneBot 以结构化文本段发送，模板或显示名内的 CQ 字面量不会转换成控制段。
+欢迎经模块群事件接口返回受限回复意图，宿主投递。关闭模块或群开关不发送；管理员接答让位不影响欢迎，全局 pause 则抑制。发送失败不自动补发。OneBot 以结构化文本段发送，模板或显示名内的 CQ 字面量不会转换成控制段。
 
 群操作是协议无关的可选接口。v0.1.0 只提供入群申请审核；未实现的连接器返回 unsupported。公告和撤回已挂起，见文末说明。接口支持不代表当前账号具备权限，支持查询目前返回 `permission=unknown`，实际请求结果单独分类。
 
 支持查询与能力目录另列 `join_events` / `member_events` / `join_review_reason`，未实现事件的连接器明确为 false；它们是本地实现声明，不证明远端服务正在上报事件或当前账号有权限。`join_review_reason` 默认为 false，OneBot 实现为 true。
-
-欢迎语防重需要在静态 YAML 设置运营仓储（路径相对 YAML）。入群自动审批不依赖此仓储：
-
-```yaml
-group_store_path: ../data/group-operations.json
-```
 
 ## 入群自动审批
 
@@ -115,9 +109,8 @@ group_store_path: ../data/group-operations.json
 | 方法与路径 | 行为 |
 | --- | --- |
 | GET `/v1/admin/groups/support?conversation_id=support` | 查询连接器支持，权限可能未知 |
-| GET `/v1/admin/groups/operations?limit=100` | 查询欢迎语投递记录；不生成审批记录 |
 
-欢迎投递执行前记录 executing，执行后记录 completed/failed/unknown。网络超时、远端无法确认或提交结果失败都不能自动重试；进程重启后 executing 转为 unknown，等待部署者核实。默认每份运营文件最多 10000 条、32MiB，达到上限报 busy，不静默删防重记录。`POST /v1/admin/groups/review` 已移除，人工审批在对应平台执行。
+欢迎语与入群审批都不保存操作记录，也没有查询记录的管理 API。`POST /v1/admin/groups/review` 已移除，人工审批在对应平台执行。
 
 OneBot 当前受控测试支持：
 

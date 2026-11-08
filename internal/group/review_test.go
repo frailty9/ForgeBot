@@ -79,7 +79,7 @@ func TestAutomaticReviewCombinationAndShortCircuit(t *testing.T) {
 			})
 			p := Policy{ReviewRegex: tc.regex, ReviewRule: "must be allowed", ReviewModelEnabled: boolValue(tc.model), ReviewCombine: tc.combine}
 			port := &reviewActions{}
-			s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
+			s := New(port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 			result, err := s.HandleEvent(context.Background(), joinEvent())
 			if err != nil || result.Verdict != tc.verdict || calls != tc.calls {
 				t.Fatalf("%+v calls=%d err=%v", result, calls, err)
@@ -103,7 +103,7 @@ func TestReviewRejectReasonAndLogsWithoutPersistence(t *testing.T) {
 		var logs bytes.Buffer
 		port := &reviewActions{reason: supportsReason}
 		p := Policy{ReviewRegex: `\S`, RejectReason: "请填写申请说明"}
-		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} }, slog.New(slog.NewJSONHandler(&logs, nil)))
+		s := New(port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} }, slog.New(slog.NewJSONHandler(&logs, nil)))
 		event := joinEvent()
 		event.Comment = " \t\n"
 		result, err := s.HandleEvent(context.Background(), event)
@@ -131,7 +131,7 @@ func TestReviewConcurrentDuplicatesAndExecutionFailureNeverReplay(t *testing.T) 
 		return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
 	})
 	p := Policy{ReviewRule: "rule"}
-	s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
+	s := New(port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 	event := joinEvent()
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -158,7 +158,7 @@ func TestReviewPolicyChangeAndEffectiveEquality(t *testing.T) {
 			}
 			return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
 		})
-		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
+		s := New(port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 		result, err := s.HandleEvent(context.Background(), joinEvent())
 		if err != nil {
 			t.Fatal(err)
@@ -173,7 +173,7 @@ func TestReviewPolicyChangeAndEffectiveEquality(t *testing.T) {
 }
 
 func TestReviewDedupExpiryCapacityAndGroupIsolation(t *testing.T) {
-	s := New(nil, nil, nil)
+	s := New(nil, nil)
 	now := time.Now()
 	s.now = func() time.Time { return now }
 	event := joinEvent()
@@ -228,7 +228,7 @@ func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
 			}
 			port := &reviewActions{}
 			target.Policy = p
-			s := New(nil, port, func(string) ReviewTarget { return target })
+			s := New(port, func(string) ReviewTarget { return target })
 			_, _ = s.HandleEvent(ctx, event)
 			if len(port.requests) != 0 {
 				t.Fatal(port.requests)
@@ -270,7 +270,7 @@ func TestReviewDebugLogExplainsRegexDecision(t *testing.T) {
 		var logs bytes.Buffer
 		port := &reviewActions{}
 		p := Policy{ReviewRegex: `^[0-9A-Z]{10}$`}
-		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} },
+		s := New(port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} },
 			slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: level})))
 		event := joinEvent()
 		event.Comment = "问题：暗号\n答案：ABCDE12345"

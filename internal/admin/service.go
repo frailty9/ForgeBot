@@ -215,9 +215,6 @@ func (s *Service) DeleteDecisionAPIKey(ctx context.Context) error {
 	return s.secrets.Delete(ctx, ref)
 }
 
-func (s *Service) GroupOperations(ctx context.Context, limit int) ([]group.Record, error) {
-	return s.runtime.ListGroupOperations(ctx, limit)
-}
 func (s *Service) GroupSupport(ctx context.Context, id string) (group.Support, error) {
 	return s.runtime.Support(ctx, id)
 }

@@ -66,7 +66,7 @@ func New(cfg config.Snapshot, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	builder := runtimecfg.Builder{GroupStore: backend.GroupOperations(), Modules: moduleRegistry, Logger: logger, RequireLLM: true}
+	builder := runtimecfg.Builder{Modules: moduleRegistry, Logger: logger, RequireLLM: true}
 	if secretStore != nil {
 		builder.Secrets = secretStore
 	}

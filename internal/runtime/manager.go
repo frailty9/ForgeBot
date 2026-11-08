@@ -94,7 +94,6 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
-	GroupStore         group.Store
 	Yield              *proactive.YieldState
 	Decisions          decision.Decider
 	Memory             *conversation.Memory
@@ -384,7 +383,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		return nil, err
 	}
 	manager.current.Store(generation)
-	manager.groups = group.New(builder.GroupStore, manager, manager.groupPolicy, builder.Logger)
+	manager.groups = group.New(manager, manager.groupPolicy, builder.Logger)
 	generation.modules.Mark("active")
 	manager.storeSnapshot(snapshot)
 	return manager, nil

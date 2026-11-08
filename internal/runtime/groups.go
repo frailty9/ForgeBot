@@ -140,7 +140,3 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 	}
 	return call(ctx, actions)
 }
-
-func (m *Manager) ListGroupOperations(ctx context.Context, limit int) ([]group.Record, error) {
-	return m.groups.List(ctx, limit)
-}

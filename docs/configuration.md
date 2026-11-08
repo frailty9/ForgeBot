@@ -106,7 +106,6 @@ secret_key: base64-encoded-32-byte-master-key
 | `runtime_config_path` | 空 | JSON 路径；为空时使用内置默认配置，但管理 API 无法持久化变更 |
 | `secret_store_path` | 空 | 加密密钥库路径；要配置 LLM API Key 时必须设置 |
 | `storage.backend` | `file` | 进程单选后端，首版仅文件实现，不支持热切换或故障切第二后端 |
-| `group_store_path` | 空 | 欢迎语投递的防重记录；入群自动审批不依赖此项；相对路径以 YAML 所在目录为基准 |
 | `admin_token` | 空 | 管理 API 令牌；不会出现在配置查询响应中 |
 | `secret_key` | 空 | SecretStore 主密钥，Base64 编码的 32 字节；设置 `secret_store_path` 时必填，不会出现在配置查询或 doctor 输出中 |
 
