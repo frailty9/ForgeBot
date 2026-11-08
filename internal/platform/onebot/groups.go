@@ -24,6 +24,21 @@ type requestReference struct {
 func (*Sender) GroupEventSupport() (bool, bool)  { return true, true }
 func (*Sender) GroupReviewReasonSupported() bool { return true }
 
+// joinAnswer 取出 QQ 验证问题拼接格式“问题：xxx 换行 答案：yyy”中的答案，使审批规则
+// 只面对用户填写的内容；没有这个结构时原样返回。以第一处换行加“答案：”为界：问题由
+// 群管理员设定，答案由申请人填写，若取最后一处，申请人可在答案里伪造“答案：xxx”绕过规则。
+func joinAnswer(comment string) string {
+	const questionPrefix, answerMarker = "问题：", "\n答案："
+	if !strings.HasPrefix(comment, questionPrefix) {
+		return comment
+	}
+	index := strings.Index(comment, answerMarker)
+	if index < 0 {
+		return comment
+	}
+	return comment[index+len(answerMarker):]
+}
+
 func (e rawEvent) groupEvent(cfg Config) (group.Event, bool, error) {
 	target := scalar(e.GroupID)
 	binding, bound := cfg.Groups[target]
@@ -44,7 +59,7 @@ func (e rawEvent) groupEvent(cfg Config) (group.Event, bool, error) {
 	if user == "" || e.Time <= 0 {
 		return group.Event{}, true, operation.New(operation.Invalid, "group event user and timestamp are required")
 	}
-	event := group.Event{Kind: kind, ConversationID: binding.ConversationID, ConnectorID: cfg.ID, UserID: user, At: time.Unix(e.Time, 0), Comment: e.Comment, Self: user == scalar(e.SelfID)}
+	event := group.Event{Kind: kind, ConversationID: binding.ConversationID, ConnectorID: cfg.ID, UserID: user, At: time.Unix(e.Time, 0), Comment: joinAnswer(e.Comment), Self: user == scalar(e.SelfID)}
 	if kind == group.JoinRequested {
 		if e.Flag == "" || len(e.Flag) > 2048 {
 			return event, true, operation.New(operation.Invalid, "join request flag is required and bounded")

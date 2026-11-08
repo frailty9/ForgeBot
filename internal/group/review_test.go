@@ -262,3 +262,29 @@ func TestPolicyValidationLegacyDefaultsAndExplicitDisable(t *testing.T) {
 		t.Fatal("oversized reason accepted")
 	}
 }
+
+// DEBUG 日志给出正则、申请原文与是否匹配，用来定位“规则看起来对却被拒绝”的原因；
+// INFO 级别不输出申请内容，审批句柄始终不输出。
+func TestReviewDebugLogExplainsRegexDecision(t *testing.T) {
+	for _, level := range []slog.Level{slog.LevelDebug, slog.LevelInfo} {
+		var logs bytes.Buffer
+		port := &reviewActions{}
+		p := Policy{ReviewRegex: `^[0-9A-Z]{10}$`}
+		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} },
+			slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: level})))
+		event := joinEvent()
+		event.Comment = "问题：暗号\n答案：ABCDE12345"
+		result, err := s.HandleEvent(context.Background(), event)
+		if err != nil || result.Verdict != "rejected" {
+			t.Fatal(result, err)
+		}
+		output := logs.String()
+		if strings.Contains(output, event.Reference) {
+			t.Fatalf("approval handle leaked at %v:\n%s", level, output)
+		}
+		hasDetail := strings.Contains(output, "group review regex evaluated") && strings.Contains(output, "matches=false") && strings.Contains(output, "答案：ABCDE12345")
+		if (level == slog.LevelDebug) != hasDetail {
+			t.Fatalf("level %v detail=%v:\n%s", level, hasDetail, output)
+		}
+	}
+}

@@ -35,7 +35,7 @@ func (s *Service) claimReview(event Event) (bool, error) {
 
 func (s *Service) HandleEvent(ctx context.Context, event Event) (result EventResult, resultErr error) {
 	defer func() {
-		// 私有句柄和申请内容不进入日志；普通日志足以排查决策和执行。
+		// 私有句柄不进入日志；申请内容只在 DEBUG 的判断明细中输出。
 		s.logger.InfoContext(ctx, "group join review", "conversation_id", event.ConversationID,
 			"connector_id", event.ConnectorID, "event_id", event.ID,
 			"verdict", result.Verdict, "failure", operation.Describe(resultErr))
@@ -124,7 +124,10 @@ func (s *Service) evaluateReview(ctx context.Context, policy Policy, decider dec
 			return false, err
 		}
 		matches := pattern.MatchString(application)
-		if !policy.ModelEnabled() || (policy.Combine() == "and" && !matches) || (policy.Combine() == "or" && matches) {
+		shortCircuit := !policy.ModelEnabled() || (policy.Combine() == "and" && !matches) || (policy.Combine() == "or" && matches)
+		s.logger.DebugContext(ctx, "group review regex evaluated", "regex", policy.ReviewRegex, "application", boundedLog(application),
+			"application_bytes", len(application), "matches", matches, "combine", policy.Combine(), "model_enabled", policy.ModelEnabled(), "short_circuit", shortCircuit)
+		if shortCircuit {
 			return matches, nil
 		}
 	}
@@ -132,5 +135,16 @@ func (s *Service) evaluateReview(ctx context.Context, policy Policy, decider dec
 	if err != nil {
 		return false, err
 	}
-	return decision.DecideBool(ctx, decider, policy.ReviewRule, state)
+	approve, err := decision.DecideBool(ctx, decider, policy.ReviewRule, state)
+	s.logger.DebugContext(ctx, "group review model evaluated", "application", boundedLog(application), "approve", approve, "failure", operation.Describe(err))
+	return approve, err
+}
+
+// boundedLog 限制写入日志的外部文本长度，按字符截断避免切坏多字节字符。
+func boundedLog(text string) string {
+	runes := []rune(text)
+	if len(runes) <= 512 {
+		return text
+	}
+	return string(runes[:512]) + "…"
 }

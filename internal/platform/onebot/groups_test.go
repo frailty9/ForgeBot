@@ -1,13 +1,16 @@
 package onebot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/platform"
@@ -97,5 +100,86 @@ func TestGroupRequestAndActualMemberJoinAreDistinct(t *testing.T) {
 		if event.PostType == "notice" && (mapped.Kind != group.MemberJoined || mapped.Reference != "") {
 			t.Fatal(mapped)
 		}
+	}
+}
+
+type groupEventRecorder struct {
+	handlerFunc
+	events []group.Event
+}
+
+func (r *groupEventRecorder) HandleGroupEvent(_ context.Context, event group.Event) (group.EventResult, error) {
+	r.events = append(r.events, event)
+	return group.EventResult{Accepted: true, Verdict: "approved"}, nil
+}
+
+// 入群申请的内容在 DEBUG 日志中可见，便于排查规则为何不匹配；审批句柄 flag 不进日志。
+func TestJoinRequestDebugLogShowsCommentButNeverFlag(t *testing.T) {
+	var logs bytes.Buffer
+	a, err := New(testConfig("http://127.0.0.1:5700"), slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := &groupEventRecorder{}
+	body := mustJSON(t, map[string]any{
+		"post_type": "request", "request_type": "group", "sub_type": "add", "group_id": 8, "user_id": 7,
+		"self_id": 99, "time": time.Now().Unix(), "flag": "secret-approval-flag", "comment": "问题：暗号\n答案：ABCDE12345",
+	})
+	rr := httptest.NewRecorder()
+	a.webhook(recorder)(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK || len(recorder.events) != 1 {
+		t.Fatalf("status=%d events=%d", rr.Code, len(recorder.events))
+	}
+	output := logs.String()
+	for _, want := range []string{"onebot group event received", "request_type=group", "sub_type=add", "user_id=7", "答案：ABCDE12345", "conversation_id=support"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "secret-approval-flag") {
+		t.Fatalf("approval flag leaked into logs:\n%s", output)
+	}
+}
+
+// QQ 把验证问题拼成“问题：…\n答案：…”；适配器只交出答案，其余内容原样保留。
+func TestJoinAnswerExtractsOnlyTheApplicantAnswer(t *testing.T) {
+	for _, tc := range []struct{ name, comment, want string }{
+		{"real sample from QQ", "问题：1111\n答案：ABCDE1ABCD", "ABCDE1ABCD"},
+		{"crlf line break", "问题：暗号\r\n答案：abc", "abc"},
+		{"no verification question", "我想加入学习", "我想加入学习"},
+		{"empty comment", "", ""},
+		{"empty answer", "问题：暗号\n答案：", ""},
+		{"question without answer marker", "问题：暗号", "问题：暗号"},
+		{"answer is not trimmed", "问题：暗号\n答案： abc ", " abc "},
+		{"multiline answer keeps later lines", "问题：暗号\n答案：第一行\n第二行", "第一行\n第二行"},
+		// 以第一处分隔为界：申请人无法在答案里伪造另一段“答案：”来改变被匹配的内容。
+		{"forged marker inside the answer", "问题：暗号\n答案：随便\n答案：ABCDE1ABCD", "随便\n答案：ABCDE1ABCD"},
+		{"answer text without question prefix", "答案：ABCDE1ABCD", "答案：ABCDE1ABCD"},
+	} {
+		if got := joinAnswer(tc.comment); got != tc.want {
+			t.Errorf("%s: joinAnswer(%q) = %q, want %q", tc.name, tc.comment, got, tc.want)
+		}
+	}
+}
+
+// 映射后的入群事件携带答案；DEBUG 日志同时给出原始 comment 与提取后的 application。
+func TestJoinRequestEventCarriesExtractedAnswer(t *testing.T) {
+	var logs bytes.Buffer
+	a, err := New(testConfig("http://127.0.0.1:5700"), slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := &groupEventRecorder{}
+	body := mustJSON(t, map[string]any{
+		"post_type": "request", "request_type": "group", "sub_type": "add", "group_id": 8, "user_id": 7,
+		"self_id": 99, "time": time.Now().Unix(), "flag": "opaque", "comment": "问题：1111\n答案：ABCDE1ABCD",
+	})
+	rr := httptest.NewRecorder()
+	a.webhook(recorder)(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+	if len(recorder.events) != 1 || recorder.events[0].Comment != "ABCDE1ABCD" {
+		t.Fatalf("event comment = %+v", recorder.events)
+	}
+	if !strings.Contains(logs.String(), `application=ABCDE1ABCD`) || !strings.Contains(logs.String(), `答案：ABCDE1ABCD`) {
+		t.Fatalf("debug log should show both raw comment and extracted answer:\n%s", logs.String())
 	}
 }

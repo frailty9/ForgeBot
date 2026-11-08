@@ -201,6 +201,11 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		msg, err := event.message(a.cfg.Groups)
 		if normalized, handled, eventErr := event.groupEvent(a.cfg); handled {
+			// 审批句柄 flag 不进日志；申请内容仅在 DEBUG 输出，用于排查规则为何不匹配。
+			a.logger.DebugContext(r.Context(), "onebot group event received", "post_type", event.PostType,
+				"request_type", event.RequestType, "notice_type", event.NoticeType, "sub_type", event.SubType,
+				"group_id", scalar(event.GroupID), "user_id", scalar(event.UserID), "kind", normalized.Kind,
+				"conversation_id", normalized.ConversationID, "comment", boundedLog(event.Comment), "comment_bytes", len(event.Comment), "application", boundedLog(normalized.Comment))
 			if eventErr != nil {
 				writeResponse(w, http.StatusBadRequest, map[string]string{"status": "failed", "retcode": "1002"})
 				return
@@ -219,7 +224,8 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		if err != nil {
 			if errors.Is(err, ErrNotMessageEvent) {
-				a.logger.DebugContext(r.Context(), "onebot event ignored", "post_type", event.PostType, "message_type", event.MessageType)
+				a.logger.DebugContext(r.Context(), "onebot event ignored", "post_type", event.PostType, "message_type", event.MessageType,
+					"request_type", event.RequestType, "notice_type", event.NoticeType, "sub_type", event.SubType, "group_id", scalar(event.GroupID))
 				writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
 				return
 			}
@@ -458,6 +464,15 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	}
 	s.logger.DebugContext(ctx, "onebot outbound response accepted", "endpoint", endpoint, "status", result.Status)
 	return nil
+}
+
+// boundedLog 限制写入日志的外部文本长度，按字符截断避免切坏多字节字符。
+func boundedLog(text string) string {
+	runes := []rune(text)
+	if len(runes) <= 512 {
+		return text
+	}
+	return string(runes[:512]) + "…"
 }
 
 type rawEvent struct {
