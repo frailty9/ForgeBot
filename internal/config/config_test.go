@@ -42,8 +42,7 @@ func TestLegacyRuntimeWithoutSearchCanBeWrittenAndReloaded(t *testing.T) {
 		"bot":{"name":"ForgeBot"},
 		"admission":{"dedup_ttl":"60s","dedup_max":10000},
 		"llm":{"protocol":"openai_responses","api_key_ref":"llm/default","model":"","timeout":"60s"},
-		"platforms":{"connectors":[{"id":"echo","type":"echo","enabled":true}],"groups":[{"id":"local","connector_id":"echo","target":"local"}]},
-		"operations":{"groups":[]}
+		"platforms":{"connectors":[{"id":"echo","type":"echo","enabled":true}],"groups":[{"id":"local","connector_id":"echo","target":"local"}]}
 	}`
 	path := filepath.Join(t.TempDir(), "runtime.json")
 	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
@@ -322,48 +321,35 @@ func TestPlatformConfigAcceptsProtocolSpecificOptionsAndRejectsMalformedOptions(
 	}
 }
 
-func TestOperationsConfigRequiresBoundConversationAndKnownCommands(t *testing.T) {
+// operator 只能有一个运维群，必须引用已绑定的群并只授权已知命令；旧的
+// operations 与 administration 被严格解析拒绝。
+func TestOperatorRequiresBoundConversationAndKnownCommands(t *testing.T) {
 	platforms := PlatformConfig{
 		Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
 		Groups:     []GroupBindingConfig{{ID: "ops", ConnectorID: "echo", Target: "local"}},
 	}
-	valid := OperationsConfig{Groups: []OperatorGroupConfig{{
-		ConversationID: "ops", Notifications: true,
-		Commands: []string{"status", "restart", "pause", "resume", "proactive", "reload_docs"},
-	}}}
+	valid := OperatorConfig{ConversationID: "ops", Notifications: true, Commands: []string{"status", "restart", "pause", "resume", "proactive", "reload_docs"}}
 	if err := valid.Validate(platforms); err != nil {
 		t.Fatal(err)
 	}
-	invalid := OperationsConfig{Groups: []OperatorGroupConfig{
-		{ConversationID: "missing", Commands: []string{"status"}},
-		{ConversationID: "ops", Commands: []string{"shell"}},
-		{ConversationID: "ops", Commands: []string{"status"}},
-	}}
+	invalid := OperatorConfig{ConversationID: "missing", Commands: []string{"shell", "status", "status"}}
 	err := invalid.Validate(platforms)
 	if err == nil || !strings.Contains(err.Error(), "must reference a bound conversation") ||
 		!strings.Contains(err.Error(), "must be one of") || !strings.Contains(err.Error(), "is duplicated") {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
-}
-
-func TestAdministrationConfigScopesUsersToBoundConversations(t *testing.T) {
-	platforms := PlatformConfig{
-		Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
-		Groups:     []GroupBindingConfig{{ID: "support", ConnectorID: "echo", Target: "local"}},
+	if err := (OperatorConfig{}).Validate(platforms); err == nil || !strings.Contains(err.Error(), "conversation_id is required") {
+		t.Fatalf("blank operator accepted: %v", err)
 	}
-	valid := AdministrationConfig{Administrators: []AdministratorConfig{{ConversationID: "support", UserID: "42"}}}
-	if err := valid.Validate(platforms); err != nil {
-		t.Fatal(err)
-	}
-	invalid := AdministrationConfig{Administrators: []AdministratorConfig{
-		{ConversationID: "missing", UserID: ""},
-		{ConversationID: "support", UserID: "42"},
-		{ConversationID: "support", UserID: "42"},
-	}}
-	err := invalid.Validate(platforms)
-	if err == nil || !strings.Contains(err.Error(), "must reference a bound conversation") ||
-		!strings.Contains(err.Error(), "user_id is required") || !strings.Contains(err.Error(), "is duplicated") {
-		t.Fatalf("unexpected validation error: %v", err)
+	for _, raw := range []string{
+		`{"operator":[{"conversation_id":"ops"}]}`,
+		`{"operations":{"groups":[]}}`,
+		`{"administration":{"administrators":[]}}`,
+	} {
+		var runtime RuntimeConfig
+		if err := decodeStrictJSON([]byte(raw), &runtime); err == nil {
+			t.Fatalf("removed or multi-operator config accepted: %s", raw)
+		}
 	}
 }
 

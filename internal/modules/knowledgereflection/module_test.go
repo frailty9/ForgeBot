@@ -79,7 +79,7 @@ func TestObserverScanPublishesAndReloads(t *testing.T) {
 	observer := set.Observers()[0]
 	now := time.Now().Add(-time.Second)
 	observer.Observe(messaging.InboundMessage{ConversationID: "support", UserID: "member", MessageID: "q", Text: "How?", At: now})
-	observer.Observe(messaging.InboundMessage{ConversationID: "support", UserID: "admin", MessageID: "a", ReplyToMessageID: "q", Text: "Rotate it.", Administrator: true, At: now.Add(time.Millisecond)})
+	observer.Observe(messaging.InboundMessage{ConversationID: "support", UserID: "admin", MessageID: "a", ReplyToMessageID: "q", Text: "Rotate it.", PlatformRole: "admin", At: now.Add(time.Millisecond)})
 	control, ok := capability.Resolve(set.Capabilities(), reflectioncontract.ControlKey)
 	if !ok {
 		t.Fatal("reflection control is missing")

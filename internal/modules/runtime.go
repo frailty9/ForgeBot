@@ -51,7 +51,6 @@ type CommandRequest struct {
 	ConversationID string
 	UserID         string
 	MessageID      string
-	Administrator  bool
 	Instructions   string
 }
 

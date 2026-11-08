@@ -96,9 +96,9 @@ type RuntimeConfig struct {
 	Admission          AdmissionConfig           `json:"admission"`
 	LLM                LLMConfig                 `json:"llm"`
 	Platforms          PlatformConfig            `json:"platforms"`
-	Administration     AdministrationConfig      `json:"administration"`
-	Operations         OperationsConfig          `json:"operations"`
-	Extensions         ExtensionsConfig          `json:"extensions"`
+	// Operator 是唯一的运维群；不配置则不开放运维命令与故障通知。
+	Operator   *OperatorConfig  `json:"operator,omitempty"`
+	Extensions ExtensionsConfig `json:"extensions"`
 }
 
 // ExtensionsConfig configures MCP servers and text-only skills.
@@ -275,26 +275,9 @@ type GroupBindingConfig struct {
 	PromptSuffix string `json:"prompt_suffix,omitempty" yaml:"prompt_suffix,omitempty"`
 }
 
-// OperationsConfig grants limited command access to conversations.
-type OperationsConfig struct {
-	Groups []OperatorGroupConfig `json:"groups" yaml:"groups"`
-}
-
-// AdministrationConfig lists platform identities treated as administrators.
-type AdministrationConfig struct {
-	Administrators []AdministratorConfig `json:"administrators" yaml:"administrators"`
-}
-
-// AdministratorConfig scopes a platform user ID to a logical conversation.
-// User IDs are not assumed to be globally unique across connectors or accounts.
-type AdministratorConfig struct {
-	ConversationID string `json:"conversation_id" yaml:"conversation_id"`
-	UserID         string `json:"user_id" yaml:"user_id"`
-}
-
-// OperatorGroupConfig grants a logical conversation a deliberately small
-// operations surface, separate from the complete Web administration API.
-type OperatorGroupConfig struct {
+// OperatorConfig 指定唯一的运维群。群内所有成员都可执行允许的运维命令，
+// 因此该群应只包含可信的管理人员；多人管理请通过这个群进行。
+type OperatorConfig struct {
 	ConversationID string   `json:"conversation_id" yaml:"conversation_id"`
 	Notifications  bool     `json:"notifications" yaml:"notifications"`
 	Commands       []string `json:"commands" yaml:"commands"`
@@ -319,7 +302,6 @@ func DefaultRuntime() RuntimeConfig {
 			Connectors: []ConnectorConfig{{ID: "echo", Type: "echo", Enabled: true}},
 			Groups:     []GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}},
 		},
-		Operations: OperationsConfig{},
 		Extensions: ExtensionsConfig{Skills: SkillsConfig{MaxFileBytes: 128 << 10, MaxTotalBytes: 1 << 20, MaxFiles: 64}},
 	}
 }
@@ -703,11 +685,10 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.Platforms.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if err := c.Administration.Validate(c.Platforms); err != nil {
-		problems = append(problems, err.Error())
-	}
-	if err := c.Operations.Validate(c.Platforms); err != nil {
-		problems = append(problems, err.Error())
+	if c.Operator != nil {
+		if err := c.Operator.Validate(c.Platforms); err != nil {
+			problems = append(problems, err.Error())
+		}
 	}
 	if err := c.Extensions.Validate(); err != nil {
 		problems = append(problems, err.Error())
@@ -801,68 +782,31 @@ func (c ExtensionsConfig) Validate() error {
 	return nil
 }
 
-func (c AdministrationConfig) Validate(platforms PlatformConfig) error {
-	conversations := make(map[string]struct{}, len(platforms.Groups))
-	for _, group := range platforms.Groups {
-		conversations[strings.TrimSpace(group.ID)] = struct{}{}
+func (c OperatorConfig) Validate(platforms PlatformConfig) error {
+	conversationID := strings.TrimSpace(c.ConversationID)
+	bound := false
+	for _, binding := range platforms.Groups {
+		if strings.TrimSpace(binding.ID) == conversationID {
+			bound = true
+			break
+		}
 	}
-	seen := make(map[string]struct{}, len(c.Administrators))
 	var problems []string
-	for index, administrator := range c.Administrators {
-		conversationID := strings.TrimSpace(administrator.ConversationID)
-		userID := strings.TrimSpace(administrator.UserID)
-		prefix := fmt.Sprintf("administration.administrators[%d]", index)
-		if conversationID == "" {
-			problems = append(problems, prefix+".conversation_id is required")
-		} else if _, exists := conversations[conversationID]; !exists {
-			problems = append(problems, prefix+".conversation_id must reference a bound conversation")
-		}
-		if userID == "" {
-			problems = append(problems, prefix+".user_id is required")
-		}
-		key := conversationID + "\x00" + userID
-		if _, exists := seen[key]; exists {
+	if conversationID == "" {
+		problems = append(problems, "operator.conversation_id is required")
+	} else if !bound {
+		problems = append(problems, "operator.conversation_id must reference a bound conversation")
+	}
+	commands := make(map[string]struct{}, len(c.Commands))
+	for index, command := range c.Commands {
+		command = strings.ToLower(strings.TrimSpace(command))
+		prefix := fmt.Sprintf("operator.commands[%d]", index)
+		if !isOperatorCommand(command) {
+			problems = append(problems, prefix+" must be one of status, restart, pause, resume, proactive, reload_docs")
+		} else if _, exists := commands[command]; exists {
 			problems = append(problems, prefix+" is duplicated")
 		} else {
-			seen[key] = struct{}{}
-		}
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-func (c OperationsConfig) Validate(platforms PlatformConfig) error {
-	conversations := make(map[string]struct{}, len(platforms.Groups))
-	for _, binding := range platforms.Groups {
-		conversations[strings.TrimSpace(binding.ID)] = struct{}{}
-	}
-	configured := make(map[string]struct{}, len(c.Groups))
-	var problems []string
-	for index, group := range c.Groups {
-		conversationID := strings.TrimSpace(group.ConversationID)
-		prefix := fmt.Sprintf("operations.groups[%d]", index)
-		if conversationID == "" {
-			problems = append(problems, prefix+".conversation_id is required")
-		} else if _, exists := conversations[conversationID]; !exists {
-			problems = append(problems, prefix+".conversation_id must reference a bound conversation")
-		} else if _, exists := configured[conversationID]; exists {
-			problems = append(problems, prefix+".conversation_id is duplicated")
-		} else {
-			configured[conversationID] = struct{}{}
-		}
-		commands := make(map[string]struct{}, len(group.Commands))
-		for commandIndex, command := range group.Commands {
-			command = strings.ToLower(strings.TrimSpace(command))
-			commandPrefix := fmt.Sprintf("%s.commands[%d]", prefix, commandIndex)
-			if !isOperatorCommand(command) {
-				problems = append(problems, commandPrefix+" must be one of status, restart, pause, resume, proactive, reload_docs")
-			} else if _, exists := commands[command]; exists {
-				problems = append(problems, commandPrefix+" is duplicated")
-			} else {
-				commands[command] = struct{}{}
-			}
+			commands[command] = struct{}{}
 		}
 	}
 	if len(problems) > 0 {
@@ -1030,9 +974,8 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				"model": c.Runtime.LLM.Model, "anthropic_version": c.Runtime.LLM.AnthropicVersion, "image_understanding": c.Runtime.LLM.ImageUnderstanding, "authentication": c.Runtime.LLM.Authentication,
 				"timeout": c.Runtime.LLM.Timeout.String(), "api_key_configured": apiKeyConfigured,
 			},
-			"admission":      c.Runtime.Admission,
-			"platforms":      c.Runtime.Platforms.Public(),
-			"administration": c.Runtime.Administration,
+			"admission": c.Runtime.Admission,
+			"platforms": c.Runtime.Platforms.Public(),
 			"extensions": map[string]any{
 				"mcp": func() []map[string]any {
 					result := make([]map[string]any, 0, len(c.Runtime.Extensions.MCP))
@@ -1043,7 +986,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 				}(),
 				"skills": c.Runtime.Extensions.Skills,
 			},
-			"operations": c.Runtime.Operations,
+			"operator": c.Runtime.Operator,
 		},
 	}
 }

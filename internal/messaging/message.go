@@ -44,16 +44,16 @@ type InboundMessage struct {
 	Media            []Media        `json:"media,omitempty"`
 	Mentioned        bool           `json:"mentioned,omitempty"`
 	Command          bool           `json:"command,omitempty"`
-	Administrator    bool           `json:"-"`
 	// PlatformRole 仅由可信连接器填写，不能从测试HTTP消息反序列化提权。
 	PlatformRole      string    `json:"-"`
 	ProactiveRevision uint64    `json:"-"`
 	At                time.Time `json:"at,omitempty"`
 }
 
-// TrustedResponder 用于人机协作，不等同于 ForgeBot 配置/凭据管理权限。
+// TrustedResponder 以平台群主/管理员身份判断可信答疑人，供主动插话让位与
+// 知识沉淀使用；它不等同于 ForgeBot 配置、凭据或运维命令权限。
 func (m InboundMessage) TrustedResponder() bool {
-	return m.Administrator || m.PlatformRole == "owner" || m.PlatformRole == "admin"
+	return m.PlatformRole == "owner" || m.PlatformRole == "admin"
 }
 
 func (m InboundMessage) SessionKey() string {

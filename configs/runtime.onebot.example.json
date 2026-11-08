@@ -66,18 +66,9 @@
       }
     }
   },
-  "administration": {
-    "administrators": [
-      {"conversation_id": "support", "user_id": "replace-with-admin-qq-number"}
-    ]
-  },
-  "operations": {
-    "groups": [
-      {
-        "conversation_id": "ops",
-        "notifications": true,
-        "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
-      }
-    ]
+  "operator": {
+    "conversation_id": "ops",
+    "notifications": true,
+    "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
   }
 }

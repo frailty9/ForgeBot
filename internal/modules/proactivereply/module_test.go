@@ -120,7 +120,7 @@ func TestOrdinaryAdminChatDoesNotYieldButSemanticAnswerDoes(t *testing.T) {
 	}
 	defer set.Close(context.Background())
 	participant := set.Participants()[0]
-	admin := messaging.InboundMessage{ConversationID: "support", UserID: "a", MessageID: "a1", Text: "hello", Administrator: true}
+	admin := messaging.InboundMessage{ConversationID: "support", UserID: "a", MessageID: "a1", Text: "hello", PlatformRole: "admin"}
 	_, _ = participant.Handle(context.Background(), admin, nil)
 	if decider.calls != 0 {
 		t.Fatal("admin idle chat caused needless decision")

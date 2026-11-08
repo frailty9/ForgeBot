@@ -98,7 +98,7 @@ func TestCommitRuntimeNoopStillUsesPersistence(t *testing.T) {
 	}
 }
 
-func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *testing.T) {
+func TestManagerHotReplacesOperatorWithoutReplacingConnectors(t *testing.T) {
 	snapshot := testSnapshot()
 	var sets []*fakeConnectorSet
 	manager, err := NewManager(context.Background(), snapshot, Builder{
@@ -113,7 +113,7 @@ func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *te
 	}
 	next := snapshot
 	next.Version = 2
-	next.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "local", UserID: "admin"}}
+	next.Runtime.Operator = &config.OperatorConfig{ConversationID: "local", Notifications: true, Commands: []string{"status"}}
 	result, err := manager.Apply(context.Background(), next)
 	if err != nil {
 		t.Fatal(err)
@@ -121,10 +121,8 @@ func TestManagerHotReplacesAdministratorResolverWithoutReplacingConnectors(t *te
 	if result.Action != ActionRestartEngine || len(sets) != 1 {
 		t.Fatalf("result=%+v connector sets=%d", result, len(sets))
 	}
-	generation := manager.current.Load()
-	message := generation.admins.Mark(messaging.InboundMessage{ConversationID: "local", UserID: "admin"})
-	if !message.Administrator {
-		t.Fatal("updated administrator resolver is not active")
+	if targets := manager.NotificationTargets(); len(targets) != 1 || targets[0] != "local" {
+		t.Fatal("updated operator is not active", targets)
 	}
 }
 
@@ -161,7 +159,6 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	snapshot := searchSnapshot(t, root)
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
 	enableReflectionModule(t, &snapshot, map[string]any{"conversation_ids": []string{"c"}, "quiet_window": "1ms", "max_session_duration": "1s"})
-	snapshot.Runtime.Administration.Administrators = []config.AdministratorConfig{{ConversationID: "c", UserID: "admin"}}
 	store := configuredSecrets(t, "key")
 	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
 		return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":true,"title":"Key rotation","question":"How do I rotate a key?","answer":"Create a replacement key and revoke the old one.","tags":["api-key"],"confidence":0.98,"reason":"reusable"}`}, nil
@@ -175,7 +172,8 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{ConversationID: "c", UserID: "member", MessageID: "q1", Text: "How do I rotate a key?"}); err != nil {
 		t.Fatal(err)
 	}
-	answer := messaging.InboundMessage{ConversationID: "c", UserID: "admin", MessageID: "a1", ReplyToMessageID: "q1", Text: "Create a replacement key and revoke the old one."}
+	// 可信答疑人来自连接器提供的平台角色，而不是单独配置的管理员列表。
+	answer := messaging.InboundMessage{ConversationID: "c", UserID: "admin", MessageID: "a1", ReplyToMessageID: "q1", Text: "Create a replacement key and revoke the old one.", PlatformRole: "admin"}
 	if _, err := manager.HandleInbound(context.Background(), answer); err != nil {
 		t.Fatal(err)
 	}
@@ -364,9 +362,7 @@ type fakeConnectorSet struct {
 
 func TestNotificationTargetsFollowCurrentRuntimeSnapshot(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.Operations.Groups = []config.OperatorGroupConfig{{
-		ConversationID: "local", Notifications: true, Commands: []string{"status"},
-	}}
+	snapshot.Runtime.Operator = &config.OperatorConfig{ConversationID: "local", Notifications: true, Commands: []string{"status"}}
 	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry})
 	if err != nil {
 		t.Fatal(err)
@@ -376,9 +372,7 @@ func TestNotificationTargetsFollowCurrentRuntimeSnapshot(t *testing.T) {
 	}
 	next := snapshot
 	next.Version = 2
-	next.Runtime.Operations.Groups = []config.OperatorGroupConfig{{
-		ConversationID: "local", Notifications: false, Commands: []string{"status"},
-	}}
+	next.Runtime.Operator = &config.OperatorConfig{ConversationID: "local", Notifications: false, Commands: []string{"status"}}
 	if _, err := manager.Apply(context.Background(), next); err != nil {
 		t.Fatal(err)
 	}

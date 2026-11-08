@@ -12,15 +12,14 @@ platforms.groups[] = {id: "support", connector_id: "qq-main", target: "10001"}
 modules.native.join_review.options.groups.support  ← 入群自动审批（规则在模块层统一配置）
 modules.native.welcome.options.groups.support  ← 新人欢迎
 modules.native.proactive_reply.options.groups.support  ← 主动插话
-administration.administrators[].conversation_id = "support"  ← 可信管理员
-operations.groups[].conversation_id            ← 运维命令与通知（可以是另一个群）
+operator.conversation_id = "ops"               ← 唯一的运维群：运维命令与故障通知
 ```
 
 完整可加载的 QQ 示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)：一个 QQ 账号绑定两个群，`support` 开启入群审批、新人欢迎和主动插话，`ops` 只作为运维群。使用时把 `target` 换成你的 QQ 群号，`user_id` 换成管理员 QQ 号，并配置 OneBot 端点与回答模型。
 
 几条约束：
 
-- 逻辑群 ID 必须先出现在 `platforms.groups` 中。各模块的 `groups`（入群审批、欢迎、主动插话）、沉淀的 `conversation_ids`，以及 `administration`、`operations` 引用未绑定的 ID 时，配置加载失败并指出是哪个模块的哪个群 ID。模块关闭时也会检查，避免重新开启时才发现写错。
+- 逻辑群 ID 必须先出现在 `platforms.groups` 中。各模块的 `groups`（入群审批、欢迎、主动插话）、沉淀的 `conversation_ids`，以及 `operator.conversation_id` 引用未绑定的 ID 时，配置加载失败并指出是哪个模块的哪个群 ID。模块关闭时也会检查，避免重新开启时才发现写错。
 - `connector_id` 必须指向已启用的连接器；启用的 OneBot 连接器至少要绑定一个群。
 - 同一个连接器与群号的组合不能重复绑定；一个连接器可以绑定多个群。
 - 默认示例 [`runtime.example.json`](../configs/runtime.example.json) 为了能直接在本地运行，只绑定了 Echo 测试群 `local`，QQ 连接器是关闭的。

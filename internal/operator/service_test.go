@@ -130,3 +130,39 @@ func (s *fakeStore) Rollback(context.Context, uint64, uint64, string) (config.Sn
 func (s *fakeStore) History(context.Context, int) ([]settings.RevisionMeta, error) {
 	return nil, errors.New("not implemented")
 }
+
+type yieldRuntime struct {
+	fakeRuntime
+	calls []string
+}
+
+func (r *yieldRuntime) SetProactiveYield(group string, paused bool) error {
+	state := "resume"
+	if paused {
+		state = "yield"
+	}
+	r.calls = append(r.calls, state+":"+group)
+	return nil
+}
+
+// 运维群只有一个，yield/resume 需要能指定目标业务群；不写目标群时作用于当前群。
+func TestProactiveYieldTargetsNamedGroup(t *testing.T) {
+	runtime := &yieldRuntime{}
+	service, err := New(runtime, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"yield", "support"}, {"resume", "support"}, {"yield"}} {
+		result, err := service.Execute(context.Background(), operations.Request{Command: operations.CommandProactive, ConversationID: "ops", Arguments: args})
+		if err != nil {
+			t.Fatal(args, err)
+		}
+		if !strings.Contains(result.Reply, "让位") {
+			t.Fatal(result.Reply)
+		}
+	}
+	want := []string{"yield:support", "resume:support", "yield:ops"}
+	if strings.Join(runtime.calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls = %v, want %v", runtime.calls, want)
+	}
+}

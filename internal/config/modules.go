@@ -84,10 +84,10 @@ func (c RuntimeConfig) Clone() RuntimeConfig {
 		c.Platforms.Connectors[index].Options = slices.Clone(c.Platforms.Connectors[index].Options)
 	}
 	c.Platforms.Groups = slices.Clone(c.Platforms.Groups)
-	c.Administration.Administrators = slices.Clone(c.Administration.Administrators)
-	c.Operations.Groups = slices.Clone(c.Operations.Groups)
-	for index := range c.Operations.Groups {
-		c.Operations.Groups[index].Commands = slices.Clone(c.Operations.Groups[index].Commands)
+	if c.Operator != nil {
+		operator := *c.Operator
+		operator.Commands = slices.Clone(operator.Commands)
+		c.Operator = &operator
 	}
 	c.Extensions.Skills.Directories = slices.Clone(c.Extensions.Skills.Directories)
 	c.Extensions.MCP = slices.Clone(c.Extensions.MCP)

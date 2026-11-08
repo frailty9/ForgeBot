@@ -29,7 +29,7 @@ func TestOperatorCommandTakesPriorityOverBot(t *testing.T) {
 		return platform.HandleResult{}, nil
 	}), serviceFunc(func(_ context.Context, request Request) (Result, error) {
 		serviceCalls++
-		if request.Command != CommandStatus || request.ConversationID != "ops" || request.UserID != "u1" || !request.Administrator {
+		if request.Command != CommandStatus || request.ConversationID != "ops" || request.UserID != "u1" {
 			t.Fatalf("request = %+v", request)
 		}
 		return Result{Reply: "ready"}, nil
@@ -38,7 +38,7 @@ func TestOperatorCommandTakesPriorityOverBot(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := router.HandleInbound(context.Background(), messaging.InboundMessage{
-		ConversationID: "ops", UserID: "u1", MessageID: "m1", Text: "/status", Administrator: true,
+		ConversationID: "ops", UserID: "u1", MessageID: "m1", Text: "/status",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/administration"
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/bot"
 	"github.com/soleapi/forgebot/internal/capability"
@@ -361,7 +360,6 @@ type generation struct {
 	engine      *bot.Engine
 	connectors  platform.ConnectorSet
 	handler     *operations.Router
-	admins      administration.Resolver
 	watchCancel context.CancelFunc
 	mu          sync.RWMutex
 }
@@ -435,30 +433,24 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	policies := make([]operations.GroupPolicy, 0, len(snapshot.Runtime.Operations.Groups))
-	for _, group := range snapshot.Runtime.Operations.Groups {
-		commands := make([]operations.Command, 0, len(group.Commands))
-		for _, command := range group.Commands {
+	// 运维群最多一个，路由仍按列表接收以复用既有授权逻辑。
+	var policies []operations.GroupPolicy
+	if operator := snapshot.Runtime.Operator; operator != nil {
+		commands := make([]operations.Command, 0, len(operator.Commands))
+		for _, command := range operator.Commands {
 			commands = append(commands, operations.Command(strings.ToLower(strings.TrimSpace(command))))
 		}
-		policies = append(policies, operations.GroupPolicy{ConversationID: group.ConversationID, Notifications: group.Notifications, Commands: commands})
+		policies = append(policies, operations.GroupPolicy{ConversationID: operator.ConversationID, Notifications: operator.Notifications, Commands: commands})
 	}
 	router, err := operations.NewRouter(pausedHandler{manager: m, next: engine}, m.operator, sender, policies)
 	if err != nil {
 		engine.Shutdown(snapshot.Static.Server.ShutdownTimeout)
 		return nil, err
 	}
-	adminIdentities := make([]administration.Identity, 0, len(snapshot.Runtime.Administration.Administrators))
-	for _, administrator := range snapshot.Runtime.Administration.Administrators {
-		adminIdentities = append(adminIdentities, administration.Identity{
-			ConversationID: administrator.ConversationID, UserID: administrator.UserID,
-		})
-	}
 	return &generation{
 		decisions: generationBuilder.Decisions,
 		modules:   moduleSet,
 		snapshot:  snapshot, engine: engine, connectors: connectors, handler: router,
-		admins: administration.New(adminIdentities),
 	}, nil
 }
 
@@ -632,13 +624,10 @@ func (m *Manager) SetNotificationPublisher(publisher notification.Publisher) {
 
 func (m *Manager) NotificationTargets() []string {
 	snapshot, _ := m.Snapshot()
-	targets := make([]string, 0, len(snapshot.Runtime.Operations.Groups))
-	for _, group := range snapshot.Runtime.Operations.Groups {
-		if group.Notifications {
-			targets = append(targets, group.ConversationID)
-		}
+	if operator := snapshot.Runtime.Operator; operator != nil && operator.Notifications {
+		return []string{operator.ConversationID}
 	}
-	return targets
+	return nil
 }
 
 func (m *Manager) SendNotification(ctx context.Context, conversationID, text string) error {
@@ -873,7 +862,6 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 		return platform.HandleResult{}, errors.New("runtime is unavailable")
 	}
 	defer generation.mu.RUnlock()
-	message = generation.admins.Mark(message)
 	for _, observer := range generation.modules.Observers() {
 		observer.Observe(message)
 	}

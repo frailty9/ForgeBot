@@ -19,7 +19,7 @@ func scannerBuffer(t *testing.T) *buffer.Buffer {
 	}
 	base := time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)
 	q := messaging.InboundMessage{ConversationID: "support", UserID: "u", MessageID: "q", Text: "question"}
-	a := messaging.InboundMessage{ConversationID: "support", UserID: "admin", MessageID: "a", ReplyToMessageID: "q", Text: "answer", Administrator: true}
+	a := messaging.InboundMessage{ConversationID: "support", UserID: "admin", MessageID: "a", ReplyToMessageID: "q", Text: "answer", PlatformRole: "admin"}
 	b.ObserveAt(base, q)
 	b.ObserveAt(base.Add(time.Minute), a)
 	return b

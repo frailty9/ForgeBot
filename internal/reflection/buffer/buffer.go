@@ -161,7 +161,7 @@ func (b *Buffer) ObserveAt(now time.Time, message messaging.InboundMessage) bool
 	}
 	message.ConversationID = conversationID
 	message.Text = strings.TrimSpace(message.Text)
-	if message.Administrator {
+	if message.TrustedResponder() {
 		return b.observeAdministratorLocked(now, message)
 	}
 	key := messageKey(conversationID, message.MessageID)
@@ -183,7 +183,7 @@ func (b *Buffer) observeAdministratorLocked(now time.Time, message messaging.Inb
 	}
 	if replyID := strings.TrimSpace(message.ReplyToMessageID); replyID != "" {
 		questionKey := messageKey(message.ConversationID, replyID)
-		if candidate, exists := b.questions[questionKey]; exists && !candidate.message.Administrator {
+		if candidate, exists := b.questions[questionKey]; exists && !candidate.message.TrustedResponder() {
 			key := sessionKey(message.ConversationID, message.UserID, replyID)
 			if existing, alreadyOpen := b.sessions[key]; alreadyOpen && !existing.closed {
 				existing.Answers = append(existing.Answers, message)

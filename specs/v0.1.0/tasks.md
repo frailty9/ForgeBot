@@ -261,3 +261,13 @@
 - `groups` 中列了群（含关闭的群）时规则必须可用；关闭的群同样检查是否已绑定。
 - 双语 README 与 configuration.md 写明部署定位；群管理文档改为模块级规则写法。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 管理者收窄为唯一运维群
+
+`administration`（可信的人）与 `operations`（运维群）分开放置不易理解，且运维命令只按群授权、不检查执行人。用户决定管理者最多一个，多人管理通过群聊进行：
+
+- 删除 `administration` 与 `operations`，新增可选的顶层 `operator`（单个对象）：`conversation_id`、`notifications`、`commands`。运维群内所有成员都可执行允许的命令，文档要求该群只包含可信管理人员。
+- 删除 `internal/administration` 与 `InboundMessage.Administrator`；主动插话让位与知识沉淀的可信答疑人统一以平台群主/群管理员身份为准。
+- `/proactive yield|resume [群ID]` 可指定目标业务群，不写时作用于当前群。
+- OneBot 适配器目前只处理群消息（协议本身支持私聊），因此管理者暂不支持单个用户；私聊留待后续版本单独规划。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

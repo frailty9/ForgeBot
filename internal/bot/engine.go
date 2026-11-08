@@ -200,7 +200,7 @@ func (e *Engine) handleModuleCommand(ctx context.Context, message messaging.Inbo
 		if strings.ToLower(command.Name) != name {
 			continue
 		}
-		result, err := command.Handle(ctx, modules.CommandRequest{Name: name, Arguments: append([]string(nil), fields[1:]...), ConversationID: message.ConversationID, UserID: message.UserID, MessageID: message.MessageID, Administrator: message.Administrator, Instructions: e.instructions(message.PromptSuffix)})
+		result, err := command.Handle(ctx, modules.CommandRequest{Name: name, Arguments: append([]string(nil), fields[1:]...), ConversationID: message.ConversationID, UserID: message.UserID, MessageID: message.MessageID, Instructions: e.instructions(message.PromptSuffix)})
 		if err != nil {
 			return platform.HandleResult{Verdict: "module_command_failed"}, true, err
 		}

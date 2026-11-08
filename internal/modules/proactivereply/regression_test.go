@@ -58,7 +58,7 @@ func TestUnrelatedQuotedContentNeverDirectlyYieldsOrDropsPending(t *testing.T) {
 				if pending {
 					_, _ = i.handle(context.Background(), messaging.InboundMessage{ConversationID: "g", UserID: "u", MessageID: "q", Text: "question"}, nil)
 				}
-				_, err := i.handle(context.Background(), messaging.InboundMessage{ConversationID: "g", UserID: "admin", MessageID: "a", Administrator: true,
+				_, err := i.handle(context.Background(), messaging.InboundMessage{ConversationID: "g", UserID: "admin", MessageID: "a", PlatformRole: "admin",
 					ReplyToMessageID: "yesterday", Quoted: &messaging.QuotedMessage{MessageID: "yesterday", Text: "old chat"}, Text: "hello"}, nil)
 				if err != nil {
 					t.Fatal(err)
@@ -104,7 +104,7 @@ func TestQuotedInflightQuestionYieldsAndInvalidatesGeneratedReply(t *testing.T) 
 	if !i.pool.HasPending("g", "q") {
 		t.Fatal("inflight question missing")
 	}
-	_, err = i.handle(context.Background(), messaging.InboundMessage{ConversationID: "g", UserID: "a", MessageID: "a", Administrator: true, ReplyToMessageID: "q", Text: "answer"}, nil)
+	_, err = i.handle(context.Background(), messaging.InboundMessage{ConversationID: "g", UserID: "a", MessageID: "a", PlatformRole: "admin", ReplyToMessageID: "q", Text: "answer"}, nil)
 	if err != nil || state.CanSend("g", revision) {
 		t.Fatal("inflight reply was not invalidated", err)
 	}

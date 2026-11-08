@@ -126,17 +126,23 @@ func (s *Service) status() string {
 }
 
 func (s *Service) proactive(request operations.Request) (operations.Result, error) {
-	if len(request.Arguments) == 1 {
+	// yield/resume 作用于指定的业务群：运维群只有一个，通常不是需要让位的答疑群。
+	// 不写目标群时作用于当前群，仅在运维群与答疑群是同一个群时有意义。
+	if len(request.Arguments) == 1 || len(request.Arguments) == 2 {
 		action := strings.ToLower(strings.TrimSpace(request.Arguments[0]))
 		if action == "yield" || action == "resume" {
+			target := request.ConversationID
+			if len(request.Arguments) == 2 {
+				target = strings.TrimSpace(request.Arguments[1])
+			}
 			control, ok := s.runtime.(interface{ SetProactiveYield(string, bool) error })
 			if !ok {
 				return operations.Result{}, ErrCapabilityUnavailable
 			}
-			if err := control.SetProactiveYield(request.ConversationID, action == "yield"); err != nil {
+			if err := control.SetProactiveYield(target, action == "yield"); err != nil {
 				return operations.Result{}, err
 			}
-			return operations.Result{Reply: "本群主动插话让位状态已调整；明确 @ 仍可正常处理。"}, nil
+			return operations.Result{Reply: "群 " + target + " 的主动插话让位状态已调整；明确 @ 仍可正常处理。"}, nil
 		}
 	}
 	snapshot, _ := s.runtime.Snapshot()

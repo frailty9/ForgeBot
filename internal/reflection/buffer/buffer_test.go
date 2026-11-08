@@ -17,7 +17,11 @@ func testBuffer(t *testing.T) *Buffer {
 }
 
 func msg(conversation, user, id, text string, admin bool) messaging.InboundMessage {
-	return messaging.InboundMessage{ConversationID: conversation, UserID: user, MessageID: id, Text: text, Administrator: admin}
+	role := ""
+	if admin {
+		role = "admin"
+	}
+	return messaging.InboundMessage{ConversationID: conversation, UserID: user, MessageID: id, Text: text, PlatformRole: role}
 }
 
 func TestBufferAggregatesMultiMessageAdministratorAnswer(t *testing.T) {

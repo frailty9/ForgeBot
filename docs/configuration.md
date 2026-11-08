@@ -11,7 +11,7 @@ ForgeBot 将启动所必需且不应频繁变化的配置放在 YAML 中，将�
 | 层级 | 介质 | 是否热更新 | 内容 |
 | --- | --- | --- | --- |
 | 启动配置 | YAML / 少量环境变量 | 否，修改后重启进程 | HTTP 监听、日志、运行时配置路径、密钥库路径、管理令牌、主密钥 |
-| 运行时配置 | JSON / 管理 API | 是 | Bot、LLM、消息门控、检索、平台、管理员、反思和运维群组 |
+| 运行时配置 | JSON / 管理 API | 是 | Bot、LLM、消息门控、检索、平台、反思和运维群 |
 | LLM 密钥 | 加密 SecretStore | 是 | `llm.api_key_ref` 指向的 API Key |
 
 ForgeBot 不加载 `.env` 文件。生产部署应由进程管理器、容器编排系统或操作系统注入环境变量。
@@ -373,42 +373,33 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 同理适用于全部 OneBot 私有字段。迁移后通过 `POST /v1/admin/config/validate` 验证，再
 以完整 Runtime JSON 执行热更新。
 
-### 5.7 `administration`
+### 5.7 `operator`
 
 ```json
 {
-  "administrators": [
-    {"conversation_id": "support", "user_id": "12345678"}
-  ]
-}
-```
-
-管理员按“逻辑群组 + 平台用户 ID”授权。`conversation_id` 必须引用 `platforms.groups[].id`。该身份用于通讯侧有限能力和知识反思，不等同于 Web 管理 API 权限。
-
-### 5.8 `operations`
-
-```json
-{
-  "groups": [{
-    "conversation_id": "support",
+  "operator": {
+    "conversation_id": "ops",
     "notifications": true,
     "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
-  }]
+  }
 }
 ```
 
-运维群组必须引用已绑定的逻辑群组。可授权命令只有：
+`operator` 指定**唯一的运维群**，不配置则不开放运维命令和故障通知。`conversation_id` 必须引用已绑定的逻辑群。**运维群里的所有成员都可以执行允许的运维命令**，所以这个群里只应该有可信的管理人员；需要多人管理时，把这些人拉进同一个运维群，而不是配置多个管理者。可授权命令只有：
 
 - `/status`
 - `/restart`
 - `/pause`
 - `/resume`
 - `/proactive on|off`
+- `/proactive yield <群ID>`、`/proactive resume <群ID>`：让指定业务群的主动插话暂停 5 分钟或提前恢复；不写群 ID 时作用于运维群本身
 - `/reload-docs`
 
-`notifications: true` 时，该群组接收 Runtime、Connector 和 LLM 故障通知。通讯侧运维能力刻意小于 Web 管理 API。
+`notifications: true` 时，运维群接收 Runtime、Connector 和 LLM 故障通知。通讯侧运维能力刻意小于 Web 管理 API。目前 OneBot 适配器只处理群消息，因此运维管理者只能是一个群，不能是单个用户的私聊。
 
-### 5.9 `modules.native.knowledge_reflection`
+主动插话判断“管理员已接答”、知识沉淀收集“管理员回答”时，可信答疑人以连接器提供的平台身份为准：业务群里的群主和群管理员。这个身份不授予运维命令、ForgeBot 配置或凭据权限。旧配置中的 `administration` 与 `operations` 已删除，残留会导致配置加载失败。
+
+### 5.8 `modules.native.knowledge_reflection`
 
 ```json
 {
@@ -629,10 +620,10 @@ options 可省略或仅填写部分字段；缺省字段使用内置文案，已
 
 每批待答消息在交给回答模型前先做一次决策（有 DM 用 DM，否则用回答 LLM），判断是否是一个值得主动回答、仍需帮助、尚无管理员接手的明确问题。填写 `scope`（最多 3072 字节）后，还要求问题属于该范围。只有明确“是”才继续；否、无法判断、决策故障或批次超过 3000 字符都保持沉默。通过后，回答模型的指令末尾还会附一句宿主提示：若问题不在服务范围内或不需要回答，就只输出空内容，空回复不会发送。`scope` 只供这次决策使用，不注入回答模型；回答的范围仍以 `bot.system_prompt` 为准，二者应保持一致。
 
-可信管理员引用 ID 命中同群待处理或生成中问题作答
+业务群的群主或群管理员引用 ID 命中同群待处理或生成中问题作答
 时，模块按群暂时让位，缺省 `yield_duration=5m`，可在模块 options 中调整。平台群主/管理员只作为可信接答身份，不自动授予 ForgeBot 配置或凭据权限。无待答问题的普通管理员闲聊不调用接答模型，也不刷新让位时长；有待答/生成中问题时可通过共享 Decision 判断语义接答。
 
-让位只暂停未 @ 的主动插话；同条消息引用问题并 @Bot 时仍走正常问答。旧待答项丢弃，已生成的主动回复在发送前复查群版本，即使到期也不补发。状态跨无关热更新保留，进程重启清空。管理群的 `proactive` 运维命令增加 `/proactive yield`（本群让位 5 分钟）和 `/proactive resume`（提前恢复）；这与全局 pause/resume 相互独立。
+让位只暂停未 @ 的主动插话；同条消息引用问题并 @Bot 时仍走正常问答。旧待答项丢弃，已生成的主动回复在发送前复查群版本，即使到期也不补发。状态跨无关热更新保留，进程重启清空。运维群的 `proactive` 命令增加 `/proactive yield <群ID>`（让指定群让位 5 分钟）和 `/proactive resume <群ID>`（提前恢复）；这与全局 pause/resume 相互独立。
 
 检索预回复只在工具通过白名单和预算校验且实际准备执行时产生。
 每次请求最多尝试一次；发送失败不阻止检索。它是程序行为，不是开放给 LLM 的发送工具。
@@ -753,7 +744,7 @@ Invoke-RestMethod `
 - 设置明确的 HTTP、LLM、检索超时与资源上限。
 - OneBot 启用 `receive_secret`，并保护当前仍在 JSON 中的 OneBot 密钥。
 - 在启用自动反思前确认文档库备份策略和管理员名单。
-- 监控 `/healthz`、结构化日志及运维群组故障通知。
+- 监控 `/healthz`、结构化日志及运维群故障通知。
 
 ## 入群自动审批
 
