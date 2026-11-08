@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/operation"
 )
 
-type Policies func(string) (Policy, decision.Decider, bool)
+// Policies 返回逻辑群当前的审批视图；每次调用都读取最新运行代。
+type Policies func(string) ReviewTarget
 type Service struct {
 	store   Store
 	actions Actions
@@ -27,7 +27,7 @@ type Service struct {
 
 func New(store Store, actions Actions, policy Policies, loggers ...*slog.Logger) *Service {
 	if policy == nil {
-		policy = func(string) (Policy, decision.Decider, bool) { return Policy{}, nil, false }
+		policy = func(string) ReviewTarget { return ReviewTarget{} }
 	}
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {

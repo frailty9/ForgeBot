@@ -24,6 +24,7 @@ const (
 	RegistrationStatus             RegistrationKind = "status"
 	RegistrationConnectorProviders RegistrationKind = "connector_providers"
 	RegistrationGroupEvents        RegistrationKind = "group_events"
+	RegistrationJoinReview         RegistrationKind = "join_review"
 )
 
 // BuildContext exposes only capabilities prepared earlier in the same
@@ -103,6 +104,7 @@ type ProviderRegistration struct {
 
 type ExtendedRegistrations struct {
 	GroupEvents        []GroupEventRegistration
+	JoinReview         *JoinReviewRegistration
 	Tools              []ToolRegistration
 	Commands           []CommandRegistration
 	Observers          []ObserverRegistration
@@ -117,6 +119,18 @@ type ExtendedRegistrations struct {
 type GroupEventRegistration struct {
 	ID     string
 	Handle func(context.Context, group.Event) (*group.EventReply, error)
+}
+
+// JoinReviewRegistration 只提供各群的审批规则；判断、去重、执行前复核与
+// 调用连接器都由宿主完成，模块不获得审批或任何群操作权限。
+type JoinReviewRegistration struct {
+	Policy func(conversationID string) (group.Policy, bool)
+}
+
+// GroupReferencer 由按逻辑群配置的模块工厂实现，返回 options 中引用的群 ID，
+// 宿主据此拒绝引用未绑定群的配置，避免写错 ID 后功能静默不生效。
+type GroupReferencer interface {
+	ReferencedGroups(json.RawMessage) ([]string, error)
 }
 
 type ExtendedProvider interface {

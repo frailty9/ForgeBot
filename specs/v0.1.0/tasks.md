@@ -242,3 +242,13 @@
 - 开启 `auto_review` 时仍要求至少一种判断（`review_regex` 或模型）。
 - 旧配置残留 `review_enabled` 会因严格解析报未知字段，需手动删除。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 入群审批迁入模块
+
+入群审批是唯一不在 `modules` 下的群级功能，配置方式与欢迎、主动插话不一致。调整为：
+
+- 新增 `native.join_review` 模块：模块启用且群出现在 `options.groups` 中即开启自动审批，删除 `auto_review` 开关。字段去掉 `review_` 前缀（`regex`、`model_enabled`、`rule`、`combine`、`reject_reason`）。
+- 模块只提供各群规则（新注册类型 `join_review`，每代最多一个）；判断、去重、执行前复核与连接器调用仍由宿主 `group.Service` 完成，去重状态跨热更新保留。
+- 删除顶层 `group_management` 及 `group.Policy.AutoReview`；残留的 `group_management` 会被严格解析拒绝。
+- 统一校验：`native.join_review`、`native.welcome`、`native.proactive_reply` 的 `groups` 与 `native.knowledge_reflection` 的 `conversation_ids` 必须引用已绑定的群，关闭的模块同样检查。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。

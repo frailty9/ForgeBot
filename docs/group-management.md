@@ -9,7 +9,7 @@ platforms.connectors[].id = "qq-main"          ← 一个 QQ 账号（OneBot 端
         ↓ connector_id
 platforms.groups[] = {id: "support", connector_id: "qq-main", target: "10001"}
         ↓ 逻辑群 ID "support"（target 10001 是 QQ 群号）
-group_management.support                       ← 入群自动审批
+modules.native.join_review.options.groups.support  ← 入群自动审批
 modules.native.welcome.options.groups.support  ← 新人欢迎
 modules.native.proactive_reply.options.groups.support  ← 主动插话
 administration.administrators[].conversation_id = "support"  ← 可信管理员
@@ -20,7 +20,7 @@ operations.groups[].conversation_id            ← 运维命令与通知（可�
 
 几条约束：
 
-- 逻辑群 ID 必须先出现在 `platforms.groups` 中。`group_management`、`administration` 和 `operations` 引用未绑定的 ID 时配置加载失败；`native.welcome` 与 `native.proactive_reply` 目前不检查，写错的群 ID 只会让该功能静默不生效，请核对拼写。
+- 逻辑群 ID 必须先出现在 `platforms.groups` 中。各模块的 `groups`（入群审批、欢迎、主动插话）、沉淀的 `conversation_ids`，以及 `administration`、`operations` 引用未绑定的 ID 时，配置加载失败并指出是哪个模块的哪个群 ID。模块关闭时也会检查，避免重新开启时才发现写错。
 - `connector_id` 必须指向已启用的连接器；启用的 OneBot 连接器至少要绑定一个群。
 - 同一个连接器与群号的组合不能重复绑定；一个连接器可以绑定多个群。
 - 默认示例 [`runtime.example.json`](../configs/runtime.example.json) 为了能直接在本地运行，只绑定了 Echo 测试群 `local`，QQ 连接器是关闭的。
@@ -58,32 +58,38 @@ operations.groups[].conversation_id            ← 运维命令与通知（可�
 group_store_path: ../data/group-operations.json
 ```
 
-运行配置按逻辑群启用能力，默认全部关闭：
+## 入群自动审批
+
+入群审批由 `native.join_review` 模块按群配置。**模块启用、且群出现在 `options.groups` 中，即表示该群开启自动审批**，没有单独的开关；不想审批某个群，从 `groups` 中删掉它即可。模块关闭或群不在列表中时，Bot 不处理入群申请，全部由管理员在原平台处理。
 
 ```json
 {
-  "group_management": {
-    "support": {
-      "auto_review": false,
-      "review_regex": "\\S",
-      "review_model_enabled": false,
-      "review_rule": "申请内容须说明入群目的，并符合本群主题。",
-      "review_combine": "and",
-      "reject_reason": "请填写符合本群要求的入群申请说明。"
+  "modules": {
+    "native.join_review": {
+      "enabled": true,
+      "options": {
+        "groups": {
+          "support": {
+            "regex": "\\S",
+            "model_enabled": false,
+            "rule": "申请内容须说明入群目的，并符合本群主题。",
+            "combine": "and",
+            "reject_reason": "请填写符合本群要求的入群申请说明。"
+          }
+        }
+      }
     }
   }
 }
 ```
 
-## 入群自动审批
+每个群至少启用一种判断：非空 `regex`、启用模型判断，或两者组合，否则加载配置时报错。模块只提供规则；判断、去重、执行前复核与调用连接器都由宿主完成。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
 
-`auto_review` 是唯一的开关：开启后 Bot 按规则自动同意或拒绝该群的入群申请，关闭时 Bot 不处理入群申请，全部由管理员在原平台处理。开启时至少启用一种判断：非空 `review_regex`、启用模型判断，或两者组合，否则加载配置时报错。自动审批直接使用平台事件中的私有句柄，批准不伪造实际成员入群事件。
+旧配置中顶层的 `group_management`（含 `auto_review`、`review_regex` 等字段）已删除，残留会导致配置加载失败。迁移方法：把 `group_management.<群ID>` 移到 `modules.native.join_review.options.groups.<群ID>`，字段去掉 `review_` 前缀（`review_model_enabled` 改为 `model_enabled`），删掉 `auto_review`，并把模块 `enabled` 设为 `true`。
 
-旧配置中的 `review_enabled` 已并入 `auto_review` 并删除，残留该字段会导致配置加载失败，请直接删掉它。
-
-- `review_regex`：Go regexp 表达式，匹配申请原文；例如 `\S` 要求至少一个非空白字符。不自动去除空白或补锚点，完整匹配可显式使用 `^...$`。最多 4096 字节，无效表达式在加载/热更新时拒绝。
-- `review_model_enabled`：开启后使用共享 `DecideBool(ctx, rule, state)`，判断标准为 `review_rule`（非空，最多 4096 字节）。DM 已配置且启用时使用 DM，否则使用回答 LLM。每次最多一个模型请求，DM 故障直接返回错误，不转调 LLM。
-- `review_combine`：`and`（默认）或 `or`，始终先执行正则。
+- `regex`：Go regexp（RE2）表达式，匹配申请原文；例如 `\S` 要求至少一个非空白字符。不支持前瞻 `(?=...)`、后顾和反向引用。不自动去除空白或补锚点，完整匹配可显式使用 `^...$`。最多 4096 字节，无效表达式在加载/热更新时拒绝。
+- `model_enabled`：开启后使用共享 `DecideBool(ctx, rule, state)`，判断标准为 `rule`（非空，最多 4096 字节）。DM 已配置且启用时使用 DM，否则使用回答 LLM。每次最多一个模型请求，DM 故障直接返回错误，不转调 LLM。
+- `combine`：`and`（默认）或 `or`，始终先执行正则。
 - `reject_reason`：固定拒绝理由，最多 2048 字节；适配器不支持时忽略文本，仍执行拒绝，不额外发送聊天消息。
 
 | 组合 | 正则结果 | 后续行为 |
@@ -95,9 +101,9 @@ group_store_path: ../data/group-operations.json
 
 仅启用一种判断时直接使用该项结果。
 
-注意 `review_regex` 与 `or` 的组合：正则一旦通过就直接同意，不再调用模型。示例里的 `\S` 只要求有任意非空白字符，若配合 `or` 等于几乎全部放行；使用 `or` 时应改成真正反映入群要求的表达式。模型失败、超时或无法判断时均不操作，管理员在原平台查看和处理申请。执行前再次核对当前策略、绑定、暂停和连接器能力，策略改变则放弃旧判断。
+注意 `regex` 与 `or` 的组合：正则一旦通过就直接同意，不再调用模型。示例里的 `\S` 只要求有任意非空白字符，若配合 `or` 等于几乎全部放行；使用 `or` 时应改成真正反映入群要求的表达式。模型失败、超时或无法判断时均不操作，管理员在原平台查看和处理申请。执行前再次核对当前策略、绑定、暂停和连接器能力，策略改变则放弃旧判断。
 
-旧配置省略 `review_model_enabled` 时，非空 `review_rule` 表示启用模型；显式 false 可保留规则文本而关闭模型。上例保留完整参数并关闭功能。纯正则审批只需开启 `auto_review`，保持模型开关为 false；组合审批再将模型开关改为 true。
+省略 `model_enabled` 时，非空 `rule` 表示启用模型；显式 false 可保留规则文本而关闭模型。纯正则审批保持 `model_enabled` 为 false；组合审批再改为 true。
 
 审批不持久化记录，也不提供 Bot 侧人工审批入口。进程内只保留连接器/群/事件 ID 的去重键，最长 24 小时、最多 10000 个；容量耗尽不执行新审批。去重跨热更新保留、重启清空。判断与执行结果写普通日志；网络失败、未知结果不自动重试，管理员可在原平台核实。
 

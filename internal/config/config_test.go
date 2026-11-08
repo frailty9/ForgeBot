@@ -467,13 +467,10 @@ func TestLogConfigValidation(t *testing.T) {
 	}
 }
 
-// review_enabled 已并入 auto_review；旧配置里残留该字段时严格解析直接报错，不会被静默忽略。
-func TestGroupManagementRejectsRemovedReviewEnabled(t *testing.T) {
+// 入群审批已迁到 modules.native.join_review；旧的顶层 group_management 被严格解析拒绝。
+func TestRuntimeRejectsRemovedGroupManagement(t *testing.T) {
 	var runtime RuntimeConfig
-	if err := decodeStrictJSON([]byte(`{"group_management":{"local":{"review_enabled":true,"auto_review":true,"review_regex":"."}}}`), &runtime); err == nil {
-		t.Fatal("removed review_enabled field accepted")
-	}
-	if err := decodeStrictJSON([]byte(`{"group_management":{"local":{"auto_review":true,"review_regex":"."}}}`), &runtime); err != nil {
-		t.Fatal(err)
+	if err := decodeStrictJSON([]byte(`{"group_management":{"local":{"auto_review":true,"review_regex":"."}}}`), &runtime); err == nil {
+		t.Fatal("removed group_management accepted")
 	}
 }

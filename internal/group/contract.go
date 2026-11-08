@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/operation"
 )
 
@@ -73,13 +74,23 @@ type EventReporter interface {
 	GroupEventSupport() (joinRequests, memberJoined bool)
 }
 
+// Policy 是一个群的入群自动审批规则，由 native.join_review 模块按群提供。
+// 模块启用且该群在其配置中即表示开启自动审批，宿主不再另设开关。
 type Policy struct {
-	AutoReview         bool   `json:"auto_review"`
-	ReviewRule         string `json:"review_rule,omitempty"`
-	ReviewRegex        string `json:"review_regex,omitempty"`
-	ReviewModelEnabled *bool  `json:"review_model_enabled,omitempty"`
-	ReviewCombine      string `json:"review_combine,omitempty"`
-	RejectReason       string `json:"reject_reason,omitempty"`
+	ReviewRule         string
+	ReviewRegex        string
+	ReviewModelEnabled *bool
+	ReviewCombine      string
+	RejectReason       string
+}
+
+// ReviewTarget 是宿主对某个逻辑群的审批视图：Bound 表示群已绑定，
+// Enabled 表示审批模块为该群提供了策略；判断仍由宿主执行。
+type ReviewTarget struct {
+	Bound   bool
+	Enabled bool
+	Policy  Policy
+	Decider decision.Decider
 }
 
 type Status string

@@ -47,11 +47,9 @@ func TestConfiguredDMFailureNeverInvokesAnswerLLM(t *testing.T) {
 }
 
 func TestAutomaticReviewWithoutStoreAndDedupAcrossHotUpdate(t *testing.T) {
-	snapshot := testSnapshot()
-	p := group.Policy{AutoReview: true, ReviewRegex: `\S`}
-	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": p}
+	snapshot, registry := joinReviewSnapshot(t, `\S`)
 	port := &groupPort{Sender: registeredSender(t).registry}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, Modules: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,12 +69,12 @@ func TestAutomaticReviewWithoutStoreAndDedupAcrossHotUpdate(t *testing.T) {
 	}
 	next = next.Clone()
 	next.Version++
-	p.ReviewRegex = "changed"
-	next.Runtime.GroupManagement["local"] = p
+	changed, _ := joinReviewSnapshot(t, "changed")
+	next.Runtime.Modules = changed.Runtime.Modules
 	if _, err = manager.Apply(context.Background(), next); err != nil {
 		t.Fatal(err)
 	}
-	previous := snapshot.Runtime.GroupManagement["local"]
+	previous := group.Policy{ReviewRegex: `\S`}
 	err = manager.Review(context.Background(), "local", group.ReviewRequest{ConnectorID: "echo", Reference: "opaque", Approve: true, ExpectedPolicy: &previous})
 	if err == nil || operation.Describe(err).Code != operation.Conflict || port.calls.Load() != 1 {
 		t.Fatal(err, port.calls.Load())

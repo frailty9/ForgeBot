@@ -154,6 +154,15 @@ func validate(options Options, requireConversations bool, catalog conversation.C
 }
 
 func (Factory) ValidateOptions(raw json.RawMessage) error { _, err := parse(raw); return err }
+
+// ReferencedGroups 供宿主核对沉淀所监听的群均已绑定。
+func (Factory) ReferencedGroups(raw json.RawMessage) ([]string, error) {
+	options, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), options.ConversationIDs...), nil
+}
 func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
 	options, err := parse(raw)
 	if err != nil {

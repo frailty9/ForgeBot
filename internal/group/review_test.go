@@ -3,7 +3,6 @@ package group
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -78,9 +77,9 @@ func TestAutomaticReviewCombinationAndShortCircuit(t *testing.T) {
 				}
 				return decision.Result{Answer: decision.Answer{"matches": tc.answer}}, nil
 			})
-			p := Policy{AutoReview: true, ReviewRegex: tc.regex, ReviewRule: "must be allowed", ReviewModelEnabled: boolValue(tc.model), ReviewCombine: tc.combine}
+			p := Policy{ReviewRegex: tc.regex, ReviewRule: "must be allowed", ReviewModelEnabled: boolValue(tc.model), ReviewCombine: tc.combine}
 			port := &reviewActions{}
-			s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, d, true })
+			s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 			result, err := s.HandleEvent(context.Background(), joinEvent())
 			if err != nil || result.Verdict != tc.verdict || calls != tc.calls {
 				t.Fatalf("%+v calls=%d err=%v", result, calls, err)
@@ -103,8 +102,8 @@ func TestReviewRejectReasonAndLogsWithoutPersistence(t *testing.T) {
 	for _, supportsReason := range []bool{true, false} {
 		var logs bytes.Buffer
 		port := &reviewActions{reason: supportsReason}
-		p := Policy{AutoReview: true, ReviewRegex: `\S`, RejectReason: "请填写申请说明"}
-		s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, nil, true }, slog.New(slog.NewJSONHandler(&logs, nil)))
+		p := Policy{ReviewRegex: `\S`, RejectReason: "请填写申请说明"}
+		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p} }, slog.New(slog.NewJSONHandler(&logs, nil)))
 		event := joinEvent()
 		event.Comment = " \t\n"
 		result, err := s.HandleEvent(context.Background(), event)
@@ -131,8 +130,8 @@ func TestReviewConcurrentDuplicatesAndExecutionFailureNeverReplay(t *testing.T) 
 		calls.Add(1)
 		return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
 	})
-	p := Policy{AutoReview: true, ReviewRule: "rule"}
-	s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, d, true })
+	p := Policy{ReviewRule: "rule"}
+	s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 	event := joinEvent()
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -150,7 +149,7 @@ func TestReviewConcurrentDuplicatesAndExecutionFailureNeverReplay(t *testing.T) 
 
 func TestReviewPolicyChangeAndEffectiveEquality(t *testing.T) {
 	for _, changed := range []bool{true, false} {
-		p := Policy{AutoReview: true, ReviewRule: "rule", ReviewModelEnabled: boolValue(true)}
+		p := Policy{ReviewRule: "rule", ReviewModelEnabled: boolValue(true)}
 		port := &reviewActions{}
 		d := reviewDecider(func(context.Context, decision.Request) (decision.Result, error) {
 			p.ReviewModelEnabled = boolValue(true)
@@ -159,7 +158,7 @@ func TestReviewPolicyChangeAndEffectiveEquality(t *testing.T) {
 			}
 			return decision.Result{Answer: decision.Answer{"matches": "yes"}}, nil
 		})
-		s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, d, true })
+		s := New(nil, port, func(string) ReviewTarget { return ReviewTarget{Bound: true, Enabled: true, Policy: p, Decider: d} })
 		result, err := s.HandleEvent(context.Background(), joinEvent())
 		if err != nil {
 			t.Fatal(err)
@@ -204,12 +203,13 @@ func TestReviewDedupExpiryCapacityAndGroupIsolation(t *testing.T) {
 func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
 	for _, mode := range []string{"disabled", "expired", "future", "historical", "canceled", "missing-identity", "missing-model"} {
 		t.Run(mode, func(t *testing.T) {
-			p := Policy{AutoReview: true, ReviewRegex: `\S`}
+			p := Policy{ReviewRegex: `\S`}
+			target := ReviewTarget{Bound: true, Enabled: true}
 			event := joinEvent()
 			ctx := context.Background()
 			switch mode {
 			case "disabled":
-				p.AutoReview = false
+				target.Enabled = false
 			case "expired":
 				event.At = time.Now().Add(-25 * time.Hour)
 			case "future":
@@ -227,7 +227,8 @@ func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
 				p.ReviewRule = "rule"
 			}
 			port := &reviewActions{}
-			s := New(nil, port, func(string) (Policy, decision.Decider, bool) { return p, nil, true })
+			target.Policy = p
+			s := New(nil, port, func(string) ReviewTarget { return target })
 			_, _ = s.HandleEvent(ctx, event)
 			if len(port.requests) != 0 {
 				t.Fatal(port.requests)
@@ -237,18 +238,17 @@ func TestReviewDisabledExpiredAndCanceledDoNotAct(t *testing.T) {
 }
 
 func TestPolicyValidationLegacyDefaultsAndExplicitDisable(t *testing.T) {
-	for _, raw := range []string{
-		`{"auto_review":true,"review_regex":"["}`,
-		`{"auto_review":true}`,
-		`{"review_combine":"other"}`,
-		`{"review_model_enabled":true}`,
+	for _, p := range []Policy{
+		{ReviewRegex: "["},
+		{},
+		{ReviewRegex: `\S`, ReviewCombine: "other"},
+		{ReviewModelEnabled: boolValue(true)},
 	} {
-		var p Policy
-		if err := json.Unmarshal([]byte(raw), &p); err == nil && p.Validate() == nil {
-			t.Fatal("invalid policy accepted", raw)
+		if p.Validate() == nil {
+			t.Fatalf("invalid policy accepted: %+v", p)
 		}
 	}
-	legacy := Policy{AutoReview: true, ReviewRule: "rule"}
+	legacy := Policy{ReviewRule: "rule"}
 	if err := legacy.Validate(); err != nil || !legacy.ModelEnabled() || legacy.Combine() != "and" {
 		t.Fatal(legacy, err)
 	}

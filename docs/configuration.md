@@ -755,8 +755,8 @@ Invoke-RestMethod `
 
 ## 入群自动审批
 
-`group_management.<逻辑群ID>` 用 `auto_review` 一个开关控制入群自动审批，默认关闭。`review_regex` 是可选 Go 正则（最多 4096 字节），`review_model_enabled` 控制是否使用共享模型决策，`review_rule` 为模型判断标准（最多 4096 字节），`review_combine` 为 `and`（默认）或 `or`，`reject_reason` 是最多 2048 字节的固定拒绝理由。
+入群自动审批由 `modules.native.join_review` 按群配置：模块启用且群出现在 `options.groups` 中即开启，默认关闭。每个群可设 `regex`（可选 Go 正则，RE2 语法，最多 4096 字节）、`model_enabled`（是否使用共享模型决策）、`rule`（模型判断标准，最多 4096 字节）、`combine`（`and` 默认或 `or`）与 `reject_reason`（最多 2048 字节的固定拒绝理由）。顶层 `group_management` 已删除。
 
-正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `review_rule` 沿用启用模型的旧配置语义；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
+正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
 
 单次工具结果默认 64 KiB，包含 JSON 信封和转义开销，可容纳默认 12000 字符的正常中文检索上下文。字符数不等于字节数；显式更小预算或自定义更大检索输出仍可能得到 `budget_exhausted`。

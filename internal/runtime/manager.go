@@ -115,7 +115,7 @@ type Builder struct {
 // Build constructs a complete bot engine and its configured dependencies.
 func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engine, error) {
 	snapshot = snapshot.Clone()
-	if err := b.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+	if err := b.Modules.ValidateRuntime(snapshot.Runtime.Modules, snapshot.Runtime.Platforms); err != nil {
 		return nil, err
 	}
 	client, err := b.buildClient(ctx, snapshot, "", "")
@@ -402,7 +402,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 		}
 	}
 	snapshot = snapshot.Clone()
-	if err := m.builder.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+	if err := m.builder.Modules.ValidateRuntime(snapshot.Runtime.Modules, snapshot.Runtime.Platforms); err != nil {
 		return nil, err
 	}
 	client, err := m.builder.buildClient(ctx, snapshot, secretRef, secretValue)
@@ -695,7 +695,7 @@ func (m *Manager) watchConnectorErrors(generation *generation) {
 // Apply builds a candidate generation and swaps it in atomically after success.
 func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyResult, error) {
 	snapshot = snapshot.Clone()
-	if err := m.builder.Modules.Validate(snapshot.Runtime.Modules); err != nil {
+	if err := m.builder.Modules.ValidateRuntime(snapshot.Runtime.Modules, snapshot.Runtime.Platforms); err != nil {
 		return ApplyResult{}, err
 	}
 	m.applyMu.Lock()
@@ -736,7 +736,7 @@ func (m *Manager) Apply(ctx context.Context, snapshot config.Snapshot) (ApplyRes
 // after persistence returns the matching, monotonically newer snapshot.
 func (m *Manager) CommitRuntime(ctx context.Context, runtimeConfig config.RuntimeConfig, persist Persist) (ApplyResult, error) {
 	runtimeConfig = runtimeConfig.Clone()
-	if err := m.builder.Modules.Validate(runtimeConfig.Modules); err != nil {
+	if err := m.builder.Modules.ValidateRuntime(runtimeConfig.Modules, runtimeConfig.Platforms); err != nil {
 		return ApplyResult{}, operation.Wrap("config.validate", operation.Invalid, operation.NotStarted, err)
 	}
 	if persist == nil {

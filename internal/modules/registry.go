@@ -17,6 +17,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -94,7 +95,7 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 		switch kind {
 		case RegistrationTools, RegistrationCommands, RegistrationObservers,
 			RegistrationParticipants, RegistrationJobs, RegistrationStatus,
-			RegistrationConnectorProviders, RegistrationGroupEvents:
+			RegistrationConnectorProviders, RegistrationGroupEvents, RegistrationJoinReview:
 		default:
 			return fmt.Errorf("unsupported registration kind %q", kind)
 		}
@@ -189,6 +190,35 @@ func (r *Registry) Validate(entries map[string]config.ModuleConfig) error {
 	return nil
 }
 
+// ValidateRuntime 在模块自身校验之外，检查按逻辑群配置的模块只引用已绑定的群。
+// 关闭的模块同样检查，避免重新开启时才发现写错的群 ID。
+func (r *Registry) ValidateRuntime(entries map[string]config.ModuleConfig, platforms config.PlatformConfig) error {
+	if err := r.Validate(entries); err != nil {
+		return err
+	}
+	bound := make(map[string]bool, len(platforms.Groups))
+	for _, binding := range platforms.Groups {
+		bound[binding.ID] = true
+	}
+	for _, id := range r.ids() {
+		referencer, ok := r.entries[id].factory.(GroupReferencer)
+		cfg, configured := entries[id]
+		if !ok || !configured {
+			continue
+		}
+		groups, err := referencer.ReferencedGroups(slices.Clone(cfg.Options))
+		if err != nil {
+			return fmt.Errorf("module %s: %w", id, err)
+		}
+		for _, conversationID := range groups {
+			if !bound[conversationID] {
+				return fmt.Errorf("module %s references unbound group %q; add it to platforms.groups first", id, conversationID)
+			}
+		}
+	}
+	return nil
+}
+
 func enabled(entry entry, cfg config.ModuleConfig) bool {
 	if cfg.Enabled != nil {
 		return *cfg.Enabled
@@ -221,6 +251,7 @@ type Status struct {
 }
 type Set struct {
 	groupEvents        []GroupEventRegistration
+	joinReview         *JoinReviewRegistration
 	chain              *hooks.Chain
 	capabilities       capability.Values
 	tools              []ToolRegistration
@@ -397,6 +428,12 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 				set.commands = append(set.commands, extra.Commands...)
 				set.observers = append(set.observers, extra.Observers...)
 				set.participants = append(set.participants, extra.Participants...)
+				if extra.JoinReview != nil {
+					if set.joinReview != nil {
+						return nil, errors.New("only one module may provide join review")
+					}
+					set.joinReview = extra.JoinReview
+				}
 				for _, registration := range extra.GroupEvents {
 					registration.ID = id + "/" + registration.ID
 					set.groupEvents = append(set.groupEvents, registration)
@@ -447,6 +484,9 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 	allowed := make(map[RegistrationKind]bool, len(descriptor.Registrations))
 	for _, kind := range descriptor.Registrations {
 		allowed[kind] = true
+	}
+	if registrations.JoinReview != nil && (!allowed[RegistrationJoinReview] || registrations.JoinReview.Policy == nil) {
+		return errors.New("returned undeclared or invalid join review registration")
 	}
 	if len(registrations.GroupEvents) > 0 && !allowed[RegistrationGroupEvents] {
 		return errors.New("returned undeclared group event registrations")
@@ -546,8 +586,17 @@ func (s *Set) ToolBudgets() map[string]int {
 	}
 	return result
 }
-func (s *Set) Commands() []CommandRegistration         { return slices.Clone(s.commands) }
-func (s *Set) GroupEvents() []GroupEventRegistration   { return slices.Clone(s.groupEvents) }
+func (s *Set) Commands() []CommandRegistration       { return slices.Clone(s.commands) }
+func (s *Set) GroupEvents() []GroupEventRegistration { return slices.Clone(s.groupEvents) }
+
+// JoinReviewPolicy 返回本运行代审批模块为该群提供的规则；模块未启用或群不在
+// 其配置中时返回 false，表示宿主不处理该群的入群申请。
+func (s *Set) JoinReviewPolicy(conversationID string) (group.Policy, bool) {
+	if s == nil || s.joinReview == nil {
+		return group.Policy{}, false
+	}
+	return s.joinReview.Policy(conversationID)
+}
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
 func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
 func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }

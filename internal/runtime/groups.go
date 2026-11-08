@@ -4,23 +4,25 @@ import (
 	"context"
 	"time"
 
-	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/operation"
 )
 
-func (m *Manager) groupPolicy(id string) (group.Policy, decision.Decider, bool) {
+// groupPolicy 每次从当前运行代读取：群是否绑定来自 platforms.groups，
+// 审批规则来自 native.join_review 模块，决策服务来自本代共享实例。
+func (m *Manager) groupPolicy(id string) group.ReviewTarget {
 	g := m.acquire()
 	if g == nil {
-		return group.Policy{}, nil, false
+		return group.ReviewTarget{}
 	}
 	defer g.mu.RUnlock()
 	for _, binding := range g.snapshot.Runtime.Platforms.Groups {
 		if binding.ID == id {
-			return g.snapshot.Runtime.GroupManagement[id], g.decisions, true
+			policy, enabled := g.modules.JoinReviewPolicy(id)
+			return group.ReviewTarget{Bound: true, Enabled: enabled, Policy: policy, Decider: g.decisions}
 		}
 	}
-	return group.Policy{}, nil, false
+	return group.ReviewTarget{}
 }
 func (m *Manager) HandleGroupEvent(ctx context.Context, event group.Event) (group.EventResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -119,11 +121,11 @@ func (m *Manager) groupAction(ctx context.Context, id, connectorID, kind string,
 	if !bound {
 		return operation.New(operation.Conflict, "conversation binding changed")
 	}
-	policy := g.snapshot.Runtime.GroupManagement[id]
-	if expected != nil && !policy.Equal(*expected) {
+	policy, enabled := g.modules.JoinReviewPolicy(id)
+	if expected != nil && (!enabled || !policy.Equal(*expected)) {
 		return operation.New(operation.Conflict, "group review policy changed")
 	}
-	if kind == "review" && !policy.AutoReview {
+	if kind == "review" && !enabled {
 		return operation.New(operation.Disabled, "group operation disabled by current configuration")
 	}
 	if m.Paused() {

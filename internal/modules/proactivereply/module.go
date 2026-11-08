@@ -145,6 +145,19 @@ func (Factory) ValidateOptions(raw json.RawMessage) error {
 	return err
 }
 
+// ReferencedGroups 供宿主核对主动插话配置的群均已绑定。
+func (Factory) ReferencedGroups(raw json.RawMessage) ([]string, error) {
+	options, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(options.Groups))
+	for id := range options.Groups {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
 	options, err := parse(raw)
 	if err != nil {

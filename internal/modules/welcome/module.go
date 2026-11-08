@@ -54,6 +54,19 @@ func parse(raw json.RawMessage) (Options, error) {
 }
 func (Factory) ValidateOptions(raw json.RawMessage) error      { _, err := parse(raw); return err }
 func (Factory) PublicOptions(raw json.RawMessage) (any, error) { return parse(raw) }
+
+// ReferencedGroups 供宿主核对欢迎模板引用的群均已绑定。
+func (Factory) ReferencedGroups(raw json.RawMessage) ([]string, error) {
+	options, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(options.Groups))
+	for id := range options.Groups {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
 func (Factory) Build(_ context.Context, raw json.RawMessage) (modules.Instance, error) {
 	options, err := parse(raw)
 	if err != nil {

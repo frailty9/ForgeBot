@@ -33,18 +33,22 @@
       {"id": "ops", "connector_id": "qq-main", "target": "10002"}
     ]
   },
-  "group_management": {
-    "support": {
-      "auto_review": true,
-      "review_regex": "^.{4,}$",
-      "review_model_enabled": false,
-      "review_rule": "申请内容须说明入群目的，并符合本群主题。",
-      "review_combine": "and",
-      "reject_reason": "请填写至少 4 个字的入群申请说明。"
-    }
-  },
   "modules": {
     "native.onebot": {"enabled": true, "options": {}},
+    "native.join_review": {
+      "enabled": true,
+      "options": {
+        "groups": {
+          "support": {
+            "regex": "^.{4,}$",
+            "model_enabled": false,
+            "rule": "申请内容须说明入群目的，并符合本群主题。",
+            "combine": "and",
+            "reject_reason": "请填写至少 4 个字的入群申请说明。"
+          }
+        }
+      }
+    },
     "native.welcome": {
       "enabled": true,
       "options": {

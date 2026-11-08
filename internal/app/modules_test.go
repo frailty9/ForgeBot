@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/config"
@@ -74,8 +75,13 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 			t.Fatal(result)
 		}
 		_, status := root.runtime.Snapshot()
-		if len(status.Modules) != 7 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled || status.Modules[2].Enabled || status.Modules[3].Enabled || status.Modules[4].Enabled || status.Modules[5].Enabled || status.Modules[6].Enabled {
+		if len(status.Modules) != 8 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled {
 			t.Fatal(status.Modules)
+		}
+		for _, module := range status.Modules[2:] {
+			if module.Enabled {
+				t.Fatal("optional module unexpectedly enabled", status.Modules)
+			}
 		}
 		if err := root.runtime.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
@@ -115,7 +121,34 @@ func TestOneBotExampleBindsGroupsEndToEnd(t *testing.T) {
 	if bound["support"] != "qq-main" || bound["ops"] != "qq-main" {
 		t.Fatalf("example groups not bound to qq-main: %v", bound)
 	}
-	if !cfg.Runtime.GroupManagement["support"].AutoReview {
+	if entry := cfg.Runtime.Modules["native.join_review"]; entry.Enabled == nil || !*entry.Enabled || !strings.Contains(string(entry.Options), `"support"`) {
 		t.Fatal("example should show join review enabled on the support group")
+	}
+	if err := registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms); err != nil {
+		t.Fatal("example references an unbound group", err)
+	}
+}
+
+// 按逻辑群配置的模块引用未绑定的群 ID 时，运行时校验直接拒绝，避免功能静默不生效。
+func TestModulesRejectUnboundGroupReferences(t *testing.T) {
+	registry, err := NativeModules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	platforms := config.PlatformConfig{Groups: []config.GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}}}
+	for id, options := range map[string]string{
+		"native.join_review":          `{"groups":{"ghost":{"regex":"."}}}`,
+		"native.welcome":              `{"groups":{"ghost":{"enabled":true,"text":"hi"}}}`,
+		"native.proactive_reply":      `{"groups":{"ghost":{"enabled":true}}}`,
+		"native.knowledge_reflection": `{"conversation_ids":["ghost"]}`,
+	} {
+		entries := map[string]config.ModuleConfig{id: {Options: json.RawMessage(options)}}
+		if err := registry.ValidateRuntime(entries, platforms); err == nil || !strings.Contains(err.Error(), "ghost") {
+			t.Fatalf("%s accepted unbound group: %v", id, err)
+		}
+		bound := strings.ReplaceAll(options, "ghost", "local")
+		if err := registry.ValidateRuntime(map[string]config.ModuleConfig{id: {Options: json.RawMessage(bound)}}, platforms); err != nil {
+			t.Fatalf("%s rejected bound group: %v", id, err)
+		}
 	}
 }

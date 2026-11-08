@@ -189,7 +189,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 	add("runtime_config", nil, "配置结构有效；未启动连接器、MCP 或 Bot")
 	registry, registryErr := app.NativeModules()
 	if registryErr == nil {
-		registryErr = registry.Validate(cfg.Runtime.Modules)
+		registryErr = registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms)
 	}
 	add("native_module_options", registryErr, "使用正式模块工厂校验配置，未构建索引或后台任务")
 	if registryErr == nil {

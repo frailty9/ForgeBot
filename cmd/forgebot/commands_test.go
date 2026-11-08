@@ -16,8 +16,8 @@ import (
 	"github.com/soleapi/forgebot/internal/app"
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
-	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
+	"github.com/soleapi/forgebot/internal/modules/joinreview"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -74,9 +74,9 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	}
 	approvalConfig := cfg.Clone()
 	approvalConfig.Static.GroupStorePath = ""
-	approvalConfig.Runtime.GroupManagement = map[string]group.Policy{
-		approvalConfig.Runtime.Platforms.Groups[0].ID: {AutoReview: true, ReviewRegex: `\S`},
-	}
+	on := true
+	reviewOptions, _ := json.Marshal(map[string]any{"groups": map[string]any{approvalConfig.Runtime.Platforms.Groups[0].ID: map[string]any{"regex": `\S`}}})
+	approvalConfig.Runtime.Modules = map[string]config.ModuleConfig{joinreview.ID: {Enabled: &on, Options: reviewOptions}}
 	var approvalOutput bytes.Buffer
 	if err = doctor(approvalConfig, false, false, &approvalOutput); err != nil {
 		t.Fatal("automatic approval incorrectly requires an operation store", approvalOutput.String(), err)

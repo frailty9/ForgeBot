@@ -13,6 +13,7 @@ import (
 	groupfile "github.com/soleapi/forgebot/internal/group/filestore"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/modules"
+	"github.com/soleapi/forgebot/internal/modules/joinreview"
 	"github.com/soleapi/forgebot/internal/modules/welcome"
 	"github.com/soleapi/forgebot/internal/platform"
 )
@@ -77,15 +78,24 @@ func (p *groupPort) Review(context.Context, string, group.ReviewRequest) error {
 	return nil
 }
 
-func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
+// joinReviewSnapshot 在 local 群上启用 native.join_review，返回快照与对应的模块注册表。
+func joinReviewSnapshot(t *testing.T, regex string) (config.Snapshot, *modules.Registry) {
+	t.Helper()
 	snapshot := testSnapshot()
-	snapshot.Runtime.GroupManagement = map[string]group.Policy{"local": {AutoReview: true, ReviewRegex: `\S`}}
+	on := true
+	options, _ := json.Marshal(map[string]any{"groups": map[string]any{"local": map[string]any{"regex": regex}}})
+	snapshot.Runtime.Modules = map[string]config.ModuleConfig{joinreview.ID: {Enabled: &on, Options: options}}
+	return snapshot, moduleRegistry(t, joinreview.Factory{})
+}
+
+func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
+	snapshot, registry := joinReviewSnapshot(t, `\S`)
 	store, err := groupfile.Open(filepath.Join(t.TempDir(), "groups.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := &groupPort{Sender: registeredSender(t).registry}
-	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, GroupStore: store})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, GroupStore: store, Modules: registry})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,16 +12,6 @@
     "llm_timeout": "8s",
     "max_concurrent": 16
   },
-  "group_management": {
-    "local": {
-      "auto_review": false,
-      "review_regex": "\\S",
-      "review_model_enabled": false,
-      "review_rule": "申请内容须说明入群目的，并符合本群主题。",
-      "review_combine": "and",
-      "reject_reason": "请填写符合本群要求的入群申请说明。"
-    }
-  },
   "conversation_memory": {
     "disabled": true,
     "ttl": "20m",
@@ -97,6 +87,20 @@
         "max_file_bytes": 4194304,
         "max_total_bytes": 268435456,
         "max_files": 10000
+      }
+    },
+    "native.join_review": {
+      "enabled": false,
+      "options": {
+        "groups": {
+          "local": {
+            "regex": "\\S",
+            "model_enabled": false,
+            "rule": "申请内容须说明入群目的，并符合本群主题。",
+            "combine": "and",
+            "reject_reason": "请填写符合本群要求的入群申请说明。"
+          }
+        }
       }
     },
     "native.welcome": {

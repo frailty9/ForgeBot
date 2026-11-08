@@ -43,14 +43,15 @@ func (s *Service) HandleEvent(ctx context.Context, event Event) (result EventRes
 	if err := ctx.Err(); err != nil {
 		return EventResult{}, err
 	}
-	policy, decider, bound := s.policy(event.ConversationID)
-	if !bound {
+	target := s.policy(event.ConversationID)
+	if !target.Bound {
 		return EventResult{}, operation.New(operation.NotFound, "conversation is not bound")
 	}
+	policy, decider := target.Policy, target.Decider
 	if event.Kind != JoinRequested || event.Self || event.Historical {
 		return EventResult{Verdict: "ignored"}, nil
 	}
-	if !policy.AutoReview {
+	if !target.Enabled {
 		return EventResult{Verdict: "disabled"}, nil
 	}
 	if err := policy.Validate(); err != nil {
@@ -87,8 +88,7 @@ func (s *Service) HandleEvent(ctx context.Context, event Event) (result EventRes
 		}
 		return EventResult{Accepted: true, Verdict: "undecided"}, nil
 	}
-	current, _, bound := s.policy(event.ConversationID)
-	if !bound || !current.Equal(policy) {
+	if current := s.policy(event.ConversationID); !current.Bound || !current.Enabled || !current.Policy.Equal(policy) {
 		return EventResult{Accepted: true, Verdict: "policy_changed"}, nil
 	}
 	if err := ctx.Err(); err != nil {

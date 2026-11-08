@@ -16,7 +16,6 @@ import (
 
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/conversation"
-	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
@@ -89,7 +88,6 @@ func (c StorageConfig) Kind() string {
 
 // RuntimeConfig contains hot-reloadable application behavior.
 type RuntimeConfig struct {
-	GroupManagement    map[string]group.Policy   `json:"group_management,omitempty"`
 	Decision           DecisionConfig            `json:"decision"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
 	Agent              agent.Limits              `json:"agent"`
@@ -684,18 +682,6 @@ func (c StaticConfig) Validate() error {
 
 func (c RuntimeConfig) Validate() error {
 	var problems []string
-	bound := map[string]bool{}
-	for _, binding := range c.Platforms.Groups {
-		bound[binding.ID] = true
-	}
-	for id, policy := range c.GroupManagement {
-		if !bound[id] {
-			problems = append(problems, "group_management must reference a bound conversation")
-		}
-		if err := policy.Validate(); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
 	if err := c.Decision.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -1035,7 +1021,6 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 			"log":                 c.Static.Log,
 		},
 		"runtime": map[string]any{
-			"group_management":    c.Runtime.GroupManagement,
 			"decision":            c.Runtime.Decision.Public(),
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
 			"agent":               c.Runtime.Agent.Defaults(),

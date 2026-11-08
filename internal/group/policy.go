@@ -45,7 +45,7 @@ func (p Policy) Validate() error {
 	if p.ModelEnabled() && strings.TrimSpace(p.ReviewRule) == "" {
 		return fmt.Errorf("group model review requires a nonblank review_rule")
 	}
-	if p.AutoReview && p.ReviewRegex == "" && !p.ModelEnabled() {
+	if p.ReviewRegex == "" && !p.ModelEnabled() {
 		return fmt.Errorf("automatic group review requires review_regex or model review")
 	}
 	return nil
