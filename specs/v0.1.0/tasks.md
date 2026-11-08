@@ -294,3 +294,11 @@
 - 删除 `group_store_path`、`group.Store/Record/Status`、`group/filestore`、`Backend.GroupOperations`、`GET /v1/admin/groups/operations` 和 doctor 的 `group_store` 检查。旧配置里残留 `group_store_path` 会在严格解析时报未知字段，需要手动删除这一行。
 - 入群审批原本就不依赖该仓储，行为不变。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./... -count=1 通过。
+
+## 2026-11-08 欢迎语 {user} 取到用户 ID
+
+真实验收中欢迎语的 `{user}` 显示成了用户 ID。原因：OneBot 的 `group_increase` 通知只带 `user_id`，适配器没有昵称来源，模块只能退回 ID。处理：
+
+- OneBot 适配器收到非 Bot 自身的入群事件后，调用 `get_group_member_info` 查询新成员，优先取群名片，其次昵称，填入事件的 `UserName`。
+- 查询带 3 秒超时；失败或超时只记 DEBUG 日志，`{user}` 退回用户 ID，欢迎语照常发送。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；相关包 -race 通过。

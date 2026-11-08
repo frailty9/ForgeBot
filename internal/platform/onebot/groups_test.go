@@ -141,6 +141,50 @@ func TestJoinRequestDebugLogShowsCommentButNeverFlag(t *testing.T) {
 	}
 }
 
+// 入群通知只带 user_id；适配器查询群名片，其次昵称，查询失败时留空由欢迎语退回用户 ID。
+func TestMemberJoinedResolvesDisplayName(t *testing.T) {
+	cases := []struct {
+		name, response, want string
+	}{
+		{"card", `{"status":"ok","retcode":0,"data":{"card":"小明","nickname":"nick"}}`, "小明"},
+		{"nickname", `{"status":"ok","retcode":0,"data":{"card":"","nickname":"nick"}}`, "nick"},
+		{"failed", `{"status":"failed","retcode":1200}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var asked map[string]any
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/get_group_member_info" {
+					t.Errorf("unexpected API %s", r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&asked)
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer api.Close()
+			a, err := New(testConfig(api.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := &groupEventRecorder{}
+			body := mustJSON(t, map[string]any{
+				"post_type": "notice", "notice_type": "group_increase", "sub_type": "approve",
+				"group_id": 8, "user_id": 7, "self_id": 99, "time": time.Now().Unix(),
+			})
+			rr := httptest.NewRecorder()
+			a.webhook(recorder)(rr, httptest.NewRequest(http.MethodPost, "/onebot", bytes.NewReader(body)))
+			if rr.Code != http.StatusOK || len(recorder.events) != 1 {
+				t.Fatalf("status=%d events=%d", rr.Code, len(recorder.events))
+			}
+			if got := recorder.events[0].UserName; got != tc.want {
+				t.Fatalf("UserName = %q, want %q", got, tc.want)
+			}
+			if asked["group_id"] != float64(8) || asked["user_id"] != float64(7) {
+				t.Fatal("unexpected member lookup payload", asked)
+			}
+		})
+	}
+}
+
 // QQ 把验证问题拼成“问题：…\n答案：…”；适配器只交出答案，其余内容原样保留。
 func TestJoinAnswerExtractsOnlyTheApplicantAnswer(t *testing.T) {
 	for _, tc := range []struct{ name, comment, want string }{

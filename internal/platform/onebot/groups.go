@@ -88,6 +88,26 @@ func (s *Sender) ReviewGroupRequest(ctx context.Context, target string, request 
 	return s.groupAPI(ctx, "set_group_add_request", payload, nil)
 }
 
+// memberName 查询新成员的群名片或昵称；入群通知本身只带 user_id。失败时返回空串，
+// 欢迎语的 {user} 随之退回用户 ID，不因查询失败而不欢迎。
+func (s *Sender) memberName(ctx context.Context, target, user string) string {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var info struct {
+		Card     string `json:"card"`
+		Nickname string `json:"nickname"`
+	}
+	payload := map[string]any{"group_id": numericOrString(target), "user_id": numericOrString(user), "no_cache": true}
+	if err := s.groupAPI(ctx, "get_group_member_info", payload, &info); err != nil {
+		s.logger.DebugContext(ctx, "onebot member name lookup failed", "group_id", target, "user_id", user, "err", err)
+		return ""
+	}
+	if name := strings.TrimSpace(info.Card); name != "" {
+		return name
+	}
+	return strings.TrimSpace(info.Nickname)
+}
+
 func (s *Sender) groupAPI(ctx context.Context, action string, payload any, out any) error {
 	if err := ctx.Err(); err != nil {
 		return operation.Wrap("onebot."+action, operation.Canceled, operation.NotStarted, err)

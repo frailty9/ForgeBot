@@ -215,6 +215,9 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 				writeResponse(w, http.StatusOK, map[string]string{"status": "ok", "retcode": "0"})
 				return
 			}
+			if normalized.Kind == group.MemberJoined && !normalized.Self {
+				normalized.UserName = a.sender.memberName(r.Context(), scalar(event.GroupID), normalized.UserID)
+			}
 			result, eventErr := consumer.HandleGroupEvent(context.WithoutCancel(r.Context()), normalized)
 			if eventErr != nil {
 				a.logger.Error("onebot group event failed", "err", eventErr, "kind", normalized.Kind, "conversation_id", normalized.ConversationID)
