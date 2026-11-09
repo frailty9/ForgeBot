@@ -358,3 +358,7 @@ OneBot 支持的消息段远多于 `text`/`at`，宿主自己维护一套受限�
 - 已知限制：Bot 发出的消息没有平台消息 ID（发送接口不返回），所以“管理员直接引用 Bot 的回复”仍判断不了。
 - 后续：知识沉淀重构时改为订阅“新消息进入”，问题内容先查容器、已滑出的用引用原文，去掉现有的 24 小时候选问题缓冲，届时再并掉 `Observers`。本次不动。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；-race 通过。
+
+## 2026-11-09 decision.dm.provider 改名为 protocol
+
+`jev` 指的是 System One 这套接口格式（独立的 `/v1/systemone` 请求和 choice 结果），不是供应商；具体服务由 `endpoint` 决定，本地配置就是把 `jev` 指向了自己的端点。`provider` 还会和“连接器提供者”混淆，也与 `llm.protocol` 的写法不一致。字段改名为 `decision.dm.protocol`，校验仍只接受 `jev`，错误信息改为 `decision.dm.protocol must be jev`。旧的 `provider` 键因严格解析报未知字段，需改名，不做兼容。示例配置、本地配置和 `configuration.md` 同步；文档里的 DM 示例补上了缺省关闭后必须写的 `"enabled": true`。

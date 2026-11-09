@@ -41,7 +41,7 @@ func TestExampleDeclaresEveryNativeModule(t *testing.T) {
 			t.Errorf("optional example module %s should be disabled", id)
 		}
 	}
-	if dm := cfg.Runtime.Decision.DM; dm == nil || dm.Enabled || dm.Provider == "" || dm.Endpoint == "" || dm.Model == "" || dm.APIKeyRef == "" || dm.MinConfidence == nil {
+	if dm := cfg.Runtime.Decision.DM; dm == nil || dm.Enabled || dm.Protocol == "" || dm.Endpoint == "" || dm.Model == "" || dm.APIKeyRef == "" || dm.MinConfidence == nil {
 		t.Fatal("example must declare complete disabled DM configuration")
 	}
 	// 完整示例关闭的 DM 不得使构建访问供应商。

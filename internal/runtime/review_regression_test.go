@@ -20,7 +20,7 @@ func TestConfiguredDMFailureNeverInvokesAnswerLLM(t *testing.T) {
 		dmCalls, llmCalls := 0, 0
 		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { dmCalls++; w.WriteHeader(http.StatusServiceUnavailable) }))
 		snapshot := testSnapshot()
-		snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Enabled: true, Provider: "jev", Endpoint: api.URL, APIKeyRef: "dm/key"}
+		snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Enabled: true, Protocol: "jev", Endpoint: api.URL, APIKeyRef: "dm/key"}
 		client := moduleClient(func(context.Context, llm.Request) (llm.Response, error) {
 			llmCalls++
 			return llm.Response{Text: `{"matches":"yes"}`}, nil

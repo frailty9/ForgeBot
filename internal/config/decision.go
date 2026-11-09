@@ -18,7 +18,7 @@ type DecisionModelConfig struct {
 	// Enabled 缺省 false：写出 dm 对象只是保留供应商参数，必须显式 enabled=true 才加载 DM；
 	// 未启用时直接使用 LLM，不解析 DM 凭据、不发 DM 请求。
 	Enabled       bool     `json:"enabled"`
-	Provider      string   `json:"provider"`
+	Protocol      string   `json:"protocol"`
 	Endpoint      string   `json:"endpoint"`
 	Model         string   `json:"model"`
 	APIKeyRef     string   `json:"api_key_ref"`
@@ -58,8 +58,8 @@ func (c DecisionConfig) Validate() error {
 		return nil
 	}
 	dm := c.DM
-	if dm.Provider != "jev" {
-		return fmt.Errorf("decision.dm.provider must be jev")
+	if dm.Protocol != "jev" {
+		return fmt.Errorf("decision.dm.protocol must be jev")
 	}
 	if strings.TrimSpace(dm.APIKeyRef) == "" {
 		return fmt.Errorf("decision.dm.api_key_ref is required")
@@ -80,7 +80,7 @@ func (c DecisionConfig) Public() map[string]any {
 	dmTimeout, llmTimeout, _ := c.Timeouts()
 	result := map[string]any{"dm_timeout": dmTimeout.String(), "llm_timeout": llmTimeout.String(), "max_concurrent": c.MaxConcurrent}
 	if c.DM != nil {
-		result["dm"] = map[string]any{"enabled": c.DM.Enabled, "provider": c.DM.Provider, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
+		result["dm"] = map[string]any{"enabled": c.DM.Enabled, "protocol": c.DM.Protocol, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
 	}
 	return result
 }

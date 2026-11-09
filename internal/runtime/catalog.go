@@ -57,7 +57,7 @@ func (m *Manager) Capabilities(ctx context.Context) catalog.Snapshot {
 	decisionSource := "llm"
 	dmConfigured := configured
 	if dm := g.snapshot.Runtime.Decision.DM; g.snapshot.Runtime.Decision.DMEnabled() {
-		decisionSource = dm.Provider
+		decisionSource = dm.Protocol
 		dmConfigured = m.credentialConfigured(ctx, dm.APIKeyRef)
 	}
 	result.Entries = append(result.Entries, catalog.Entry{ID: "decision", Kind: "decision", Source: decisionSource, Enabled: true, Configured: dmConfigured, Loaded: g.decisions != nil, Health: "not_probed", Documentation: "docs/decision-service.md"})

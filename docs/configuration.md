@@ -214,7 +214,8 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
 {
   "decision": {
     "dm": {
-      "provider": "jev",
+      "enabled": true,
+      "protocol": "jev",
       "endpoint": "https://api.typesafe.ai",
       "model": "jev-latest",
       "api_key_ref": "decision/default",
@@ -223,6 +224,8 @@ LLM 配置可热切换协议、供应商地址和模型。新配置初始化失�
   }
 }
 ```
+
+`protocol` 选的是接口格式，目前只支持 `jev`（TypeSafe System One 的 `/v1/systemone` 请求和 choice 结果格式，与 `llm.protocol` 同类）；具体是哪家服务由 `endpoint` 决定，所以兼容这套格式的服务只需改 `endpoint`。旧版的 `provider` 键已改名为 `protocol`，残留会报未知字段。
 
 DM Key 与回答 Key 一样存入加密凭据仓储。配置 DM 后可以通过受认证的 `GET/PUT/DELETE /v1/admin/decision/api-key` 查看状态、写入或删除，PUT 格式为 `{"api_key":"..."}`；GET 不返回明文。缺少 DM Key、DM 超时或结构无效时直接返回错误，不改用 LLM；合法 unknown 或低置信也不换模型争取肯定结果。当前 Jev 适配不启用图片资产，选用 DM 时含图决策返回 unsupported，主动插话因此保持沉默。
 
