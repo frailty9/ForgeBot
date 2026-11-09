@@ -11,12 +11,20 @@ import (
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/decision"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	"github.com/soleapi/forgebot/internal/modules/proactivereply"
 	"github.com/soleapi/forgebot/internal/proactive"
 )
+
+// withHistory 提供宿主在生产环境中总会提供的核心近期消息容器。
+func withHistory(values capability.Values) capability.Values {
+	window := history.New(history.Policy{}, []string{"support", "g"}, nil)
+	_ = values.Provide(history.ReaderKey.ID(), history.Reader(window))
+	return values
+}
 
 func build(t *testing.T, raw string) *modules.Set {
 	t.Helper()
@@ -25,9 +33,9 @@ func build(t *testing.T, raw string) *modules.Set {
 		t.Fatal(err)
 	}
 	enabled := true
-	set, err := registry.Build(context.Background(), map[string]config.ModuleConfig{
+	set, err := registry.BuildWithCapabilities(context.Background(), map[string]config.ModuleConfig{
 		proactivereply.ID: {Enabled: &enabled, Options: json.RawMessage(raw)},
-	}, nil)
+	}, nil, withHistory(capability.NewValues()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +72,7 @@ func TestYieldSharedAcrossModuleGenerationsAndCheckedBeforeSend(t *testing.T) {
 	if err := registry.Register(proactivereply.Factory{}, hooks.Native, 0, hooks.Continue); err != nil {
 		t.Fatal(err)
 	}
-	values := capability.NewValues()
+	values := withHistory(capability.NewValues())
 	if err := values.Provide(proactive.YieldKey.ID(), state); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +114,7 @@ func TestOrdinaryAdminChatDoesNotYieldButSemanticAnswerDoes(t *testing.T) {
 	state := proactive.NewYieldState()
 	state.Configure([]string{"support"})
 	decider := &interventionDecider{answer: "no"}
-	values := capability.NewValues()
+	values := withHistory(capability.NewValues())
 	_ = values.Provide(proactive.YieldKey.ID(), state)
 	_ = values.Provide(decision.ServiceKey.ID(), decision.Decider(decider))
 	registry := modules.NewRegistry()
@@ -173,7 +181,7 @@ func (d *flushDecider) Decide(_ context.Context, r decision.Request) (decision.R
 
 func buildWithDecider(t *testing.T, raw string, decider decision.Decider) *modules.Set {
 	t.Helper()
-	values := capability.NewValues()
+	values := withHistory(capability.NewValues())
 	if decider != nil {
 		_ = values.Provide(decision.ServiceKey.ID(), decider)
 	}

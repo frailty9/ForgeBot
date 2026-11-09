@@ -21,6 +21,11 @@
     "max_session_bytes": 65536,
     "max_total_bytes": 8388608
   },
+  "message_history": {
+    "max_messages": 50,
+    "ttl": "30m",
+    "max_text_chars": 1000
+  },
   "agent": {
     "timeout": "90s",
     "max_turns": 6,
@@ -60,6 +65,7 @@
         "max_buffered": 50,
         "max_text_len": 500,
         "max_concurrent": 4,
+        "context_messages": 10,
         "groups": {
           "local": {
             "enabled": false

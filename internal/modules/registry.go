@@ -18,6 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/group"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -95,7 +96,7 @@ func (r *Registry) Register(factory Factory, source hooks.Source, order int, fai
 		switch kind {
 		case RegistrationTools, RegistrationCommands, RegistrationObservers,
 			RegistrationParticipants, RegistrationJobs, RegistrationStatus,
-			RegistrationConnectorProviders, RegistrationGroupEvents, RegistrationJoinReview:
+			RegistrationConnectorProviders, RegistrationGroupEvents, RegistrationJoinReview, RegistrationHistory:
 		default:
 			return fmt.Errorf("unsupported registration kind %q", kind)
 		}
@@ -258,6 +259,7 @@ type Set struct {
 	commands           []CommandRegistration
 	observers          []ObserverRegistration
 	participants       []ParticipantRegistration
+	history            []history.Subscriber
 	jobs               []BackgroundJob
 	statusProviders    map[string]func() any
 	connectorProviders map[string]ProviderRegistration
@@ -428,6 +430,10 @@ func (r *Registry) BuildWithCapabilities(ctx context.Context, entries map[string
 				set.commands = append(set.commands, extra.Commands...)
 				set.observers = append(set.observers, extra.Observers...)
 				set.participants = append(set.participants, extra.Participants...)
+				for _, subscriber := range extra.History {
+					subscriber.ID = id + "/" + subscriber.ID
+					set.history = append(set.history, subscriber)
+				}
 				if extra.JoinReview != nil {
 					if set.joinReview != nil {
 						return nil, errors.New("only one module may provide join review")
@@ -509,6 +515,14 @@ func validateExtended(descriptor Descriptor, registrations ExtendedRegistrations
 	}
 	if len(registrations.Participants) > 0 && !allowed[RegistrationParticipants] {
 		return errors.New("returned undeclared participant registrations")
+	}
+	if len(registrations.History) > 0 && !allowed[RegistrationHistory] {
+		return errors.New("returned undeclared history registrations")
+	}
+	for _, subscriber := range registrations.History {
+		if strings.TrimSpace(subscriber.ID) == "" || (subscriber.Appended == nil && subscriber.Evicted == nil) {
+			return errors.New("invalid history subscriber registration")
+		}
 	}
 	if len(registrations.Jobs) > 0 && !allowed[RegistrationJobs] {
 		return errors.New("returned undeclared job registrations")
@@ -599,7 +613,10 @@ func (s *Set) JoinReviewPolicy(conversationID string) (group.Policy, bool) {
 }
 func (s *Set) Observers() []ObserverRegistration       { return slices.Clone(s.observers) }
 func (s *Set) Participants() []ParticipantRegistration { return slices.Clone(s.participants) }
-func (s *Set) Jobs() []BackgroundJob                   { return slices.Clone(s.jobs) }
+
+// HistorySubscribers 是这一代模块对近期消息容器的订阅，宿主在这一代生效时整体替换。
+func (s *Set) HistorySubscribers() []history.Subscriber { return slices.Clone(s.history) }
+func (s *Set) Jobs() []BackgroundJob                    { return slices.Clone(s.jobs) }
 
 // ConnectorProvider returns an independently owned registration for one type.
 // The provider itself is immutable process code; only its option bytes are

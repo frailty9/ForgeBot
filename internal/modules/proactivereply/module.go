@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/decision"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -42,7 +44,10 @@ type Options struct {
 	MaxBuffered   int
 	MaxTextLen    int
 	MaxConcurrent int
-	Groups        map[string]GroupOptions
+	// ContextMessages 是决策时附带的近期群聊条数（取自核心容器），0 表示不附带。
+	// 建议不超过 message_history.max_messages 的 60%。
+	ContextMessages int
+	Groups          map[string]GroupOptions
 }
 
 type Factory struct{}
@@ -52,6 +57,7 @@ func (Factory) Descriptor() modules.Descriptor {
 		ID: ID, DefaultEnabled: false,
 		Hooks:    []hooks.Stage{hooks.BeforeReply},
 		Provides: []capability.ID{proactive.ControlKey.ID()},
+		Requires: []capability.ID{history.ReaderKey.ID()},
 		Registrations: []modules.RegistrationKind{
 			modules.RegistrationParticipants, modules.RegistrationStatus,
 		},
@@ -62,7 +68,7 @@ func defaults() Options {
 	return Options{
 		YieldDuration: 5 * time.Minute,
 		Silence:       4 * time.Second, MaxWindow: 25 * time.Second,
-		MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4,
+		MaxBuffered: 50, MaxTextLen: 500, MaxConcurrent: 4, ContextMessages: 10,
 		Groups: map[string]GroupOptions{},
 	}
 }
@@ -73,14 +79,15 @@ func parse(raw json.RawMessage) (Options, error) {
 		return result, nil
 	}
 	var value struct {
-		Scope         string                  `json:"scope"`
-		YieldDuration string                  `json:"yield_duration"`
-		Silence       string                  `json:"silence"`
-		MaxWindow     string                  `json:"max_window"`
-		MaxBuffered   *int                    `json:"max_buffered"`
-		MaxTextLen    *int                    `json:"max_text_len"`
-		MaxConcurrent *int                    `json:"max_concurrent"`
-		Groups        map[string]GroupOptions `json:"groups"`
+		Scope           string                  `json:"scope"`
+		YieldDuration   string                  `json:"yield_duration"`
+		Silence         string                  `json:"silence"`
+		MaxWindow       string                  `json:"max_window"`
+		MaxBuffered     *int                    `json:"max_buffered"`
+		MaxTextLen      *int                    `json:"max_text_len"`
+		MaxConcurrent   *int                    `json:"max_concurrent"`
+		ContextMessages *int                    `json:"context_messages"`
+		Groups          map[string]GroupOptions `json:"groups"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -126,11 +133,17 @@ func parse(raw json.RawMessage) (Options, error) {
 	if value.MaxConcurrent != nil {
 		result.MaxConcurrent = *value.MaxConcurrent
 	}
+	if value.ContextMessages != nil {
+		result.ContextMessages = *value.ContextMessages
+	}
 	if value.Groups != nil {
 		result.Groups = value.Groups
 	}
 	if result.Silence < 0 || result.MaxWindow < 0 || result.MaxBuffered < 0 || result.MaxTextLen < 0 || result.MaxConcurrent <= 0 {
 		return Options{}, errors.New("proactive reply limits are invalid")
+	}
+	if result.ContextMessages < 0 || result.ContextMessages > 50 {
+		return Options{}, errors.New("context_messages must be 0..50")
 	}
 	for id := range result.Groups {
 		if strings.TrimSpace(id) == "" {
@@ -168,7 +181,7 @@ func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
 		"yield_duration": options.YieldDuration.String(),
 		"silence":        options.Silence.String(), "max_window": options.MaxWindow.String(),
 		"max_buffered": options.MaxBuffered, "max_text_len": options.MaxTextLen,
-		"max_concurrent": options.MaxConcurrent, "groups": options.Groups,
+		"max_concurrent": options.MaxConcurrent, "context_messages": options.ContextMessages, "groups": options.Groups,
 	}, nil
 }
 
@@ -186,7 +199,11 @@ func (Factory) BuildWithContext(ctx context.Context, build modules.BuildContext,
 		state = proactive.NewYieldState()
 	}
 	decider, _ := capability.Resolve(build.Capabilities, decision.ServiceKey)
-	item := &instance{options: options, yield: state, decisions: decider}
+	recent, ok := capability.Resolve(build.Capabilities, history.ReaderKey)
+	if !ok || recent == nil {
+		return nil, errors.New("proactive reply requires the message history reader")
+	}
+	item := &instance{options: options, yield: state, decisions: decider, history: recent, now: time.Now}
 	item.pool = proactive.New(ctx, item.policy, item.flush, proactive.Options{
 		ManualStart:   true,
 		MaxConcurrent: options.MaxConcurrent, IdleBucketTTL: time.Minute,
@@ -201,6 +218,24 @@ type instance struct {
 	pool      *proactive.Pool
 	mu        sync.RWMutex
 	responder modules.DeferredResponder
+
+	history history.Reader
+	now     func() time.Time
+}
+
+// answeredRecently 查核心容器：Bot 是否在 yield_duration 内回复过这条消息。管理员事后引用它
+// （例如纠正 Bot），说明人已经接手这个话题，与引用待答问题一样让位。
+func (i *instance) answeredRecently(conversationID, messageID string) bool {
+	if messageID == "" {
+		return false
+	}
+	now := i.now()
+	for _, record := range i.history.Recent(conversationID, 0) {
+		if record.Role == history.RoleBot && record.ReplyTo == messageID && now.Sub(record.At) < i.options.YieldDuration {
+			return true
+		}
+	}
+	return false
 }
 
 func (i *instance) Registrations() hooks.Registrations {
@@ -231,7 +266,7 @@ func (i *instance) handle(ctx context.Context, message messaging.InboundMessage,
 	i.responder = responder
 	i.mu.Unlock()
 	if message.TrustedResponder() && i.options.Groups[message.ConversationID].Enabled {
-		intervened := message.ReplyToMessageID != "" && i.pool.HasPending(message.ConversationID, message.ReplyToMessageID)
+		intervened := message.ReplyToMessageID != "" && (i.pool.HasPending(message.ConversationID, message.ReplyToMessageID) || i.answeredRecently(message.ConversationID, message.ReplyToMessageID))
 		pending := i.pool.PendingTranscript(message.ConversationID)
 		if !intervened && !message.Addressed() && pending != "" && strings.TrimSpace(message.Text) != "" && i.decisions != nil {
 			text := []rune(message.Text)
@@ -282,7 +317,7 @@ func (i *instance) flush(ctx context.Context, batch proactive.Batch) {
 		return
 	}
 	text := batch.Transcript(i.options.MaxTextLen)
-	if !i.worthReplying(ctx, text) {
+	if !i.worthReplying(ctx, text, i.recentContext(batch)) {
 		return
 	}
 	responder(ctx, messaging.InboundMessage{
@@ -293,9 +328,60 @@ func (i *instance) flush(ctx context.Context, batch proactive.Batch) {
 	})
 }
 
+// maxRecentRunes 限制近期上下文的总长度；与待判断片段合计仍低于布尔决策的 state 上限。
+const maxRecentRunes = 1500
+
+// recentContext 从核心容器取这批消息之前的近期群聊，排除这批消息本身；超长时保留最新的几条。
+func (i *instance) recentContext(batch proactive.Batch) string {
+	if i.options.ContextMessages <= 0 {
+		return ""
+	}
+	inBatch := make(map[string]bool, len(batch.Msgs))
+	for _, m := range batch.Msgs {
+		inBatch[m.MsgID] = true
+	}
+	var lines []string
+	for _, r := range i.history.Recent(batch.ConversationID, i.options.ContextMessages+len(batch.Msgs)) {
+		if r.MessageID == "" || !inBatch[r.MessageID] {
+			lines = append(lines, recentLine(r))
+		}
+	}
+	if len(lines) > i.options.ContextMessages {
+		lines = lines[len(lines)-i.options.ContextMessages:]
+	}
+	budget, start := maxRecentRunes, len(lines)
+	for start > 0 && budget-len([]rune(lines[start-1])) >= 0 {
+		budget -= len([]rune(lines[start-1]))
+		start--
+	}
+	return strings.Join(lines[start:], "")
+}
+
+func recentLine(r history.Record) string {
+	speaker := r.UserName
+	if speaker == "" {
+		speaker = r.UserID
+	}
+	switch r.Role {
+	case history.RoleBot:
+		speaker = "[Bot]"
+	case history.RoleAdmin:
+		speaker = "[管理员] " + speaker
+	}
+	text := []rune(r.Text)
+	if len(text) > 200 {
+		text = append(text[:200], '…')
+	}
+	if r.HasMedia {
+		text = append(text, []rune("[含媒体]")...)
+	}
+	return fmt.Sprintf("%s: %s\n", speaker, string(text))
+}
+
 // worthReplying 是主动插话的唯一一次决策：没有用户在等回复，误判就是打扰，
-// 因此未配置决策服务、故障、无法判断或输入被截断时一律沉默。
-func (i *instance) worthReplying(ctx context.Context, text string) bool {
+// 因此未配置决策服务、故障、无法判断或输入被截断时一律沉默。recent 是这批消息之前的
+// 近期群聊（含管理员与 Bot 的发言），用来判断管理员是否已经接手，不增加模型调用。
+func (i *instance) worthReplying(ctx context.Context, text, recent string) bool {
 	if i.decisions == nil || strings.TrimSpace(text) == "" {
 		return false
 	}
@@ -304,10 +390,17 @@ func (i *instance) worthReplying(ctx context.Context, text string) bool {
 		return false
 	}
 	rule := "data.messages 是群聊中未 @ 机器人的消息。判断是否值得机器人谨慎地主动回答：应是一个明确的、仍需要帮助的问题，且没有可信管理员已经接手。闲聊、感叹、已被解答或无需回复的内容都不符合。"
+	if recent != "" {
+		rule += "data.recent 是这些消息之前的近期群聊，[管理员] 是群主或群管理员，[Bot] 是机器人。如果管理员已经在回答或纠正同一话题（包括纠正机器人之前的回答），视为已经接手，不符合。"
+	}
 	if i.options.Scope != "" {
 		rule += "此外，问题必须属于以下服务范围，范围外的专业问题不符合：" + i.options.Scope
 	}
-	state, _ := json.Marshal(map[string]string{"messages": text})
+	data := map[string]string{"messages": text}
+	if recent != "" {
+		data["recent"] = recent
+	}
+	state, _ := json.Marshal(data)
 	worth, err := decision.DecideBool(ctx, i.decisions, rule, state)
 	return err == nil && worth
 }

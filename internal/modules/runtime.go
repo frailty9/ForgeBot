@@ -6,6 +6,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/group"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/tooling"
@@ -25,6 +26,7 @@ const (
 	RegistrationConnectorProviders RegistrationKind = "connector_providers"
 	RegistrationGroupEvents        RegistrationKind = "group_events"
 	RegistrationJoinReview         RegistrationKind = "join_review"
+	RegistrationHistory            RegistrationKind = "history"
 )
 
 // BuildContext exposes only capabilities prepared earlier in the same
@@ -102,11 +104,13 @@ type ProviderRegistration struct {
 }
 
 type ExtendedRegistrations struct {
-	GroupEvents        []GroupEventRegistration
-	JoinReview         *JoinReviewRegistration
-	Tools              []ToolRegistration
-	Commands           []CommandRegistration
-	Observers          []ObserverRegistration
+	GroupEvents []GroupEventRegistration
+	JoinReview  *JoinReviewRegistration
+	Tools       []ToolRegistration
+	Commands    []CommandRegistration
+	Observers   []ObserverRegistration
+	// History 订阅核心近期消息容器的“新消息进入”和“消息移出”事件；宿主只投递给当前一代模块。
+	History            []history.Subscriber
 	Participants       []ParticipantRegistration
 	Jobs               []BackgroundJob
 	Capabilities       []CapabilityRegistration

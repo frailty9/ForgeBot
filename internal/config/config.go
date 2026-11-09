@@ -16,6 +16,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/conversation"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/platform"
 	"gopkg.in/yaml.v3"
@@ -89,12 +90,14 @@ func (c StorageConfig) Kind() string {
 type RuntimeConfig struct {
 	Decision           DecisionConfig            `json:"decision"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
-	Agent              agent.Limits              `json:"agent"`
-	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
-	Bot                BotConfig                 `json:"bot"`
-	Admission          AdmissionConfig           `json:"admission"`
-	LLM                LLMConfig                 `json:"llm"`
-	Platforms          PlatformConfig            `json:"platforms"`
+	// MessageHistory 是核心近期消息容器的上限；容器始终启用，没有开关。
+	MessageHistory history.Policy          `json:"message_history"`
+	Agent          agent.Limits            `json:"agent"`
+	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
+	Bot            BotConfig               `json:"bot"`
+	Admission      AdmissionConfig         `json:"admission"`
+	LLM            LLMConfig               `json:"llm"`
+	Platforms      PlatformConfig          `json:"platforms"`
 	// Operator 是唯一的运维群；不配置则不开放运维命令与故障通知。
 	Operator   *OperatorConfig  `json:"operator,omitempty"`
 	Extensions ExtensionsConfig `json:"extensions"`
@@ -664,6 +667,9 @@ func (c RuntimeConfig) Validate() error {
 	if err := c.ConversationMemory.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := c.MessageHistory.Validate(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if err := c.Agent.Validate(); err != nil {
 		problems = append(problems, err.Error())
 	}
@@ -961,6 +967,7 @@ func (c Snapshot) Public(apiKeyConfigured bool) map[string]any {
 		"runtime": map[string]any{
 			"decision":            c.Runtime.Decision.Public(),
 			"conversation_memory": c.Runtime.ConversationMemory.Defaults(),
+			"message_history":     c.Runtime.MessageHistory.Defaults(),
 			"agent":               c.Runtime.Agent.Defaults(),
 			"bot":                 c.Runtime.Bot,
 			"llm": map[string]any{

@@ -22,6 +22,7 @@ import (
 	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/decision"
 	"github.com/soleapi/forgebot/internal/group"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
@@ -94,9 +95,11 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
-	Yield              *proactive.YieldState
-	Decisions          decision.Decider
-	Memory             *conversation.Memory
+	Yield     *proactive.YieldState
+	Decisions decision.Decider
+	Memory    *conversation.Memory
+	// History 是核心近期消息容器，跨代保留；为空时由 NewManager 或 Build 创建。
+	History            *history.Window
 	Modules            *modules.Registry
 	Sender             platform.Sender
 	Secrets            secret.Reader
@@ -124,12 +127,16 @@ func (b Builder) Build(ctx context.Context, snapshot config.Snapshot) (*bot.Engi
 	if err != nil {
 		return nil, err
 	}
+	if b.History == nil {
+		b.History = newHistory(snapshot, b)
+	}
 	initial := b.initialCapabilities(snapshot, client)
 	moduleSet, err := b.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
 	}
-	engine, err := b.build(ctx, snapshot, b.Sender, client, moduleSet)
+	b.History.SetSubscribers(moduleSet.HistorySubscribers())
+	engine, err := b.build(ctx, snapshot, withHistory(b.Sender, b.History), client, moduleSet)
 	if err == nil {
 		moduleSet.Start(ctx)
 	}
@@ -264,6 +271,9 @@ func (b Builder) initialCapabilities(snapshot config.Snapshot, client llm.Client
 		conversations[strings.TrimSpace(group.ID)] = struct{}{}
 	}
 	_ = values.Provide(conversation.CatalogKey.ID(), conversation.Catalog(conversations))
+	if b.History != nil {
+		_ = values.Provide(history.ReaderKey.ID(), history.Reader(b.History))
+	}
 	return values
 }
 
@@ -377,12 +387,16 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		builder.Yield = proactive.NewYieldState()
 	}
 	builder.Yield.Configure(boundConversationIDs(snapshot.Runtime))
+	if builder.History == nil {
+		builder.History = newHistory(snapshot, builder)
+	}
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
 	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
 	if err != nil {
 		return nil, err
 	}
 	manager.current.Store(generation)
+	builder.History.SetSubscribers(generation.modules.HistorySubscribers())
 	manager.groups = group.New(manager, manager.groupPolicy, builder.Logger)
 	generation.modules.Mark("active")
 	manager.storeSnapshot(snapshot)
@@ -428,6 +442,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if connectors != nil {
 		sender = connectors
 	}
+	sender = withHistory(sender, m.builder.History)
 	engine, err := generationBuilder.build(ctx, snapshot, sender, client, moduleSet)
 	if err != nil {
 		return nil, err
@@ -638,7 +653,7 @@ func (m *Manager) SendNotification(ctx context.Context, conversationID, text str
 	if generation.connectors == nil {
 		return errors.New("runtime connectors are unavailable")
 	}
-	return generation.connectors.Send(ctx, messaging.OutboundMessage{ConversationID: conversationID, Text: text})
+	return withHistory(generation.connectors, m.builder.History).Send(ctx, messaging.OutboundMessage{ConversationID: conversationID, Text: text})
 }
 
 func (m *Manager) Paused() bool { return m.paused.Load() }
@@ -823,6 +838,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		}
 	}
 	m.current.Store(nil)
+	m.builder.History.SetSubscribers(nil)
 	if old.watchCancel != nil {
 		old.watchCancel()
 	}
@@ -861,6 +877,7 @@ func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMe
 		return platform.HandleResult{}, errors.New("runtime is unavailable")
 	}
 	defer generation.mu.RUnlock()
+	m.builder.History.Append(history.FromInbound(message))
 	for _, observer := range generation.modules.Observers() {
 		observer.Observe(message)
 	}
@@ -976,7 +993,9 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	}
 	m.builder.Memory.Configure(next.snapshot.Runtime.ConversationMemory)
 	m.builder.Yield.Configure(boundConversationIDs(next.snapshot.Runtime))
+	m.builder.History.Configure(next.snapshot.Runtime.MessageHistory, boundConversationIDs(next.snapshot.Runtime))
 	old := m.current.Swap(next)
+	m.builder.History.SetSubscribers(next.modules.HistorySubscribers())
 	m.storeSnapshot(next.snapshot)
 	if m.started {
 		if connectorsChanged {

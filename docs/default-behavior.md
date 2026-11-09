@@ -23,6 +23,8 @@
 | 发送失败／执行未知 | 不把回答写入记忆，不盲目重发 | effect独立于错误分类 | [投递提交](../internal/bot/memory_test.go) |
 | 管理员接答 | 群级暂停主动插话，@仍走正常范围判断 | 默认5m，仅引用命中待答或明确语义接答 | [主动模块](../internal/modules/proactivereply/module_test.go) |
 | 让位后到期 | 新问题可处理，旧批次不补发 | revision抑制旧在途回复 | [让位状态](../internal/proactive/yield_test.go) |
+| 管理员事后纠正 | 管理员引用 Bot 在让位时长内刚回答过的问题，同样让位；未引用时由主动插话决策结合近期群聊判断管理员是否已接手 | 仅群主/管理员；引用无关消息、普通成员或超时均不触发；不增加模型调用 | [回归测试](../internal/modules/proactivereply/regression_test.go) |
+| 核心近期消息容器 | 始终启用：按群保存最近收到的消息和 Bot 发送成功的消息，逐条滑动 | 每群 50 条、30 分钟、单条 1000 字；只记已绑定的群，只在内存中，不存图片，重启清空 | [容器](../internal/history/window_test.go)、[宿主接入](../internal/runtime/history_test.go) |
 | 配置更新失败 | 保持原运行代，持久化恢复错误可诊断 | expected_version与候选构建 | [运行时](../internal/runtime/manager_test.go) |
 | 不支持群操作 | unsupported；权限未知不能伪装成功。公告与撤回已挂起 | 可选接口 | [群操作路由](../internal/platform/groups.go) |
 | 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
@@ -32,4 +34,4 @@
 | 能力目录 | 展示投影，not_probed不冒充健康 | 认证API与CLI同源 | [目录](../internal/runtime/catalog_test.go) |
 | 初次使用 | init不覆盖；doctor不要求先启动Bot | 远程与stdio探测须显式 | [CLI](../cmd/forgebot/commands_test.go) |
 
-2026-11-09 已通过真实验收：入群审批、实际成员入群欢迎（含 @）、init 到启动的教程、目标回答模型对范围提示词与工具检索的遵守、专用 DM。尚待真实验收：管理员接答让位的真实表现，以及自动沉淀的实际运营效果（需真实群消息窗口）。暂未实现分类自动重试、群消息合并转发和长回复分段，不将一次 `Send` 成功推论为平台最终可见的 exactly-once 保证。
+2026-11-09 已通过真实验收：入群审批、实际成员入群欢迎（含 @）、init 到启动的教程、目标回答模型对范围提示词与工具检索的遵守、专用 DM、管理员接答让位。尚待真实验收：自动沉淀的实际运营效果（需真实群消息窗口）。暂未实现分类自动重试、群消息合并转发和长回复分段，不将一次 `Send` 成功推论为平台最终可见的 exactly-once 保证。
