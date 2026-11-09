@@ -172,7 +172,7 @@
 
 ## 2026-11-03 恢复：竞态验证环境已修复
 
-编译器已更换为 D:/Dev/MingGW64/x86_64-16.2.0-release-posix-seh-ucrt-rt_v14-rev1/bin/gcc.exe。此前五包定向 -race 与 go test -race ./... 均通过，0xc0000139 不再出现。按用户要求恢复持续实施，保留下方历史暂停记录供追溯。
+编译器已更换为较新的 MinGW-w64 gcc（16.2）。此前五包定向 -race 与 go test -race ./... 均通过，0xc0000139 不再出现。按用户要求恢复持续实施，保留下方历史暂停记录供追溯。
 
 ## 2026-11-03 暂停交接：竞态测试无法运行
 
@@ -180,7 +180,7 @@
 - 普通验证：go test ./...、go vet ./... 通过；CLI 最后一次独立调整后 go test ./cmd/forgebot、go vet ./cmd/forgebot 通过。
 - 失败命令：go test -race ./internal/runtime ./internal/settings ./internal/secret ./internal/persistence，四包均 exit status 0xc0000139，没有 Go 竞态报告。
 - 对照：未改动的 internal/admission 执行 go test -race ./internal/admission，同样 exit status 0xc0000139；不能据此认定本次业务代码产生竞态，也不能认定竞态验证通过。
-- 环境：go1.25.5 windows/amd64；CGO_ENABLED=1；CC=gcc；命中的编译器 D:/Dev/MingGW64/bin/gcc.exe。尚未定位具体加载/工具链原因，未改动系统工具链或 PATH。
+- 环境：go1.25.5 windows/amd64；CGO_ENABLED=1；CC=gcc（当时为较旧的 MinGW gcc 8.1.0）。尚未定位具体加载/工具链原因，未改动系统工具链或 PATH。
 - 按用户“遇到错误可暂停”的授权暂停，不继续叠加工作包 3。没有合并 master、运行正式 Bot、访问真实 LLM/OneBot 或改写部署配置及凭据。
 - 恢复入口：先核对当前 Git 状态；处理竞态环境后重跑上面五包，或由用户明确接受将竞态验证留给可用环境，再从工作包 3 继续。保留现有正常测试证据，不重演已完成提交。
 
