@@ -87,20 +87,22 @@ func (c StorageConfig) Kind() string {
 }
 
 // RuntimeConfig contains hot-reloadable application behavior.
+// 字段顺序即 init 生成和管理接口保存的 JSON 顺序，按配置流程排列：
+// 身份与模型 → 接入的群 → 功能 → 各项上限。
 type RuntimeConfig struct {
-	Decision           DecisionConfig            `json:"decision"`
+	Bot       BotConfig      `json:"bot"`
+	LLM       LLMConfig      `json:"llm"`
+	Decision  DecisionConfig `json:"decision"`
+	Platforms PlatformConfig `json:"platforms"`
+	// Operator 是唯一的运维群；不配置则不开放运维命令与故障通知。
+	Operator           *OperatorConfig           `json:"operator,omitempty"`
+	Modules            map[string]ModuleConfig   `json:"modules,omitempty"`
+	Extensions         ExtensionsConfig          `json:"extensions"`
 	ConversationMemory conversation.MemoryPolicy `json:"conversation_memory"`
 	// MessageHistory 是核心近期消息容器的上限；容器始终启用，没有开关。
-	MessageHistory history.Policy          `json:"message_history"`
-	Agent          agent.Limits            `json:"agent"`
-	Modules        map[string]ModuleConfig `json:"modules,omitempty"`
-	Bot            BotConfig               `json:"bot"`
-	Admission      AdmissionConfig         `json:"admission"`
-	LLM            LLMConfig               `json:"llm"`
-	Platforms      PlatformConfig          `json:"platforms"`
-	// Operator 是唯一的运维群；不配置则不开放运维命令与故障通知。
-	Operator   *OperatorConfig  `json:"operator,omitempty"`
-	Extensions ExtensionsConfig `json:"extensions"`
+	MessageHistory history.Policy  `json:"message_history"`
+	Agent          agent.Limits    `json:"agent"`
+	Admission      AdmissionConfig `json:"admission"`
 }
 
 // ExtensionsConfig configures MCP servers and text-only skills.

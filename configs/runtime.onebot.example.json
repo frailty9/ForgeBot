@@ -33,8 +33,22 @@
       {"id": "ops", "connector_id": "qq-main", "target": "10002"}
     ]
   },
+  "operator": {
+    "conversation_id": "ops",
+    "notifications": true,
+    "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
+  },
   "modules": {
     "native.onebot": {"enabled": true, "options": {}},
+    "native.proactive_reply": {
+      "enabled": true,
+      "options": {
+        "scope": "本项目的接口、部署与故障排查",
+        "groups": {
+          "support": {"enabled": true}
+        }
+      }
+    },
     "native.join_review": {
       "enabled": true,
       "options": {
@@ -62,20 +76,6 @@
           }
         }
       }
-    },
-    "native.proactive_reply": {
-      "enabled": true,
-      "options": {
-        "scope": "本项目的接口、部署与故障排查",
-        "groups": {
-          "support": {"enabled": true}
-        }
-      }
     }
-  },
-  "operator": {
-    "conversation_id": "ops",
-    "notifications": true,
-    "commands": ["status", "restart", "pause", "resume", "proactive", "reload_docs"]
   }
 }

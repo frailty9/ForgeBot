@@ -1,4 +1,18 @@
 {
+  "bot": {
+    "name": "ForgeBot",
+    "system_prompt": ""
+  },
+  "llm": {
+    "authentication": "api_key",
+    "image_understanding": false,
+    "protocol": "openai_responses",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_ref": "llm/default",
+    "model": "gpt-5",
+    "anthropic_version": "2023-06-01",
+    "timeout": "60s"
+  },
   "decision": {
     "dm": {
       "enabled": false,
@@ -12,27 +26,51 @@
     "llm_timeout": "8s",
     "max_concurrent": 16
   },
-  "conversation_memory": {
-    "disabled": true,
-    "ttl": "20m",
-    "max_pairs": 6,
-    "max_sessions": 1000,
-    "max_pending": 8,
-    "max_session_bytes": 65536,
-    "max_total_bytes": 8388608
+  "platforms": {
+    "connectors": [
+      {
+        "id": "echo-local",
+        "type": "echo",
+        "enabled": true,
+        "options": {}
+      },
+      {
+        "id": "qq-main",
+        "type": "onebot",
+        "enabled": false,
+        "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
+        "options": {
+          "api_url": "http://127.0.0.1:5700",
+          "send_token": "",
+          "webhook_addr": "127.0.0.1:8090",
+          "webhook_path": "/onebot/qq-main",
+          "receive_secret": "",
+          "request_limit": 1048576,
+          "timeout": "15s",
+          "replay_ttl": "5m",
+          "replay_max": 10000
+        }
+      }
+    ],
+    "groups": [
+      {
+        "id": "local",
+        "connector_id": "echo-local",
+        "target": "local"
+      }
+    ]
   },
-  "message_history": {
-    "max_messages": 50,
-    "ttl": "30m",
-    "max_text_chars": 1000
-  },
-  "agent": {
-    "timeout": "90s",
-    "max_turns": 6,
-    "max_tool_calls": 12,
-    "max_tools_per_turn": 4,
-    "max_result_bytes": 65536,
-    "max_context_bytes": 131072
+  "operator": {
+    "conversation_id": "local",
+    "notifications": true,
+    "commands": [
+      "status",
+      "restart",
+      "pause",
+      "resume",
+      "proactive",
+      "reload_docs"
+    ]
   },
   "modules": {
     "native.echo": {
@@ -95,6 +133,24 @@
         "max_files": 10000
       }
     },
+    "native.knowledge_reflection": {
+      "enabled": false,
+      "options": {
+        "conversation_ids": [
+          "local"
+        ],
+        "scan_interval": "15m",
+        "message_ttl": "24h",
+        "quiet_window": "3m",
+        "max_session_duration": "30m",
+        "max_messages_per_conversation": 1000,
+        "max_messages_total": 10000,
+        "max_message_chars": 4000,
+        "max_pairs_per_scan": 50,
+        "min_confidence": 0.9,
+        "extra_directory": "extra"
+      }
+    },
     "native.join_review": {
       "enabled": false,
       "options": {
@@ -120,89 +176,7 @@
           }
         }
       }
-    },
-    "native.knowledge_reflection": {
-      "enabled": false,
-      "options": {
-        "conversation_ids": [
-          "local"
-        ],
-        "scan_interval": "15m",
-        "message_ttl": "24h",
-        "quiet_window": "3m",
-        "max_session_duration": "30m",
-        "max_messages_per_conversation": 1000,
-        "max_messages_total": 10000,
-        "max_message_chars": 4000,
-        "max_pairs_per_scan": 50,
-        "min_confidence": 0.9,
-        "extra_directory": "extra"
-      }
     }
-  },
-  "bot": {
-    "name": "ForgeBot",
-    "system_prompt": ""
-  },
-  "llm": {
-    "authentication": "api_key",
-    "image_understanding": false,
-    "protocol": "openai_responses",
-    "base_url": "https://api.openai.com/v1",
-    "api_key_ref": "llm/default",
-    "model": "gpt-5",
-    "anthropic_version": "2023-06-01",
-    "timeout": "60s"
-  },
-  "admission": {
-    "dedup_ttl": "60s",
-    "dedup_max": 10000
-  },
-  "platforms": {
-    "connectors": [
-      {
-        "id": "echo-local",
-        "type": "echo",
-        "enabled": true,
-        "options": {}
-      },
-      {
-        "id": "qq-main",
-        "type": "onebot",
-        "enabled": false,
-        "prompt_suffix": "当前回复将发送到不支持 Markdown 的聊天渠道，请使用纯文本。",
-        "options": {
-          "api_url": "http://127.0.0.1:5700",
-          "send_token": "",
-          "webhook_addr": "127.0.0.1:8090",
-          "webhook_path": "/onebot/qq-main",
-          "receive_secret": "",
-          "request_limit": 1048576,
-          "timeout": "15s",
-          "replay_ttl": "5m",
-          "replay_max": 10000
-        }
-      }
-    ],
-    "groups": [
-      {
-        "id": "local",
-        "connector_id": "echo-local",
-        "target": "local"
-      }
-    ]
-  },
-  "operator": {
-    "conversation_id": "local",
-    "notifications": true,
-    "commands": [
-      "status",
-      "restart",
-      "pause",
-      "resume",
-      "proactive",
-      "reload_docs"
-    ]
   },
   "extensions": {
     "mcp": [
@@ -245,5 +219,31 @@
       "max_total_bytes": 1048576,
       "max_files": 64
     }
+  },
+  "conversation_memory": {
+    "disabled": true,
+    "ttl": "20m",
+    "max_pairs": 6,
+    "max_sessions": 1000,
+    "max_pending": 8,
+    "max_session_bytes": 65536,
+    "max_total_bytes": 8388608
+  },
+  "message_history": {
+    "max_messages": 50,
+    "ttl": "30m",
+    "max_text_chars": 1000
+  },
+  "agent": {
+    "timeout": "90s",
+    "max_turns": 6,
+    "max_tool_calls": 12,
+    "max_tools_per_turn": 4,
+    "max_result_bytes": 65536,
+    "max_context_bytes": 131072
+  },
+  "admission": {
+    "dedup_ttl": "60s",
+    "dedup_max": 10000
   }
 }
