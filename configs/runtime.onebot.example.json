@@ -52,7 +52,14 @@
       "enabled": true,
       "options": {
         "groups": {
-          "support": {"enabled": true, "text": "欢迎 {user} 加入！提问时请 @我，并附上报错信息。"}
+          "support": {
+            "enabled": true,
+            "message": [
+              {"type": "text", "data": {"text": "欢迎 "}},
+              {"type": "at", "data": {"qq": "{user_id}"}},
+              {"type": "text", "data": {"text": " 加入！提问时请 @我，并附上报错信息。"}}
+            ]
+          }
         }
       }
     },

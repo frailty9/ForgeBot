@@ -110,7 +110,7 @@
         "groups": {
           "local": {
             "enabled": false,
-            "text": "欢迎 {user}（{user_id}）加入 {conversation_id}！请先阅读群公告。"
+            "message": "欢迎 {user}（{user_id}）加入 {conversation_id}！请先阅读群公告。"
           }
         }
       }

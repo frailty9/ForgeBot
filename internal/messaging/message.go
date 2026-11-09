@@ -72,9 +72,20 @@ func (m InboundMessage) HasQuotedContent() bool {
 	return m.Quoted != nil && (m.Quoted.Text != "" || len(m.Quoted.Media) > 0)
 }
 
+// Segment 是原样透传给连接器的出站消息段，形状沿用 OneBot：{"type":…,"data":{…}}。
+// 宿主不解释 Type 和 Data 的含义，由连接器按各自协议处理；不认识的段由连接器自行决定
+// 如何降级。Data 的值是 JSON 解码后的字符串、数字、布尔、数组或对象。
+type Segment struct {
+	Type string         `json:"type"`
+	Data map[string]any `json:"data,omitempty"`
+}
+
+// OutboundMessage 的 Text 始终是完整的纯文本形式；Segments 非空时，支持消息段的连接器
+// 按段发送，其余连接器发送 Text。
 type OutboundMessage struct {
-	ConversationID   string  `json:"conversation_id"`
-	ReplyToMessageID string  `json:"reply_to_message_id,omitempty"`
-	Text             string  `json:"text,omitempty"`
-	Media            []Media `json:"media,omitempty"`
+	ConversationID   string    `json:"conversation_id"`
+	ReplyToMessageID string    `json:"reply_to_message_id,omitempty"`
+	Text             string    `json:"text,omitempty"`
+	Segments         []Segment `json:"segments,omitempty"`
+	Media            []Media   `json:"media,omitempty"`
 }

@@ -86,7 +86,7 @@
 | BOT-18 | 群公告 | 群管理 | 暂缓 | 2026-11-05 挂起并删除实现：OneBot11 标准无群公告接口，原实现依赖非标准 `_send_group_notice` 扩展 | [挂起说明](group-management.md) |
 | BOT-19 | 撤回群成员消息 | 群管理与处置 | 暂缓 | 2026-11-05 挂起并删除实现。原意是处理违规消息，但缺少触发方式（管理员拿不到平台消息 ID）；恢复前需先设计入口，如引用违规消息加命令或违规判定 | [挂起说明](group-management.md) |
 | BOT-20 | 共享模型决策与业务范围 | 决策 | 已实现，真实 DM 验收待补 | 有 DM 用 DM、未配置/关闭用 LLM；每次最多一次模型请求，无故障后备；布尔入口区分 false 与 error | [决策契约](decision-service.md)、[测试](../internal/decision/routing_test.go) |
-| BOT-21 | 新人入群欢迎语 | 成员事件与群互动 | 已实现，真实成员事件验收待补 | `native.welcome` 按群模板在收到入群事件时发送，忽略自身/历史事件；不去重、不落盘，不依赖 DM/LLM | [欢迎模块](../internal/modules/welcome/)、[欢迎测试](../internal/runtime/groups_test.go)、[版本 R15](../specs/v0.1.0/requirements.md) |
+| BOT-21 | 新人入群欢迎语 | 成员事件与群互动 | 已实现，真实成员事件验收待补 | `native.welcome` 按群 `message`（字符串或原样透传的 OneBot 消息段）在收到入群事件时发送，忽略自身/历史事件；不去重、不落盘，不依赖 DM/LLM | [欢迎模块](../internal/modules/welcome/)、[欢迎测试](../internal/runtime/groups_test.go)、[版本 R15](../specs/v0.1.0/requirements.md) |
 | BOT-22 | 部署业务范围约束 | 问答策略 | 已实现（提示词约束） | 2026-11-05 改为由部署者把范围、拒答与寒暄措辞写在 `bot.system_prompt` 中；属于尽力遵守，需目标模型实测。主动插话的范围另在 `native.proactive_reply.scope` 配置，供其决策使用 | [版本 R16](../specs/v0.1.0/requirements.md)、[配置说明](configuration.md) |
 
 BOT-12 的最新决定取代“管理员介入后全面接管 Bot 回复”的表述：只临时关闭该群的主动插话，明确 @ 始终保留正常触发路径；“始终”针对主动插话暂停而言，不绕过消息去重、身份授权或全局运行状态。介入识别、暂停时长、恢复条件、待处理和在途的未 @ 回复如何处置仍待设计。不得把现有单条待答取消当作该需求已经完成。

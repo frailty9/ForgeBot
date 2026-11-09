@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,43 @@ func TestSenderUsesSendMsgAndReplySegments(t *testing.T) {
 	segments, ok := got["message"].([]any)
 	if !ok || len(segments) != 2 {
 		t.Fatalf("expected reply segments: %#v", got["message"])
+	}
+}
+
+// 消息段原样透传给 OneBot：不改写类型和 data，含非字符串值；只有消息段、没有纯文本也能发送。
+func TestSenderPassesSegmentsThroughUnchanged(t *testing.T) {
+	var body []byte
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"status":"ok","retcode":0}`))
+	}))
+	defer api.Close()
+	a, err := New(testConfig(api.URL), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := messaging.OutboundMessage{ConversationID: "support", Segments: []messaging.Segment{
+		{Type: "text", Data: map[string]any{"text": "欢迎 "}},
+		{Type: "at", Data: map[string]any{"qq": "123"}},
+		{Type: "face", Data: map[string]any{"id": json.Number("178")}},
+		{Type: "image", Data: map[string]any{"file": "https://example.com/a.png"}},
+		{Type: "dice"},
+	}}
+	if err := a.Sender().SendTo(context.Background(), "8", msg); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Message json.RawMessage `json:"message"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"data":{"text":"欢迎 "},"type":"text"},{"data":{"qq":"123"},"type":"at"},{"data":{"id":178},"type":"face"},{"data":{"file":"https://example.com/a.png"},"type":"image"},{"data":{},"type":"dice"}]`
+	if string(got.Message) != want {
+		t.Fatalf("segments changed:\n got %s\nwant %s", got.Message, want)
+	}
+	if err := a.Sender().SendTo(context.Background(), "8", messaging.OutboundMessage{ConversationID: "support"}); err == nil {
+		t.Fatal("empty message accepted")
 	}
 }
 

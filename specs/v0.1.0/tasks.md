@@ -302,3 +302,24 @@
 - OneBot 适配器收到非 Bot 自身的入群事件后，调用 `get_group_member_info` 查询新成员，优先取群名片，其次昵称，填入事件的 `UserName`。
 - 查询带 3 秒超时；失败或超时只记 DEBUG 日志，`{user}` 退回用户 ID，欢迎语照常发送。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；相关包 -race 通过。
+
+## 2026-11-08 欢迎语支持消息段（@ 新成员）
+
+欢迎内容原先只能是固定文本，无法 @ 新成员。OneBot 本身支持消息段组合，因此把配置项从 `text` 改为 `message`，可写成字符串或消息段数组。设计取舍：消息段由宿主定义成平台无关的小集合，连接器负责翻译；不把 OneBot 的段原样透传，避免欢迎模块和 QQ 绑死，也让配置能在加载时校验。
+
+- 新增 `messaging.Segment`（`text`、`at`）与 `OutboundMessage.Segments`；`group.EventReply` 同时带纯文本形式和消息段，宿主投递前复核数量（最多 16 个）、类型和 `at` 目标（只能是纯数字，拒绝 `all`）。
+- `native.welcome` 的 `text` 字段移除，改为 `message`；`at` 段的 `data.qq`（沿用 OneBot 写法）可写 `{user_id}`（@ 新成员）或固定数字 ID。旧配置里的 `text` 会因严格解析报未知字段，需要手动改名。
+- OneBot 把 `at` 翻译为 `{"type":"at","data":{"qq":…}}`，适配器发送前再次校验；不支持 @ 的连接器（如本地 Echo）发送纯文本形式，`@` 段退化为 `@昵称`。
+- 新人昵称只作为文本出现，不会被解析成控制段。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；-race 通过。
+
+## 2026-11-08 欢迎语消息段改为原样透传
+
+OneBot 支持的消息段远多于 `text`/`at`，宿主自己维护一套受限的段集合会不断落后于平台。调整为：`message` 数组里的段不再检查内部语法，原样透传给连接器，形状沿用 OneBot 的 `{"type":…,"data":{…}}`。
+
+- `messaging.Segment` 改为 `Type` + `Data map[string]any`，删除 `SegmentText/SegmentAt` 与 `ValidUserID`；welcome 不再校验段类型和 data，只检查数组非空、最多 64 段、每段有 `type`、顶层键无拼写错误。
+- 宿主 `validReply` 只复核结构边界（有内容、数量有界、每段有 `type`），允许只有消息段、没有纯文本（如纯图片）。
+- 占位符 `{user}`、`{user_id}`、`{conversation_id}` 在所有字符串值里替换，数字和嵌套对象原样保留；替换发生在 JSON 解码之后，并深拷贝，昵称里的引号、花括号、CQ 字面量不会改变消息段结构，也不污染共享配置。数字用 `json.Number` 往返，QQ 号不丢精度。
+- OneBot 把段原样放进 `message`；不再校验 `at` 目标，因此 `qq: "all"` 会被原样发出，能否 @ 全体取决于账号权限和 OneBot 实现（取舍已写入 `group-management.md`）。
+- 不支持消息段的连接器发送纯文本形式：`text` 取其文本，`at` 写成 `@昵称`/`@号码`，其余类型省略。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；-race 通过。

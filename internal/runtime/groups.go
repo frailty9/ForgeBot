@@ -52,11 +52,11 @@ func (m *Manager) HandleGroupEvent(ctx context.Context, event group.Event) (grou
 			if reply == nil {
 				continue
 			}
-			result, err = m.groups.DeliverEvent(ctx, event, registration.ID, *reply, func(ctx context.Context, text string) error {
+			result, err = m.groups.DeliverEvent(ctx, event, registration.ID, *reply, func(ctx context.Context, reply group.EventReply) error {
 				if m.Paused() {
 					return operation.New(operation.Disabled, "runtime is paused")
 				}
-				return g.engine.SendEventReply(ctx, event.ConversationID, text)
+				return g.engine.SendEventReply(ctx, event.ConversationID, reply)
 			})
 			if err != nil {
 				return result, err

@@ -138,7 +138,7 @@ func TestModulesRejectUnboundGroupReferences(t *testing.T) {
 	platforms := config.PlatformConfig{Groups: []config.GroupBindingConfig{{ID: "local", ConnectorID: "echo", Target: "local"}}}
 	for id, options := range map[string]string{
 		"native.join_review":          `{"regex":".","groups":{"ghost":{"enabled":true}}}`,
-		"native.welcome":              `{"groups":{"ghost":{"enabled":true,"text":"hi"}}}`,
+		"native.welcome":              `{"groups":{"ghost":{"enabled":true,"message":"hi"}}}`,
 		"native.proactive_reply":      `{"groups":{"ghost":{"enabled":true}}}`,
 		"native.knowledge_reflection": `{"conversation_ids":["ghost"]}`,
 	} {

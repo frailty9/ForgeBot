@@ -413,19 +413,18 @@ type Sender struct {
 
 // SendTo sends a text message to one configured external group target.
 func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.OutboundMessage) error {
-	if strings.TrimSpace(target) == "" || strings.TrimSpace(msg.Text) == "" {
-		return operation.New(operation.Invalid, "onebot target and text are required")
+	if strings.TrimSpace(target) == "" || (strings.TrimSpace(msg.Text) == "" && len(msg.Segments) == 0) {
+		return operation.New(operation.Invalid, "onebot target and message content are required")
 	}
 	if len(msg.Media) > 0 {
 		return operation.Wrap("onebot.send", operation.Unsupported, operation.NotStarted, ErrUnsupported)
 	}
 	// 文本始终使用结构化段，避免成员名/模型输出内的 CQ 字面量变成平台动作。
-	payload := map[string]any{"message": []map[string]any{{"type": "text", "data": map[string]string{"text": msg.Text}}}}
-	payload["message_type"] = "group"
-	payload["group_id"] = numericOrString(target)
+	segments := outboundSegments(msg)
 	if msg.ReplyToMessageID != "" {
-		payload["message"] = []map[string]any{{"type": "reply", "data": map[string]any{"id": numericOrString(msg.ReplyToMessageID)}}, {"type": "text", "data": map[string]string{"text": msg.Text}}}
+		segments = append([]map[string]any{{"type": "reply", "data": map[string]any{"id": numericOrString(msg.ReplyToMessageID)}}}, segments...)
 	}
+	payload := map[string]any{"message": segments, "message_type": "group", "group_id": numericOrString(target)}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -434,7 +433,7 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	if err != nil {
 		return fmt.Errorf("onebot API URL: %w", err)
 	}
-	s.logger.DebugContext(ctx, "onebot outbound request", "endpoint", endpoint, "target", target, "conversation_id", msg.ConversationID, "reply_to", msg.ReplyToMessageID, "text_len", len([]rune(msg.Text)))
+	s.logger.DebugContext(ctx, "onebot outbound request", "endpoint", endpoint, "target", target, "conversation_id", msg.ConversationID, "reply_to", msg.ReplyToMessageID, "text_len", len([]rune(msg.Text)), "segments", segmentTypes(segments))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -467,6 +466,33 @@ func (s *Sender) SendTo(ctx context.Context, target string, msg messaging.Outbou
 	}
 	s.logger.DebugContext(ctx, "onebot outbound response accepted", "endpoint", endpoint, "status", result.Status)
 	return nil
+}
+
+// outboundSegments 生成 OneBot 的 message 数组。有消息段时原样透传（OneBot 的段与宿主的
+// 透传形状一致），不检查段的含义，是否合法由 OneBot 实现判断；没有消息段时整段文本作为一个
+// text 段，避免成员名/模型输出内的 CQ 字面量变成平台动作。
+func outboundSegments(msg messaging.OutboundMessage) []map[string]any {
+	if len(msg.Segments) == 0 {
+		return []map[string]any{{"type": "text", "data": map[string]string{"text": msg.Text}}}
+	}
+	out := make([]map[string]any, 0, len(msg.Segments))
+	for _, segment := range msg.Segments {
+		data := segment.Data
+		if data == nil {
+			data = map[string]any{}
+		}
+		out = append(out, map[string]any{"type": segment.Type, "data": data})
+	}
+	return out
+}
+
+// segmentTypes 只列出段类型，供 DEBUG 日志确认实际发出的结构（如是否含 at），不含内容。
+func segmentTypes(segments []map[string]any) []string {
+	types := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		types = append(types, fmt.Sprint(segment["type"]))
+	}
+	return types
 }
 
 // boundedLog 限制写入日志的外部文本长度，按字符截断避免切坏多字节字符。

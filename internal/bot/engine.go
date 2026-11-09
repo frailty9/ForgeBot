@@ -19,6 +19,7 @@ import (
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/conversation"
 	"github.com/soleapi/forgebot/internal/decision"
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
@@ -263,13 +264,13 @@ func (e *Engine) ToolNames() []string {
 }
 
 // SendEventReply 由宿主在已验证的群事件作用域调用，不向模块或模型暴露 Sender。
-func (e *Engine) SendEventReply(ctx context.Context, id, text string) error {
+func (e *Engine) SendEventReply(ctx context.Context, id string, reply group.EventReply) error {
 	e.lifetime.RLock()
 	defer e.lifetime.RUnlock()
 	if e.closing.Load() {
 		return operation.New(operation.Unavailable, "engine is stopped")
 	}
-	return e.deps.Sender.Send(ctx, messaging.OutboundMessage{ConversationID: id, Text: text})
+	return e.deps.Sender.Send(ctx, messaging.OutboundMessage{ConversationID: id, Text: reply.Text, Segments: reply.Segments})
 }
 
 func (e *Engine) respondDeferred(ctx context.Context, in messaging.InboundMessage) {

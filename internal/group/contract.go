@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/decision"
+	"github.com/soleapi/forgebot/internal/messaging"
 )
 
 // ID 由有序的字段生成稳定的事件标识，避免拼接歧义。
@@ -44,7 +45,12 @@ type EventResult struct {
 	Verdict  string `json:"verdict"`
 }
 
-type EventReply struct{ Text string }
+// EventReply 是模块对群事件的受限回复意图。Text 是完整的纯文本形式；Segments 非空时
+// 支持结构化段的连接器按段发送（如 @ 成员），其余连接器发送 Text。
+type EventReply struct {
+	Text     string
+	Segments []messaging.Segment
+}
 type EventHandler interface {
 	HandleGroupEvent(context.Context, Event) (EventResult, error)
 }
