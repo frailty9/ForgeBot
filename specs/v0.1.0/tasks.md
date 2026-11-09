@@ -323,3 +323,13 @@ OneBot 支持的消息段远多于 `text`/`at`，宿主自己维护一套受限�
 - OneBot 把段原样放进 `message`；不再校验 `at` 目标，因此 `qq: "all"` 会被原样发出，能否 @ 全体取决于账号权限和 OneBot 实现（取舍已写入 `group-management.md`）。
 - 不支持消息段的连接器发送纯文本形式：`text` 取其文本，`at` 写成 `@昵称`/`@号码`，其余类型省略。
 - 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；-race 通过。
+
+## 2026-11-09 专用决策模型缺省关闭，统一开关命名
+
+配置里只有 `decision.dm.disabled` 和 `conversation_memory.disabled` 用 `disabled`，其余开关都用 `enabled`。原因是这两项的 Go 字段是普通 `bool`，缺省启用只能把开关写成反向。梳理后确定规则：**缺省启用的功能写 `disabled`，缺省关闭的功能写 `enabled`**，看键名就知道缺省状态。
+
+- `conversation_memory` 保持缺省启用（连续追问依赖它；进程内、有界、不落盘、无外部依赖），键仍是 `disabled`。
+- `decision.dm` 改为缺省关闭：它依赖外部服务和凭据，启用后失败不降级，没有它时直接用回答 LLM 也能工作。键从 `disabled` 改为 `enabled`；写了 `dm` 对象但不写 `enabled` 现在等于未启用，必须显式 `enabled=true`。
+- 旧的 `decision.dm.disabled` 已移除，残留会报未知字段；原来写 `disabled: true` 的改为 `enabled: false`（语义不变），原来依赖“有对象就启用”的必须补 `enabled: true`。
+- 示例配置与本地配置已同步；`configuration.md` 写明命名规则。
+- 验证：go build ./...、go vet ./...、go test ./... -count=1 通过；-race 通过。

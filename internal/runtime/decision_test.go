@@ -24,7 +24,7 @@ func (s forbiddenDMSecrets) Get(context.Context, string) (string, error) {
 
 func TestDisabledDMUsesLLMWithoutResolvingCredential(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Disabled: true, Provider: "jev", Endpoint: "http://127.0.0.1:1", APIKeyRef: "unused"}
+	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Provider: "jev", Endpoint: "http://127.0.0.1:1", APIKeyRef: "unused"}
 	modelCalls := 0
 	client := moduleClient(func(context.Context, llm.Request) (llm.Response, error) {
 		modelCalls++
@@ -100,7 +100,7 @@ func TestDMCredentialReplacementRebuildsDecisionProvider(t *testing.T) {
 	}))
 	defer api.Close()
 	snapshot := testSnapshot()
-	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Provider: "jev", Endpoint: api.URL, APIKeyRef: "dm/key"}
+	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Enabled: true, Provider: "jev", Endpoint: api.URL, APIKeyRef: "dm/key"}
 	store := configuredSecrets(t, "answer-key")
 	candidate, err := store.Stage(context.Background(), "dm/key", "old-dm")
 	if err != nil {

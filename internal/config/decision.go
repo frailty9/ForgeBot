@@ -15,8 +15,9 @@ type DecisionConfig struct {
 	MaxConcurrent int                  `json:"max_concurrent,omitempty"`
 }
 type DecisionModelConfig struct {
-	// Disabled 允许保留供应商参数而不加载 DM；关闭后直接使用 LLM。
-	Disabled      bool     `json:"disabled"`
+	// Enabled 缺省 false：写出 dm 对象只是保留供应商参数，必须显式 enabled=true 才加载 DM；
+	// 未启用时直接使用 LLM，不解析 DM 凭据、不发 DM 请求。
+	Enabled       bool     `json:"enabled"`
 	Provider      string   `json:"provider"`
 	Endpoint      string   `json:"endpoint"`
 	Model         string   `json:"model"`
@@ -24,7 +25,7 @@ type DecisionModelConfig struct {
 	MinConfidence *float64 `json:"min_confidence,omitempty"`
 }
 
-func (c DecisionConfig) DMEnabled() bool { return c.DM != nil && !c.DM.Disabled }
+func (c DecisionConfig) DMEnabled() bool { return c.DM != nil && c.DM.Enabled }
 
 func (c DecisionConfig) Timeouts() (time.Duration, time.Duration, error) {
 	dm, llm := 3*time.Second, 8*time.Second
@@ -79,7 +80,7 @@ func (c DecisionConfig) Public() map[string]any {
 	dmTimeout, llmTimeout, _ := c.Timeouts()
 	result := map[string]any{"dm_timeout": dmTimeout.String(), "llm_timeout": llmTimeout.String(), "max_concurrent": c.MaxConcurrent}
 	if c.DM != nil {
-		result["dm"] = map[string]any{"disabled": c.DM.Disabled, "provider": c.DM.Provider, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
+		result["dm"] = map[string]any{"enabled": c.DM.Enabled, "provider": c.DM.Provider, "endpoint": c.DM.Endpoint, "model": c.DM.Model, "min_confidence": c.DM.MinConfidence}
 	}
 	return result
 }

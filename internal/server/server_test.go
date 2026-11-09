@@ -142,7 +142,7 @@ func TestAdminReflectionScanRequiresAuthenticationAndReportsDisabled(t *testing.
 func TestDecisionAPIKeyUsesWriteOnlyManagementAndEncryptedStore(t *testing.T) {
 	fixture := newAdminFixture(t)
 	runtimeConfig := config.DefaultRuntime()
-	runtimeConfig.Decision.DM = &config.DecisionModelConfig{Provider: "jev", APIKeyRef: "decision/private"}
+	runtimeConfig.Decision.DM = &config.DecisionModelConfig{Enabled: true, Provider: "jev", APIKeyRef: "decision/private"}
 	body, err := json.Marshal(admin.UpdateRequest{ExpectedVersion: 1, Runtime: runtimeConfig, Source: "dm-test"})
 	if err != nil {
 		t.Fatal(err)

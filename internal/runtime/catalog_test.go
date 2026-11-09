@@ -12,7 +12,7 @@ import (
 
 func TestCapabilitiesReflectConfigurationWithoutLeakingSecrets(t *testing.T) {
 	snapshot := testSnapshot()
-	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Provider: "jev", APIKeyRef: "decision/private-key-reference"}
+	snapshot.Runtime.Decision.DM = &config.DecisionModelConfig{Enabled: true, Provider: "jev", APIKeyRef: "decision/private-key-reference"}
 	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: registeredSender(t).registry, Secrets: configuredSecrets(t, "answer-private-value"), ClientFactory: (&recordingFactory{}).New, Modules: moduleRegistry(t, replyexperience.Factory{})})
 	if err != nil {
 		t.Fatal(err)

@@ -1,7 +1,7 @@
 {
   "decision": {
     "dm": {
-      "disabled": true,
+      "enabled": false,
       "provider": "jev",
       "endpoint": "https://api.typesafe.ai",
       "model": "jev-latest",
