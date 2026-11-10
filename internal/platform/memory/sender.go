@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/soleapi/forgebot/internal/group"
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/platform"
 )
@@ -20,6 +21,8 @@ type Adapter struct {
 	sender *Sender
 	errors chan error
 }
+
+func (*Sender) MessageSupport() group.MessageSupport { return group.MessageSupport{TextMessages: true} }
 
 func NewAdapter(id string, logger *slog.Logger) *Adapter {
 	return &Adapter{id: id, sender: NewSender(logger), errors: make(chan error)}

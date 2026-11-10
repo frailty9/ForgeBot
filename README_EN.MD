@@ -6,7 +6,7 @@ ForgeBot is a general-purpose AI Bot for group collaboration. Combine question a
 
 **One deployment serves one business.** A single ForgeBot instance can join many groups across several platforms, but they all share one business scope (`bot.system_prompt`), one knowledge base, one answer model and one set of feature rules such as join review; individual groups only choose which features to turn on. To serve several unrelated businesses, run one instance per business.
 
-The project is preparing a `v0.1.0` source preview and has not been released. OneBot 11 and a local Echo connector are available. WebUI, FPP external plugins, Telegram, SQL/NoSQL backends and vector retrieval are deferred.
+`v0.1.0` is merged and locally tagged; `v0.2.0` is in development. OneBot 11, local Echo, and an [official QQ group connector](docs/qqbot.md) are implemented; live acceptance for the new connector remains pending. WebUI, FPP external plugins, Telegram, SQL/NoSQL backends and vector retrieval are deferred.
 
 ## Capabilities
 
@@ -23,7 +23,7 @@ The project is preparing a `v0.1.0` source preview and has not been released. On
 - A host capability for recalling one message by ID within a bound conversation; triggering and moderation policy are left to consuming features.
 - Versioned configuration, history, rollback, component replacement, encrypted write-only credential management and a read-only capability catalog.
 
-Implementation and live acceptance are tracked separately in the [default behavior matrix](docs/default-behavior.md) and [version tasks](specs/v0.1.0/tasks.md).
+Implementation and live acceptance are tracked separately in the [default behavior matrix](docs/default-behavior.md) and [version tasks](specs/v0.2.0/tasks.md).
 
 ## First run
 

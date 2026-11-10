@@ -50,6 +50,21 @@
           "replay_ttl": "5m",
           "replay_max": 10000
         }
+      },
+      {
+        "id": "qqbot-main",
+        "type": "qqbot",
+        "enabled": false,
+        "options": {
+          "app_id": "YOUR_APP_ID",
+          "secret_ref": "qqbot/main",
+          "webhook_addr": "127.0.0.1:18091",
+          "webhook_path": "/qqbot",
+          "timeout": "15s",
+          "request_limit": 1048576,
+          "replay_ttl": "5m",
+          "replay_max": 10000
+        }
       }
     ],
     "groups": [
@@ -150,6 +165,10 @@
         "min_confidence": 0.9,
         "extra_directory": "extra"
       }
+    },
+    "native.qqbot": {
+      "enabled": false,
+      "options": {}
     },
     "native.join_review": {
       "enabled": false,

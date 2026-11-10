@@ -11,6 +11,7 @@ import (
 	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules/echo"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
+	"github.com/soleapi/forgebot/internal/platform"
 	runtimecfg "github.com/soleapi/forgebot/internal/runtime"
 )
 
@@ -75,7 +76,7 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 			t.Fatal(result)
 		}
 		_, status := root.runtime.Snapshot()
-		if len(status.Modules) != 8 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled {
+		if len(status.Modules) != 9 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled {
 			t.Fatal(status.Modules)
 		}
 		for _, module := range status.Modules[2:] {
@@ -86,6 +87,34 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 		if err := root.runtime.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestOfficialQQExampleValidatesWithoutStartingPlatform(t *testing.T) {
+	cfg, _, err := config.Load(config.LoadOptions{RuntimePath: filepath.Join("..", "..", "configs", "runtime.qqbot.example.json"), LookupEnv: func(string) string { return "" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NativeModules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms); err != nil {
+		t.Fatal(err)
+	}
+	providers, err := registry.BuildConnectorProviders(context.Background(), cfg.Runtime.Modules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer providers.Close(context.Background())
+	registration, ok := providers.ConnectorProvider("qqbot")
+	if !ok {
+		t.Fatal("official QQ provider not enabled by example")
+	}
+	connector := cfg.Runtime.Platforms.Connectors[0]
+	bindings := []platform.ConnectorBinding{{ConversationID: cfg.Runtime.Platforms.Groups[0].ID, Target: cfg.Runtime.Platforms.Groups[0].Target}}
+	if err := registration.Provider.ValidateOptions(registration.ModuleOptions, connector.Options, bindings); err != nil {
+		t.Fatal(err)
 	}
 }
 

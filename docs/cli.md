@@ -10,6 +10,8 @@ go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol anthropic_me
 
 `init` 生成的 `runtime.local.json` 也包含 `native.join_review` 的完整关闭示例：正则、模型规则、AND 组合、拒绝理由、关闭的 `local` 群及 `external_review` 的 URL、方法、Header 凭据引用、JSON body 和结果表达式。生成时不执行审批或访问外部校验服务。启用前绑定支持审批的连接器和逻辑群、填写真实 URL 并初始化 `review/token`；不需要外部判断时删除整个 `external_review`。模型开关保持 `false`，需要三项组合时改为 `true`，按正则 → HTTP → 模型依次执行，详见[外部 HTTP 审批](group-management.md#外部-http-审批)。
 
+`init` 也列出默认关闭的 `native.qqbot` 模块及 QQ 官方 connector 完整参数。使用前填写 AppID/凭据引用、初始化 AppSecret、绑定 `group_openid`，然后启用模块和连接器；生成配置不会访问 QQ。完整启用示例见[QQ 官方接入](qqbot.md)。
+
 首次写入回答 Key：
 
 ```powershell
@@ -55,6 +57,8 @@ go run ./cmd/forgebot doctor -config configs/forgebot.local.yaml -probe-tools
 ```
 
 `-probe` 发一个有界的回答模型完成请求，可能消耗额度；`-probe-tools` 初始化 MCP HTTP 或执行已配置的 stdio 命令、列出工具，完成后关闭，不调用工具。探测共享 30 秒总预算、单项最多 15 秒。它们不审核申请、不发公告、不撤回消息。当前不进行专用 DM 的真实探测，DM 单独验收。
+
+QQ 官方群聊支持 `qqbot` 类型与 `native.qqbot` 模块，详见[接入教程](qqbot.md)。doctor 校验 options 和 `secret_ref` 对应凭据，不请求 QQ Token、不配置公开 HTTPS 回调，ready 不代表真实收发可用。使用中的 AppSecret 可通过受认证的 `/v1/admin/secrets/{ref}` 轮换，CLI 初始化不覆盖已有值。
 
 运行后可查看当前能力：
 

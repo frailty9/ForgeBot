@@ -364,8 +364,10 @@ OneBot `options` 字段：
 OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被引用消息，并将引用文字和图片作为独立上下文传给 LLM；引用内容不会并入当前消息文本，因此不会影响命令识别、消息准入或去重。
 
 注意：当前 `send_token` 和 `receive_secret` 仍以明文保存在运行时 JSON 中；管理 API
-的公开配置响应只显示它们是否已配置。回答/DM、MCP 与本批外部审批凭据使用加密 SecretStore。未知
+的公开配置响应只显示它们是否已配置。回答/DM、MCP、外部审批及 QQ 官方 AppSecret 使用加密 SecretStore。未知
 且禁用的未来 Provider 实例不会在公开响应中回显其原始 `options`。
+
+QQ 官方机器人使用独立的 `qqbot` 类型和 `native.qqbot` 模块，默认关闭，Webhook、AppID/SecretStore、被动回复及撤回边界见 [QQ 官方接入](qqbot.md)。完整示例是 [`runtime.qqbot.example.json`](../configs/runtime.qqbot.example.json)，不要将其 options 混入 OneBot 实例。字段严格解析，secret_ref 不写真实 AppSecret。
 
 #### OneBot 配置迁移（破坏式）
 

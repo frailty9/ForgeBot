@@ -17,6 +17,7 @@ import (
 	"github.com/soleapi/forgebot/internal/modules/knowledgereflection"
 	"github.com/soleapi/forgebot/internal/modules/onebot"
 	"github.com/soleapi/forgebot/internal/modules/proactivereply"
+	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 	"github.com/soleapi/forgebot/internal/modules/structuredsearch"
 	"github.com/soleapi/forgebot/internal/modules/welcome"
@@ -108,7 +109,7 @@ func NativeModules() (*modules.Registry, error) {
 	for _, item := range []struct {
 		factory modules.Factory
 		order   int
-	}{{echo.Factory{}, 50}, {onebot.Factory{}, 60}, {replyexperience.Factory{}, 100}, {proactivereply.Factory{}, 200}, {structuredsearch.Factory{}, 300}, {knowledgereflection.Factory{}, 400}, {joinreview.Factory{}, 450}, {welcome.Factory{}, 500}} {
+	}{{echo.Factory{}, 50}, {onebot.Factory{}, 60}, {qqbot.Factory{}, 70}, {replyexperience.Factory{}, 100}, {proactivereply.Factory{}, 200}, {structuredsearch.Factory{}, 300}, {knowledgereflection.Factory{}, 400}, {joinreview.Factory{}, 450}, {welcome.Factory{}, 500}} {
 		if err := registry.Register(item.factory, hooks.Native, item.order, hooks.Continue); err != nil {
 			return nil, err
 		}

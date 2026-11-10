@@ -91,6 +91,7 @@ type ReviewReasonReporter interface {
 	GroupReviewReasonSupported() bool
 }
 type Support struct {
+	MessageSupport
 	JoinEvents       bool   `json:"join_events"`
 	MemberEvents     bool   `json:"member_events"`
 	JoinReview       bool   `json:"join_review"`
@@ -99,6 +100,14 @@ type Support struct {
 	Permission       string `json:"permission"`
 }
 
+// MessageSupport 是本地投递能力声明，不探测账号权限。
+type MessageSupport struct {
+	TextMessages       bool `json:"text_messages"`
+	OutboundSegments   bool `json:"outbound_segments"`
+	PassiveRepliesOnly bool `json:"passive_replies_only"`
+}
+
+type MessageSupportReporter interface{ MessageSupport() MessageSupport }
 type Actions interface {
 	// Support 只读本地适配能力元数据，不主动探测远端权限或触发网络请求。
 	Support(context.Context, string) (Support, error)

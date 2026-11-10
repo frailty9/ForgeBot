@@ -44,6 +44,13 @@ conversation memory and proactive yielding belong to the process Runtime,
 not an individual generation. A generation leases those services without
 closing them when its own Engine retires.
 
+Sender/ConnectorSender keep their error-only contract. Platform message IDs and
+reference indexes needed by a protocol remain inside its adapter; no common
+receipt is returned or used to fill Bot message IDs in Core history. The existing
+host recording of successful outbound text is unchanged and has no platform ID.
+Continuous direct question/answer context remains in conversation.Memory,
+independent of message receipts or platform self-message callbacks.
+
 Group requests and member events are separate from chat messages. Optional
 connector operations include join review and message recall; native event
 modules return restricted reply intents for the current event. The host owns
@@ -98,6 +105,11 @@ must not depend on or expose the complete Web administration service.
   options, defaults, redaction, binding conversion, and adapter construction.
 - `internal/platform/onebot`: OneBot 11 HTTP webhook adapter and `send_msg`
   sender, without RuntimeConfig knowledge.
+- `internal/modules/qqbot`: default-disabled official QQ group Provider,
+  strict instance options, redacted metadata and declared secret references.
+- `internal/platform/qqbot`: signed Webhook ingestion, bounded queue/replay
+  and reference caches, cached AccessToken, passive text delivery and recall;
+  independent of OneBot.
 - `internal/operations`: protocol-neutral operator-group command policy and
   routing contract; command implementations are introduced separately.
 - `internal/operator`: restricted runtime operations exposed to operator groups;

@@ -12,7 +12,7 @@
 | ARCH-P06 旁路 | `Builder.ConnectorFactory/ConnectorProviders` 仍存在；生产组合根只注册模块，测试仍走旁路 | 删除宿主旁路，测试迁到模块 Provider 注册 |
 | BOT-19 撤回 | Sender 只返回 error；OneBot 丢弃发送响应里的消息 ID；无撤回可选接口 | 保持 error-only 发送接口；宿主共享 capability 按群绑定后传消息 ID 撤回，业务触发后续确定 |
 | 外部入群审批 | 模块只提供 Policy，Core 的 group.Service 判断并执行 | 继续由 Core 发外部请求，接入三种判断及凭据解析 |
-| QQ 官方连接器 | 生产只注册 Echo/OneBot Provider | 独立 `native.qq_official` 模块及 `qq_official` 适配器 |
+| QQ 官方连接器 | 生产只注册 Echo/OneBot Provider | 独立 `native.qqbot` 模块及 `qqbot` 适配器 |
 
 代码核对纠正：pipeline 与 reflector 都依赖 `buffer.AnswerSession`；reflection.Status 还依赖 buffer/scanner 的 Stats。删除包前必须迁移这些类型。`quiet_window/max_session_duration` 当前属于归组和调度，不属于 pipeline。
 
@@ -125,7 +125,7 @@ Runtime 在模块构建前提供此 capability；模块声明 Requires 后可解
 
 ### 6.2 模块与凭据生命周期
 
-新增 `internal/modules/qqofficial` 与 `internal/platform/qqofficial`，在 NativeModules 注册 `native.qq_official`（默认关闭），Provider 类型为 `qq_official`。独立于 OneBot 的协议实现。
+新增 `internal/modules/qqbot` 与 `internal/platform/qqbot`，在 NativeModules 注册 `native.qqbot`（默认关闭），Provider 类型为 `qqbot`。独立于 OneBot 的协议实现。
 
 建议实例 options 为 `app_id/secret_ref/webhook_addr/webhook_path/timeout/request_limit/replay_ttl/replay_max`；群 target 为 group_openid。API 和 Token 地址使用官方固定 HTTPS 地址，不增加面向生产的任意地址配置；测试用注入 HTTP client/transport。
 
@@ -135,25 +135,25 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 
 ### 6.3 入站、引用与投递
 
-- Webhook 限制请求大小、核对 AppID；op=13 校验回调按官方挑战流程独立处理。业务事件校验官方签名与时间，验签必须覆盖原始字节，不能解码再编码后验证。验签后做有界去重、入队并及时 ACK，后台调用宿主，不能等待 LLM 完成再 ACK；队列满返回可重试失败，不先确认再丢失。
+- Webhook 限制请求大小、核对 AppID；包括 op=13 在内的所有回调先校验原始字节签名与时间，通过后再按挑战或业务事件处理。不能让未认证的 op=13 成为任意签名入口，也不能解码再编码后验签。业务事件验签后做有界去重、入队并及时 ACK，后台调用宿主，不能等待 LLM 完成再 ACK；队列满返回可重试失败，不先确认再丢失。
 - 映射群/用户开放 ID、消息 ID、文本、附件、引用及角色。`GROUP_AT_MESSAGE_CREATE` 取得明确触发资格；普通群消息进入 history 和已有主动插话策略。`@全体` 不设置 Mentioned，仅官方事件或确认为 Bot 本人的 @ 可设置。
 - 官方当前群角色字段可映射 owner/admin；缺字段时视为普通成员，不从昵称、用户文本或运维群配置提权。连接器没有收到全量消息权限时，文档说明 history 和沉淀只能看到实际投递的事件。
 - 官方消息引用索引与消息 ID 不是同一字段。适配器维护有界映射，将平台引用归一为 Core 消息 ID；无法解析时不猜。被动回复使用触发消息 ID，引用展示仅在平台引用索引已知时附加。
-- 发送成功返回官方消息 ID，贯通通用发送回执。进度提示与最终回答可能回复同一消息，`msg_seq` 由适配器在有限有效期内按触发消息管理，不能始终固定为同一个值；不增加自动发送重试。
+- 官方发送响应的消息 ID 和引用索引仅在适配器内部保存用于协议操作，不返回通用回执或补写宿主 history。进度提示与最终回答可能回复同一消息，`msg_seq` 由适配器在有限有效期内按触发消息管理，不能始终固定为同一个值；不增加自动发送重试。
 - 首期以被动文本回复完成问答链路，遵守平台有效期和条数限制。没有平台允许的触发依据时，对欢迎语、通知或主动推送返回明确 unsupported/expired，不默认消耗主动推送额度。出站富媒体不随本版扩展；纯文本可用时沿用文本形式。
-- 实现已公开的群消息撤回接口，并复用 BOT-19 路由。官方限制发送后 2 分钟内；Bot 是群管理员时可撤回自己和普通成员的消息，普通成员身份只能撤回自己的消息。按官方返回区分权限与过期。群入群审批/新人事件未实施时明确为不支持，不伪造为聊天消息。
+- 实现已公开的群消息撤回接口，并通过 BOT-19 基础能力路由。适配器不按内部缓存可见性或本地两分钟计时拒绝请求，实际限制与账号权限以官方响应为准，映射已知权限/过期码。群入群审批/新人事件未实施时明确为不支持，不伪造为聊天消息。
 
 ### 6.4 能力目录与验收
 
-目录继续分开表示：协议实现支持、配置启用、已加载、账号权限未知和实际调用结果。至少列明群文本收发、发送回执、撤回，以及未实现的审批、成员事件、出站媒体和主动推送边界；按需给现有目录补最小投递能力字段，不构建新的通用能力框架。
+目录继续分开表示：协议实现支持、配置启用、已加载、账号权限未知和实际调用结果。至少列明群文本收发、撤回，以及未实现的审批、成员事件、出站媒体和主动推送边界；按需给现有目录补最小投递能力字段，不构建新的通用能力框架。
 
-受控测试覆盖签名/校验/重复/队列满/关闭、Token 并发刷新、群绑定、角色、@全体、引用、msg_seq、回执、权限和过期。真实账号必须完成“有效回调 → @Bot → 模型回答 → 平台收到消息”；如账号具备撤回权限，再验管理员引用撤回。没有账号或公网回调条件时，单独记录真实验收待办，不标版本完成。
+受控测试覆盖签名/校验/重复/队列满/关闭、Token 并发刷新、群绑定、角色、@全体、引用、msg_seq、权限和过期。真实账号必须完成“有效回调 → @Bot → 模型回答 → 平台收到消息”；如账号具备撤回权限，再验 capability 按 ID 撤回。没有账号或公网回调条件时，单独记录真实验收待办，不标版本完成。
 
 ## 7. 文档、验证与交付
 
-2026-11-10 实施补充：为外部审批等按引用配置的凭据提供运行中管理入口，新增 Bearer 认证的 `GET/PUT/DELETE /v1/admin/secrets/{ref}`。GET 只返回配置状态/版本/更新时间，PUT 使用 `value`，不提供读取明文；复用 Secret Manager 候选激活和 Runtime.ReplaceSecret/DeleteSecret，保留回答/DM 必需凭据保护。外部审批在后续请求读取当前凭据。本批不包含 QQ Provider 或连接器凭据换代。
+2026-11-10 实施补充：为外部审批等按引用配置的凭据提供运行中管理入口，新增 Bearer 认证的 `GET/PUT/DELETE /v1/admin/secrets/{ref}`。GET 只返回配置状态/版本/更新时间，PUT 使用 `value`，不提供读取明文；复用 Secret Manager 候选激活和 Runtime.ReplaceSecret/DeleteSecret，保留回答/DM 必需凭据保护。外部审批在后续请求读取当前凭据。QQ Provider 与凭据换代随后分批实施，完成情况见 tasks。
 
-连接器凭据生命周期补充：Provider 可选实现 CredentialProvider，宿主仅向当前实例传入其声明的键值。凭据替换将候选值用于构建新运行代和整个连接器集合，沿用停止旧集合、启动新集合、激活保存凭据、发布的顺序；失败尝试恢复旧集合并保留旧凭据，恢复失败返回错误。必需凭据删除在候选构建时拒绝。入站等待换代时可取消，避免 Stop 与路由屏障互相等待。QQ Provider 和 doctor 的具体接入留待后续批次。
+连接器凭据生命周期补充：Provider 可选实现 CredentialProvider，宿主仅向当前实例传入其声明的键值。凭据替换将候选值用于构建新运行代和整个连接器集合，沿用停止旧集合、启动新集合、激活保存凭据、发布的顺序；失败尝试恢复旧集合并保留旧凭据，恢复失败返回错误。必需凭据删除在候选构建时拒绝。入站等待换代时可取消，避免 Stop 与路由屏障互相等待。QQ Provider 和 doctor 在本批接入，配置示例与 init 同步列出默认关闭的 QQ 参数。
 
 每个工作包同步更新自己的 specs 进度、用户 docs 和示例；变更配置同时更新 `docs/config-index.md`。计划文档不能让用户文档提前声称新功能可用，不改本地部署配置或密钥。
 

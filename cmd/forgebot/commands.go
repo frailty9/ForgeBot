@@ -19,6 +19,7 @@ import (
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
+	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -117,6 +118,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	// 初始化文件列出关闭的审批配置，便于按需填写；不改变运行时缺省行为。
 	reviewEnabled := false
 	cfg.Modules = map[string]config.ModuleConfig{
+		qqbot.ID: {Enabled: &reviewEnabled, Options: json.RawMessage(`{}`)},
 		"native.join_review": {
 			Enabled: &reviewEnabled,
 			Options: json.RawMessage(`{
@@ -136,6 +138,10 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 }`),
 		},
 	}
+	cfg.Platforms.Connectors = append(cfg.Platforms.Connectors, config.ConnectorConfig{
+		ID: "qqbot-main", Type: "qqbot", Enabled: false,
+		Options: json.RawMessage(`{"app_id":"YOUR_APP_ID","secret_ref":"qqbot/main","webhook_addr":"127.0.0.1:18091","webhook_path":"/qqbot","timeout":"15s","request_limit":1048576,"replay_ttl":"5m","replay_max":10000}`),
+	})
 	runtimeData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -213,6 +219,7 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 		registryErr = registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms)
 	}
 	add("native_module_options", registryErr, "使用正式模块工厂校验配置，未构建索引或后台任务")
+	connectorCredentialRefs := map[string][]string{}
 	if registryErr == nil {
 		providers, err := registry.BuildConnectorProviders(context.Background(), cfg.Runtime.Modules, nil)
 		if err == nil {
@@ -233,6 +240,11 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 					}
 				}
 				add("connector:"+connector.ID, registration.Provider.ValidateOptions(registration.ModuleOptions, connector.Options, bindings), "验证协议参数，未启动连接器")
+				if provider, ok := registration.Provider.(platform.CredentialProvider); ok {
+					refs, err := provider.CredentialRefs(registration.ModuleOptions, connector.Options)
+					add("connector_credentials_config:"+connector.ID, err, "检查连接器凭据引用声明")
+					connectorCredentialRefs[connector.ID] = refs
+				}
 			}
 		} else {
 			add("connector_providers", err, "无法构建协议提供者")
@@ -273,6 +285,21 @@ func doctor(cfg config.Snapshot, probe, probeTools bool, out io.Writer) error {
 				apiKey, err = credentials.Get(context.Background(), cfg.Runtime.LLM.APIKeyRef)
 				add("answer_credential", err, "先执行 -init-api-key <llm.api_key_ref> 配置回答凭据")
 			}
+		}
+	}
+	for id, refs := range connectorCredentialRefs {
+		for _, ref := range refs {
+			var err error
+			if credentials == nil {
+				err = operation.New(operation.NotConfigured, "connector credential unavailable")
+			} else {
+				var value string
+				value, err = credentials.Get(context.Background(), ref)
+				if err == nil && value == "" {
+					err = operation.New(operation.NotConfigured, "connector credential empty")
+				}
+			}
+			add("connector_credential:"+id, err, "先通过 -init-api-key 写入连接器 secret_ref 对应凭据；不请求平台 Token")
 		}
 	}
 	// 只绑定本地监听地址检查占用，立即关闭；不连接平台也不发送群消息。

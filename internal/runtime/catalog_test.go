@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/config"
+	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
 )
 
@@ -39,5 +40,39 @@ func TestCapabilitiesReflectConfigurationWithoutLeakingSecrets(t *testing.T) {
 		if strings.Contains(string(data), secret) {
 			t.Fatal("catalog leaks secret")
 		}
+	}
+}
+
+func TestQQCapabilitiesDeclarePassiveTextRecallAndMissingEvents(t *testing.T) {
+	snapshot := testSnapshot()
+	on := true
+	snapshot.Runtime.Modules = map[string]config.ModuleConfig{qqbot.ID: {Enabled: &on}}
+	snapshot.Runtime.Platforms.Connectors[0].Type = "qqbot"
+	snapshot.Runtime.Platforms.Connectors[0].Options = json.RawMessage(`{"app_id":"app","secret_ref":"qq/key","webhook_addr":"127.0.0.1:0","webhook_path":"/qq"}`)
+	store := configuredSecrets(t, "answer")
+	candidate, err := store.Stage(context.Background(), "qq/key", "app-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Activate(context.Background(), candidate); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{Modules: moduleRegistry(t, qqbot.Factory{}), Secrets: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	found := false
+	for _, entry := range manager.Capabilities(context.Background()).Entries {
+		if entry.Kind == "group" {
+			found = true
+			s := entry.GroupSupport
+			if s == nil || !s.TextMessages || !s.PassiveRepliesOnly || !s.MessageRecall || s.JoinReview || s.MemberEvents || s.JoinEvents || s.OutboundSegments || s.Permission != "unknown" {
+				t.Fatal(entry)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("group capability missing")
 	}
 }

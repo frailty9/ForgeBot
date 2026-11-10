@@ -24,6 +24,10 @@ type requestReference struct {
 func (*Sender) GroupEventSupport() (bool, bool)  { return true, true }
 func (*Sender) GroupReviewReasonSupported() bool { return true }
 
+func (*Sender) MessageSupport() group.MessageSupport {
+	return group.MessageSupport{TextMessages: true, OutboundSegments: true}
+}
+
 // joinAnswer 取出 QQ 验证问题拼接格式“问题：xxx 换行 答案：yyy”中的答案，使审批规则
 // 只面对用户填写的内容；没有这个结构时原样返回。以第一处换行加“答案：”为界：问题由
 // 群管理员设定，答案由申请人填写，若取最后一处，申请人可在答案里伪造“答案：xxx”绕过规则。

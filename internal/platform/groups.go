@@ -23,6 +23,10 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	}
 	_, review := target.sender.(group.Reviewer)
 	_, recall := target.sender.(group.Recaller)
+	var messages group.MessageSupport
+	if reporter, ok := target.sender.(group.MessageSupportReporter); ok {
+		messages = reporter.MessageSupport()
+	}
 	joinEvents, memberEvents := false, false
 	if reporter, ok := target.sender.(group.EventReporter); ok {
 		joinEvents, memberEvents = reporter.GroupEventSupport()
@@ -31,7 +35,7 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	if reporter, ok := target.sender.(group.ReviewReasonReporter); ok {
 		reviewReason = review && reporter.GroupReviewReasonSupported()
 	}
-	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, MessageRecall: recall, Permission: "unknown"}, nil
+	return group.Support{MessageSupport: messages, JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, MessageRecall: recall, Permission: "unknown"}, nil
 }
 
 // Recall 实现 group.MessageRecaller：id 为逻辑群 ID，先查群绑定得到

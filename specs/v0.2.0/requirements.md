@@ -83,7 +83,7 @@ v0.1.0 的 `native.knowledge_reflection` 有功能实现，但运营效果未验
 
 **来源**：本版新提出。
 
-新增 QQ 官方机器人平台适配器，作为独立 ConnectorProvider。QQ 官方机器人（`qq_official`）与 OneBot（`onebot`）是独立的连接器类型，各自注册，不共享实现。
+新增 QQ 官方机器人平台适配器，作为独立 ConnectorProvider。QQ 官方机器人（`qqbot`）与 OneBot（`onebot`）是独立的连接器类型，各自注册，不共享实现。
 
 **背景**：QQ 官方机器人 API（原 QQ频道 Bot API，现已扩展到群/私聊）使用 Webhook 或 WebSocket 接收事件，使用 REST API 发送消息，鉴权方式、消息格式和能力边界与 OneBot 有本质区别。
 

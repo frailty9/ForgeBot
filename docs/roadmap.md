@@ -5,10 +5,13 @@ Current implementation planning and handoff are tracked in
 The phase lists below are historical milestones, not a complete implementation audit.
 
 The current target is [v0.2.0](../specs/v0.2.0/requirements.md): history-based
-knowledge reflection, Connector injection cleanup, quoted message recall,
+knowledge reflection, Connector injection cleanup, host message recall by ID,
 external HTTP join review, and an official QQ connector. The
 [design](../specs/v0.2.0/design.md) and [task plan](../specs/v0.2.0/tasks.md)
-are authorized for implementation. These additions are not yet implemented.
+are authorized for implementation. Reflection, injection cleanup, recall, external
+review and credential lifecycle are committed. The official QQ connector is the
+current staged batch for review; generic delivery receipts were canceled on
+2026-11-10. Live acceptance remains pending, so v0.2.0 is not complete.
 v0.1.0 is merged and locally tagged; real reflection quality remains pending
 after the refactor.
 

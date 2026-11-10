@@ -18,6 +18,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/modules/joinreview"
+	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -71,6 +72,13 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	var template map[string]string
 	if err := json.Unmarshal([]byte(external.Body), &template); err != nil || template["application"] != "{application}" || template["user_id"] != "{user_id}" || template["conversation_id"] != "{conversation_id}" {
 		t.Fatal("init must include a valid JSON body template", err)
+	}
+	qqModule, exists := cfg.Runtime.Modules[qqbot.ID]
+	if !exists || qqModule.Enabled == nil || *qqModule.Enabled {
+		t.Fatal("init must include the disabled QQ official module")
+	}
+	if len(cfg.Runtime.Platforms.Connectors) != 2 || cfg.Runtime.Platforms.Connectors[1].Type != "qqbot" || cfg.Runtime.Platforms.Connectors[1].Enabled {
+		t.Fatal("init must include the disabled QQ official connector")
 	}
 	cfg.Static.Server.Addr = "127.0.0.1:0"
 	// init 把主密钥写进 YAML，无需再设置环境变量。
@@ -133,6 +141,36 @@ func TestCapabilitiesFetchUsesTokenAndRedactedProjection(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "local-token") || !strings.Contains(output.String(), `"version": 7`) {
 		t.Fatal(output.String())
+	}
+}
+
+func TestDoctorChecksOfficialQQCredentialWithoutContactingPlatform(t *testing.T) {
+	dir := t.TempDir()
+	if err := initializeProject(dir, "test-model", "https://example.invalid/v1", llm.OpenAIResponses, false, true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.LoadOptions{Path: filepath.Join(dir, "forgebot.local.yaml"), LookupEnv: func(string) string { return "" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Static.Server.Addr = "127.0.0.1:0"
+	cfg.Runtime.LLM.Authentication = config.AuthenticationNone
+	on := true
+	cfg.Runtime.Modules = map[string]config.ModuleConfig{qqbot.ID: {Enabled: &on}}
+	cfg.Runtime.Platforms = config.PlatformConfig{Connectors: []config.ConnectorConfig{{ID: "qq", Type: "qqbot", Enabled: true, Options: json.RawMessage(`{"app_id":"app","secret_ref":"qq/key","webhook_addr":"127.0.0.1:0","webhook_path":"/qq"}`)}}, Groups: []config.GroupBindingConfig{{ID: "support", ConnectorID: "qq", Target: "group"}}}
+	var output bytes.Buffer
+	if err := doctor(cfg, false, false, &output); err == nil || !strings.Contains(output.String(), "connector_credential:qq") {
+		t.Fatal("missing QQ credential not diagnosed", output.String(), err)
+	}
+	if err := initializeAPIKey(cfg, "qq/key", "test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := doctor(cfg, false, false, &output); err != nil {
+		t.Fatal(output.String(), err)
+	}
+	if strings.Contains(output.String(), "test-secret") {
+		t.Fatal("doctor leaked AppSecret")
 	}
 }
 
