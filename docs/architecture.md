@@ -111,6 +111,9 @@ must not depend on or expose the complete Web administration service.
 5. New protocols should not require edits to the core engine: a Provider
    validates opaque options, produces a redacted public view, and builds an
    unstarted Adapter. `Adapter.Start` remains ConnectorSet-owned.
+   Runtime discovers Providers exclusively through enabled module registrations;
+   lifecycle tests use the same module/Provider/ConnectorSet path. Builder no
+   longer exposes ConnectorFactory or host ConnectorProviders injection.
 6. The LLM boundary supports exactly three wire protocols:
    `anthropic_messages`, `openai_responses`, and `openai_completions`.
    Vendors are configuration targets, not new protocol abstractions.

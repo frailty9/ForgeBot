@@ -100,13 +100,14 @@ func TestCommitRuntimeNoopStillUsesPersistence(t *testing.T) {
 
 func TestManagerHotReplacesOperatorWithoutReplacingConnectors(t *testing.T) {
 	snapshot := testSnapshot()
-	var sets []*fakeConnectorSet
+	var sets []*fakeConnectorAdapter
 	manager, err := NewManager(context.Background(), snapshot, Builder{
-		ConnectorFactory: func(config.PlatformConfig) (platform.ConnectorSet, error) {
-			set := newFakeConnectorSet()
+		Modules: connectorRegistry(t, func(request platform.ConnectorBuildRequest) (platform.Adapter, error) {
+			set := newFakeConnectorAdapter()
+			set.id = request.ConnectorID
 			sets = append(sets, set)
 			return set, nil
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -295,13 +296,14 @@ func TestManagedSecretReplacementSwitchesOnlyAfterValidation(t *testing.T) {
 
 func TestManagerOwnsConnectorLifecycleAndReplacesPlatformGeneration(t *testing.T) {
 	snapshot := testSnapshot()
-	var sets []*fakeConnectorSet
-	factory := func(config.PlatformConfig) (platform.ConnectorSet, error) {
-		set := newFakeConnectorSet()
+	var sets []*fakeConnectorAdapter
+	factory := func(request platform.ConnectorBuildRequest) (platform.Adapter, error) {
+		set := newFakeConnectorAdapter()
+		set.id = request.ConnectorID
 		sets = append(sets, set)
 		return set, nil
 	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Modules: connectorRegistry(t, factory)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,16 +340,17 @@ func TestManagerOwnsConnectorLifecycleAndReplacesPlatformGeneration(t *testing.T
 
 func TestManagerRestoresConnectorsWhenCandidateStartFails(t *testing.T) {
 	snapshot := testSnapshot()
-	var sets []*fakeConnectorSet
-	factory := func(cfg config.PlatformConfig) (platform.ConnectorSet, error) {
-		set := newFakeConnectorSet()
-		if cfg.Groups[0].Target == "broken" {
+	var sets []*fakeConnectorAdapter
+	factory := func(request platform.ConnectorBuildRequest) (platform.Adapter, error) {
+		set := newFakeConnectorAdapter()
+		set.id = request.ConnectorID
+		if request.Bindings[0].Target == "broken" {
 			set.failStart = errors.New("listen failed")
 		}
 		sets = append(sets, set)
 		return set, nil
 	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Modules: connectorRegistry(t, factory)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,13 +376,14 @@ func TestManagerRestoresConnectorsWhenCandidateStartFails(t *testing.T) {
 
 func TestManagerRestoresConnectorsWhenPersistenceFails(t *testing.T) {
 	snapshot := testSnapshot()
-	var sets []*fakeConnectorSet
-	factory := func(config.PlatformConfig) (platform.ConnectorSet, error) {
-		set := newFakeConnectorSet()
+	var sets []*fakeConnectorAdapter
+	factory := func(request platform.ConnectorBuildRequest) (platform.Adapter, error) {
+		set := newFakeConnectorAdapter()
+		set.id = request.ConnectorID
 		sets = append(sets, set)
 		return set, nil
 	}
-	manager, err := NewManager(context.Background(), snapshot, Builder{ConnectorFactory: factory})
+	manager, err := NewManager(context.Background(), snapshot, Builder{Modules: connectorRegistry(t, factory)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +411,8 @@ func TestManagerRestoresConnectorsWhenPersistenceFails(t *testing.T) {
 	}
 }
 
-type fakeConnectorSet struct {
+type fakeConnectorAdapter struct {
+	id        string
 	starts    int
 	stops     int
 	running   bool
@@ -437,11 +442,14 @@ func TestNotificationTargetsFollowCurrentRuntimeSnapshot(t *testing.T) {
 }
 
 func TestConnectorFailureDegradesRuntimeAndPublishesEvent(t *testing.T) {
-	set := newFakeConnectorSet()
+	set := newFakeConnectorAdapter()
 	publisher := &recordingPublisher{events: make(chan notification.Event, 2)}
 	manager, err := NewManager(context.Background(), testSnapshot(), Builder{
-		ConnectorFactory: func(config.PlatformConfig) (platform.ConnectorSet, error) { return set, nil },
-		Notifications:    publisher,
+		Modules: connectorRegistry(t, func(request platform.ConnectorBuildRequest) (platform.Adapter, error) {
+			set.id = request.ConnectorID
+			return set, nil
+		}),
+		Notifications: publisher,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -461,7 +469,7 @@ func TestConnectorFailureDegradesRuntimeAndPublishesEvent(t *testing.T) {
 		t.Fatal("notification was not published")
 	}
 	_, status := manager.Snapshot()
-	if status.State != StateDegraded || status.Error != "connection lost" {
+	if status.State != StateDegraded || status.Error != "connector echo: connection lost" {
 		t.Fatalf("status = %+v", status)
 	}
 }
@@ -470,12 +478,16 @@ type recordingPublisher struct{ events chan notification.Event }
 
 func (p *recordingPublisher) Publish(event notification.Event) { p.events <- event }
 
-func newFakeConnectorSet() *fakeConnectorSet {
-	return &fakeConnectorSet{errors: make(chan error), running: false}
+func newFakeConnectorAdapter() *fakeConnectorAdapter {
+	return &fakeConnectorAdapter{errors: make(chan error), running: false}
 }
 
-func (s *fakeConnectorSet) Send(context.Context, messaging.OutboundMessage) error { return nil }
-func (s *fakeConnectorSet) Start(context.Context, platform.Handler) error {
+func (s *fakeConnectorAdapter) ID() string                       { return s.id }
+func (s *fakeConnectorAdapter) Sender() platform.ConnectorSender { return s }
+func (s *fakeConnectorAdapter) SendTo(context.Context, string, messaging.OutboundMessage) error {
+	return nil
+}
+func (s *fakeConnectorAdapter) Start(context.Context, platform.Handler) error {
 	s.starts++
 	if s.failStart != nil {
 		return s.failStart
@@ -483,19 +495,12 @@ func (s *fakeConnectorSet) Start(context.Context, platform.Handler) error {
 	s.running = true
 	return nil
 }
-func (s *fakeConnectorSet) Stop(context.Context) error {
+func (s *fakeConnectorAdapter) Stop(context.Context) error {
 	s.stops++
 	s.running = false
 	return nil
 }
-func (s *fakeConnectorSet) Errors() <-chan error { return s.errors }
-func (s *fakeConnectorSet) Status() []platform.ConnectorStatus {
-	state := platform.ConnectorStopped
-	if s.running {
-		state = platform.ConnectorRunning
-	}
-	return []platform.ConnectorStatus{{ID: "fake", State: state}}
-}
+func (s *fakeConnectorAdapter) Errors() <-chan error { return s.errors }
 
 type recordingFactory struct {
 	mu        sync.Mutex

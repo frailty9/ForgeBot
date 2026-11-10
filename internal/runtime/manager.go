@@ -90,7 +90,6 @@ type ApplyResult struct {
 }
 
 type ClientFactory func(llm.ClientConfig) (llm.Client, error)
-type ConnectorFactory func(config.PlatformConfig) (platform.ConnectorSet, error)
 type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
@@ -99,15 +98,13 @@ type Builder struct {
 	Decisions decision.Decider
 	Memory    *conversation.Memory
 	// History 是核心近期消息容器，跨代保留；为空时由 NewManager 或 Build 创建。
-	History            *history.Window
-	Modules            *modules.Registry
-	Sender             platform.Sender
-	Secrets            secret.Reader
-	ClientFactory      ClientFactory
-	Logger             *slog.Logger
-	ConnectorProviders []platform.ConnectorProvider
-	ConnectorFactory   ConnectorFactory
-	Notifications      notification.Publisher
+	History       *history.Window
+	Modules       *modules.Registry
+	Sender        platform.Sender
+	Secrets       secret.Reader
+	ClientFactory ClientFactory
+	Logger        *slog.Logger
+	Notifications notification.Publisher
 	// 正式应用必须配置回答模型；诊断与边界测试可显式构建无模型实例，
 	// 但 Engine 不会将该实例伪装为成功问答或本地回显。
 	RequireLLM bool
@@ -429,7 +426,7 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	if connectors == nil && (len(moduleSet.ConnectorProviderTypes()) > 0 || len(m.builder.ConnectorProviders) > 0 || m.builder.ConnectorFactory != nil) {
+	if connectors == nil && len(moduleSet.ConnectorProviderTypes()) > 0 {
 		connectors, err = m.builder.buildConnectors(ctx, snapshot.Runtime.Platforms, moduleSet)
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -475,18 +472,6 @@ func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig,
 			registration, _ := moduleSet.ConnectorProvider(typeName)
 			providers[typeName] = registration
 		}
-	}
-	for _, provider := range b.ConnectorProviders {
-		if provider == nil || !platform.ValidConnectorType(provider.Type()) {
-			return nil, errors.New("invalid host connector provider")
-		}
-		if existing, exists := providers[provider.Type()]; exists {
-			return nil, fmt.Errorf("connector provider type %q registered by both %s and host", provider.Type(), existing.ModuleID)
-		}
-		providers[provider.Type()] = modules.ProviderRegistration{ModuleID: "host", Provider: provider}
-	}
-	if len(providers) == 0 && b.ConnectorFactory != nil {
-		return b.ConnectorFactory(cfg)
 	}
 	adapters := make([]platform.Adapter, 0, len(cfg.Connectors))
 	bindings := make([]platform.ConversationBinding, 0, len(cfg.Groups))

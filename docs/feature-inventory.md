@@ -2,7 +2,7 @@
 
 原清单核对日期：2026-11-05；v0.2.0 相关入口复核：2026-11-10，`feat/v0.2.0@1103bc7`。下方历史明细未逐项重新审计，初始盘点基于 `master@c982e73`。
 
-**当前实施 [v0.2.0](../specs/v0.2.0/requirements.md)，本批为 BOT-14 沉淀重构。** 沉淀已改用核心 history 新消息事件、模块会话快照与定时批处理，删除独立 buffer/scanner。其余目标按版本 tasks 逐批整理；本批不包含 Connector 旁路、发送回执、撤回、外部 HTTP 审批或 QQ 官方连接器。真实沉淀质量仍待验收。
+**当前实施 [v0.2.0](../specs/v0.2.0/requirements.md)，本批为 ARCH-P06 Connector 宿主旁路清理。** 沉淀重构已由用户提交 `6230796`；本批删除 Builder 的 ConnectorFactory/ConnectorProviders，生命周期测试也走模块 Provider。发送回执、撤回、外部 HTTP 审批和 QQ 官方连接器另行分批整理，真实沉淀质量仍待验收。
 
 本清单按代码、测试文件、分支差异和会话决策整理。它记录实现范围，不替代发布验收；初次核对未重跑测试，随后分支实施已运行全量测试/vet，证据见 tasks；未刷新远端分支。
 
@@ -153,7 +153,7 @@ BOT-17–19 是 Bot 核心的可选群管理能力契约，不要求每种连接
 | ARCH-08 | 模块扩展注册面 | 已实现 | Tool、Command、Observer、Participant、Background Job、Status、Connector Provider；内部 Go 注册，不等于外部插件协议 | [注册契约](../internal/modules/runtime.go) |
 | ARCH-09 | capability 依赖注入 | 已实现 | 受限能力视图、稳定 ID、依赖排序和冲突校验；不向模块交付完整 Runtime / Store | [能力容器](../internal/capability/)、[模块 Registry](../internal/modules/registry.go) |
 | ARCH-10 | 内置应用能力模块化 | 已实现 | `reply_experience`、`proactive_reply`、`structured_search`、`knowledge_reflection`；业务开关收口到 modules | [组合根](../internal/app/app.go)、[实施记录](../specs/builtin-feature-modules/tasks.md) |
-| ARCH-11 | Connector Provider 模块化 | 已实现 | `native.onebot` / `native.echo` 提供协议，connectors 按 type 声明实例，Provider 解析与脱敏 options；Runtime 仍留测试注入旁路，清理尚未进行 | [Provider](../internal/platform/provider.go)、[构建链](../internal/runtime/manager.go)、[实施记录](../specs/connector-provider-modules/tasks.md) |
+| ARCH-11 | Connector Provider 模块化 | 已实现 | `native.onebot` / `native.echo` 提供协议，connectors 按 type 声明实例，Provider 解析与脱敏 options；Runtime 和生命周期测试统一通过模块 Provider 构建 | [Provider](../internal/platform/provider.go)、[构建链](../internal/runtime/manager.go)、[生命周期测试](../internal/runtime/connector_lifecycle_test.go) |
 | ARCH-12 | generation 生命周期与替换 | 已实现 | 准备候选、发布、旧请求保留旧代、模块退场和关闭；连接器更新有停止/启动与失败恢复路径 | [Runtime](../internal/runtime/manager.go)、[代际测试](../internal/runtime/modules_test.go) |
 | ARCH-13 | 不可关闭的核心 Admission | 已实现 | 消息合法性、寻址边界与消息身份去重，与可选主动介入缓存拆分 | [Admission](../internal/admission/)、[Engine](../internal/bot/engine.go) |
 | ARCH-14 | 配置模型与存储接口 | 已实现 | 静态 YAML/环境覆盖、运行时 JSON、严格解析、快照复制、`settings.Store` 与 JSONFileStore、版本持久化 | [配置](../internal/config/)、[Store](../internal/settings/store.go)、[文件实现](../internal/settings/json_file_store.go) |
@@ -185,7 +185,7 @@ BOT-17–19 是 Bot 核心的可选群管理能力契约，不要求每种连接
 | ARCH-P03 | 可供外部项目使用的 Go SDK | 仅讨论 | 当前主要契约在 internal，尚无公开 SDK、独立扩展示例或兼容性承诺；“SDK 先于 FPP”尚不是已确认实施顺序 |
 | ARCH-P04 | 插件自定义命令与配置表单 | 部分实现 / 外部部分仅讨论 | 内置模块已有 CommandRegistration；外部命令协议、表单声明及标准配置读写接口尚未实现 |
 | ARCH-P05 | Store 数据结构与分职责接口、单后端 | 已实现首期，未合并 master | 配置/历史/凭据/运营记录分职责接口由唯一 file Backend 提供；静态单选、元数据、条件更新和恢复已测试。SQL/NoSQL 延后，禁止双写和故障切后端；见 [存储说明](storage.md) |
-| ARCH-P06 | Connector 宿主注入旁路清理 | 仅讨论 | Builder 的 ConnectorFactory / ConnectorProviders 仍存在，生产组合根当前不用；没有开展删除和测试迁移 |
+| ARCH-P06 | Connector 宿主注入旁路清理 | 已实现 | 删除 Builder 的 ConnectorFactory / ConnectorProviders；生命周期测试改为注册模块 Provider，保留替换、启动失败/保存失败恢复和故障通知断言 |
 | ARCH-P07 | 请求与投递的重试策略 | 仅讨论 / 路线图 | LLM HTTP 已有超时与错误传播，没有通用可配置重试/退避体系；消息投递还需另定幂等语义 |
 | ARCH-P08 | MCP / Skill 独立 Manager | 暂缓 | 保留 extensions.mcp / extensions.skills 作为 Core Agent 扩展入口；拆分建议未实施，暂等实际独立管理需求 |
 | ARCH-P09 | FPP 与 MCP 共享通信底座 | 仅讨论 | 目标是复用通信基础组件并分离协议语义；当前 MCP Transport 并未成为通用 FPP 通信层 |
