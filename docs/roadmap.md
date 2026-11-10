@@ -4,6 +4,14 @@ Current implementation planning and handoff are tracked in
 [`specs/README.md`](../specs/README.md) and [`specs/roadmap.md`](../specs/roadmap.md).
 The phase lists below are historical milestones, not a complete implementation audit.
 
+The current target is [v0.2.0](../specs/v0.2.0/requirements.md): history-based
+knowledge reflection, Connector injection cleanup, quoted message recall,
+external HTTP join review, and an official QQ connector. The
+[design](../specs/v0.2.0/design.md) and [task plan](../specs/v0.2.0/tasks.md)
+are authorized for implementation. These additions are not yet implemented.
+v0.1.0 is merged and locally tagged; real reflection quality remains pending
+after the refactor.
+
 - [x] Module-level native feature switches and typed Hook chains; first migration:
   reply experience (empty mention, image hint, retrieval progress).
 - [ ] External FPP plugin handshake and transports; not part of the native Hook release.

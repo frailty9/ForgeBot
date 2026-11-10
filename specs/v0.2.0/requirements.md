@@ -1,8 +1,8 @@
-# ForgeBot v0.2.0 需求草稿
+# ForgeBot v0.2.0 需求
 
-日期：2026-11-10。代码基线：master@d6c95c4（v0.1.0 已合并打标，AGENTS.md 已加入）。
+日期：2026-11-10。代码核对基线：`feat/v0.2.0@1103bc7`；本地 `master@fc5a7ec`（v0.1.0 已合并打标，AGENTS.md 已加入）。取代原草稿未核实的 `master@d6c95c4` 记录。
 
-状态：范围已确认（2026-11-10）。待开始实施前需完成设计拆分和任务排序。
+状态：范围已确认（2026-11-10）；[设计](design.md) 与 [任务](tasks.md) 已于 2026-11-10 获用户授权，先提交文档再开始实施。下述范围决定保持不变，实施边界以本次修正后的设计为准。
 
 ---
 
@@ -15,23 +15,34 @@
 v0.1.0 的 `native.knowledge_reflection` 有功能实现，但运营效果未验收，且已决定重构后再验。当前实现的结构性问题：
 
 - 知识沉淀用自己的 24 小时候选问题缓冲（`reflection/buffer`），与新建的核心近期消息容器（`internal/history`）重复。用户在上一版本有意设计了核心容器作为"宿主层的通用结构"，知识沉淀后期重构时也能用上。
-- 重构方向：改用 `history.Reader` 和 `History` 注册项（`"new message"` / `"message removed"` 事件）替换专用的 24 小时缓冲；`ObserverRegistration` 仍可保留对收消息的直接观察，但触发沉淀的"收到足够问答"判断应基于容器状态，不再独立维护。
+- 重构方向：改用 `history.Reader` 和 `History` 的“新消息进入”订阅替换专用的 24 小时候选问题缓冲。模块自己维护答题会话及“答题中/已处理”标记，不依赖“消息移出”事件，不向容器写业务标记或要求钉住记录。
 - 重构是破坏式的：`internal/reflection/buffer` 可能整体删除或大幅缩减；模块配置字段（如 `scan_interval`、`quiet_window`、`max_messages_per_conversation`、`max_messages_total` 等）可能变化，需同步更新文档和 `config-index.md`。
 
 **决定：只改缓冲层，不动 pipeline 和 publisher。**
 
-- `reflection/pipeline` 和 `internal/knowledge/markdown` 与缓冲无耦合，不在本次重构范围内。
+- `reflection/pipeline` 和 `internal/knowledge/markdown` 的业务行为不在本次重构范围内。代码核对发现 pipeline/reflector 引用了 `buffer.AnswerSession`，删除 buffer 前需要迁移纯数据类型；这不扩展为修改提炼、去重或发布算法。
 - 删除 `internal/reflection/buffer` 和 `internal/reflection/scanner`，模块改订阅 `history.History` 的 `"new message"` 事件。
-- `scan_interval` 字段随 scanner 一起消失，需同步更新文档和 `config-index.md`；其余配置字段（`quiet_window`、`max_session_duration` 等 pipeline 仍需的部分）保留或迁移到新的触发逻辑。
+- 真正的模型处理仍交给模块自己的定时任务：等安静窗口结束后批量处理已形成的答题会话。删除 scanner 包不意味着取消定时批处理或必然删除 `scan_interval`；原草稿“该字段随包消失”的结论由本次澄清取代。具体配置保留/迁移见设计。
 - 重构后运营验收仍需真实群消息窗口，时机与 BOT-14 真实效果验收合并。
+
+**2026-11-10 用户补充原始讨论，恢复以下边界**：
+
+- 管理员引用问题时，先按同群消息 ID 查 history；问题已滑出时，使用适配器已经带回的引用原文。两处都取不到才放弃这一次，不新增取引用消息的远程请求。
+- 模块只为已经开始的答题会话保留必要材料：问题文本和 ID、回答文本、第一条回答 ID、起止时间及关联标记。后续同群同一管理员的答复继续归组，不复制所有成员消息等待未来引用。
+- 已形成会话的材料由模块保存，问题或回答随后滑出 history 不使该会话失效；处理时不要求重新从容器取得全部正文。
+- Core history 继续逐条滑动、通知按一次变化合并、只读且有上限。会话容量与生命周期由模块自己负责，不能把未处理会话钉在容器里。
+
+这取代此前设计草案中“依赖 Evicted 清理会话”“处理前从 Reader 重建全文”“历史记录移出就放弃候选”和“一次删除五个配置键”的方案；外部审批和 QQ 接入等其他范围不由本次补充自动确认。
 
 ---
 
-### 1.2 知识沉淀 Observers 合并（ARCH-P06 旁路清理）
+### 1.2 Connector 宿主注入旁路清理（ARCH-P06）
 
 **来源**：上下文中多次提及但未处理。
 
 `internal/runtime/manager.go` 里的 `Builder.ConnectorFactory` / `ConnectorProviders` 旁路和测试注入路径仍保留。用户在上一版本确认"ConnectorProvider 测试注入旁路清理尚未进行"，属于技术债，可与沉淀重构一起处理。
+
+沉淀自身 Observer 迁到 History 订阅属于 §1.1，不与 Connector 旁路混为同一个改动；通用 Observer 扩展机制不因本项删除。
 
 ### 1.3 入群审批外部 HTTP 服务接口（新增）
 
@@ -156,7 +167,7 @@ v0.1.0 挂起原因已消除：OneBot v11 `send_msg` 响应带回 `message_id`�
 
 ## 6. 范围决定汇总
 
-所有开放问题已关闭。
+版本范围问题已关闭；设计引出的实施选择见 [design.md](design.md)，已随本次实施授权确认。
 
 1. ~~自动沉淀重构范围~~ → 只改缓冲层，详见 §1.1。
 2. ~~消息撤回方案~~ → Option A，详见 §2.1。
