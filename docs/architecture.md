@@ -186,11 +186,20 @@ active search module. Relative extra paths resolve from the module document root
 absolute paths are used as-is. Search itself remains read-only and indexes the
 published directory through its normal recursive scan.
 
-`native.knowledge_reflection` registers a read-only inbound Observer, a periodic
-Background Job, status, and `reflection.control`. It requires the host LLM
-completer, search control, publisher factory, and logical conversation catalog.
-Candidate construction prepares these resources without starting the job or
-creating the output directory; activation and retirement are owned by ModuleSet.
+`native.knowledge_reflection` registers only a history Appended subscription,
+a periodic Background Job, status, and `reflection.control`. It requires the
+host history Reader, LLM completer, search control, publisher factory, and logical
+conversation catalog. Administrator reply anchors resolve questions from the
+same conversation's history or the adapter's already resolved quoted text.
+Only anchored sessions retain bounded question/answer snapshots and processing
+marks; there is no parallel candidate pool for ordinary member messages.
+Snapshots survive normal history eviction and expiry without subscribing to
+Evicted or pinning records. The module owns quiet-window batching, single-flight
+processing, capacity, expiry and cancellation. Candidate construction prepares
+these resources without starting the job or creating the output directory;
+activation and retirement are owned by ModuleSet. The pipeline consumes the
+pure `reflection/session.AnswerSession` contract; reflection and Markdown
+publication algorithms are unchanged.
 
 ## MCP Transport Rules
 

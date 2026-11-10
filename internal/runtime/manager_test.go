@@ -126,7 +126,7 @@ func TestManagerHotReplacesOperatorWithoutReplacingConnectors(t *testing.T) {
 	}
 }
 
-func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
+func TestManagerReflectionOnlyRetainsAnchoredSessions(t *testing.T) {
 	root := t.TempDir()
 	snapshot := searchSnapshot(t, root)
 	snapshot.Runtime.Platforms.Groups[0].ID = "c"
@@ -149,8 +149,63 @@ func TestManagerObservesMessagesForEnabledReflection(t *testing.T) {
 			reflectionStatus, _ = module.Details.(reflectioncontract.Status)
 		}
 	}
-	if reflectionStatus.Buffer.Questions != 1 {
+	if reflectionStatus.Pending.Sessions != 0 || reflectionStatus.Pending.Messages != 0 {
 		t.Fatalf("reflection stats = %+v", reflectionStatus)
+	}
+	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{
+		ConversationID: "c", UserID: "admin", MessageID: "a1", ReplyToMessageID: "q1", Text: "Answer", PlatformRole: "admin",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, status = manager.Snapshot()
+	for _, module := range status.Modules {
+		if module.ID == "native.knowledge_reflection" {
+			reflectionStatus, _ = module.Details.(reflectioncontract.Status)
+		}
+	}
+	if reflectionStatus.Pending.Sessions != 1 || reflectionStatus.Pending.Messages != 2 {
+		t.Fatalf("anchored reflection stats = %+v", reflectionStatus)
+	}
+}
+
+func TestReflectionReloadDoesNotReplayOldAnswers(t *testing.T) {
+	snapshot := searchSnapshot(t, t.TempDir())
+	snapshot.Runtime.Platforms.Groups[0].ID = "c"
+	enableReflectionModule(t, &snapshot, map[string]any{"conversation_ids": []string{"c"}})
+	manager, err := NewManager(context.Background(), snapshot, Builder{
+		Sender: registeredSender(t).registry, Modules: searchRegistry(t), Secrets: configuredSecrets(t, "key"),
+		ClientFactory: func(cfg llm.ClientConfig) (llm.Client, error) {
+			return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":false,"confidence":0,"reason":"test"}`}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	for _, message := range []messaging.InboundMessage{
+		{ConversationID: "c", UserID: "member", MessageID: "q", Text: "Question"},
+		{ConversationID: "c", UserID: "admin", MessageID: "a", ReplyToMessageID: "q", Text: "Answer", PlatformRole: "admin"},
+	} {
+		if _, err := manager.HandleInbound(context.Background(), message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := snapshot.Clone()
+	next.Version++
+	next.Runtime.Bot.Name = "reloaded"
+	if _, err := manager.Apply(context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := manager.ScanReflection(context.Background()); err != nil || result.Status.Pending.Sessions != 0 {
+		t.Fatalf("new generation replayed old answer: %+v %v", result, err)
+	}
+	if _, err := manager.HandleInbound(context.Background(), messaging.InboundMessage{
+		ConversationID: "c", UserID: "admin", MessageID: "new-answer", ReplyToMessageID: "q", Text: "New answer", PlatformRole: "admin",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := manager.ScanReflection(context.Background()); err != nil || result.Status.Pending.Sessions != 1 {
+		t.Fatalf("new answer could not reference retained question: %+v %v", result, err)
 	}
 }
 

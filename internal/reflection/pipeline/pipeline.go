@@ -9,14 +9,14 @@ import (
 	"sync"
 
 	"github.com/soleapi/forgebot/internal/knowledge"
-	"github.com/soleapi/forgebot/internal/reflection/buffer"
 	"github.com/soleapi/forgebot/internal/reflection/reflector"
+	answersession "github.com/soleapi/forgebot/internal/reflection/session"
 )
 
 var ErrReloadFailed = errors.New("reflection search reload failed")
 
 type Reflector interface {
-	Reflect(context.Context, buffer.AnswerSession) (reflector.Result, error)
+	Reflect(context.Context, answersession.AnswerSession) (reflector.Result, error)
 }
 
 type Publisher interface {
@@ -67,7 +67,7 @@ func New(cfg Config) (*Processor, error) {
 // successful terminal outcomes and therefore also return nil.
 // ProcessBatch reflects eligible sessions, publishes accepted entries, and
 // reloads search once after any successful publication.
-func (p *Processor) ProcessBatch(ctx context.Context, sessions []buffer.AnswerSession) []error {
+func (p *Processor) ProcessBatch(ctx context.Context, sessions []answersession.AnswerSession) []error {
 	errs := make([]error, len(sessions))
 	p.mu.RLock()
 	pending := p.reloadPending

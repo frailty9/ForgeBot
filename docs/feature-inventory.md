@@ -2,7 +2,7 @@
 
 原清单核对日期：2026-11-05；v0.2.0 相关入口复核：2026-11-10，`feat/v0.2.0@1103bc7`。下方历史明细未逐项重新审计，初始盘点基于 `master@c982e73`。
 
-**当前规划为 [v0.2.0](../specs/v0.2.0/requirements.md)，设计与任务已获实施授权，进度见版本 tasks。** 本轮核对确认：沉淀仍使用独立 buffer/scanner，Connector 宿主旁路仍存在，发送不返回平台 ID；撤回、外部 HTTP 审批、QQ 官方连接器尚未实施。该版本计划不能当作下表已有能力。2026-11-10 基线 build/vet/普通测试/internal 竞态测试全部通过；未重新进行真实平台验收。
+**当前实施 [v0.2.0](../specs/v0.2.0/requirements.md)，本批为 BOT-14 沉淀重构。** 沉淀已改用核心 history 新消息事件、模块会话快照与定时批处理，删除独立 buffer/scanner。其余目标按版本 tasks 逐批整理；本批不包含 Connector 旁路、发送回执、撤回、外部 HTTP 审批或 QQ 官方连接器。真实沉淀质量仍待验收。
 
 本清单按代码、测试文件、分支差异和会话决策整理。它记录实现范围，不替代发布验收；初次核对未重跑测试，随后分支实施已运行全量测试/vet，证据见 tasks；未刷新远端分支。
 
@@ -81,7 +81,7 @@
 | BOT-11 | 未 @ 自动介入 | 主动协作 | 已实现（有条件） | 选定群组启用后缓存文本、等待静默或最大窗口后处理，限制缓存和并发；不代表已语义识别每个问题或所有管理员自然语言回答 | [主动介入模块](../internal/modules/proactivereply/)、[缓存池与测试](../internal/proactive/) |
 | BOT-12 | 管理员／群主介入后临时暂停主动插话 | 人机协作 | 已实现，2026-11-09 真实验收通过 | 按群临时暂停未 @ 主动介入，默认 5m，引用命中待答或明确语义接答触发；管理员事后引用 Bot 已回答的问题也触发，未引用时主动插话决策结合核心近期消息容器判断管理员是否已接手；@ 不受影响，同条引用 + @ 不再被吞；平台角色已归一化 | [主动模块](../internal/modules/proactivereply/)、[让位状态](../internal/proactive/yield.go)、[身份解析](../internal/administration/resolver.go) |
 | BOT-13 | 工具调用子能力：知识检索 | 知识 | 已实现 | 归并 BOT-07。官方维护内置检索工具，部署者可用 MCP 替代；检索时机由回答模型按工具描述与系统提示词选择，宿主不预检索；/search 专用路径已移除 | [检索模块](../internal/modules/structuredsearch/)、[检索上下文](../internal/search/context.go)、[版本 R4/R5](../specs/v0.1.0/requirements.md) |
-| BOT-14 | 管理员回答自动沉淀 | 知识积累 | 已实现，运营验收待补 | 引用锚定后聚合同一管理员多条回答，定时扫描、模型判断与置信度、去重、发布文档、更新索引；没有人工审核/候选编辑闭环 | [回答归组测试](../internal/reflection/buffer/buffer_test.go)、[反思模块](../internal/modules/knowledgereflection/)、[发布器](../internal/knowledge/markdown/) |
+| BOT-14 | 管理员回答自动沉淀 | 知识积累 | history 重构已实现，运营验收待补 | 新消息事件锚定管理员答复，问题先查 history 后用引用原文；仅保存已形成会话，独立于容器滑动，定时批处理；提炼、置信度、去重、发布和索引重载行为保持 | [会话测试](../internal/modules/knowledgereflection/sessions_test.go)、[反思模块](../internal/modules/knowledgereflection/)、[发布器](../internal/knowledge/markdown/) |
 | BOT-15 | 按会话追加行为与输出约束 | 行为定制 | 已实现 | 使用可选 Prompt suffix 调整渠道格式、群组语气和主题；这是模型指令，不是强制格式转换器 | [配置](../internal/config/config.go)、[指令组装](../internal/bot/engine.go) |
 | BOT-16 | 连续追问与短期会话记忆 | 对话连续性 | 已实现 | 进程内按群+用户隔离，TTL/容量/字节上限与顺序队列；仅提交确认发送成功的问答，重启清空，不持久化完整聊天记录 | [会话记忆](../internal/conversation/memory.go)、[投递提交](../internal/bot/memory_test.go)、[版本 R7](../specs/v0.1.0/requirements.md) |
 | BOT-17 | 入群申请自动审批 | 群管理 | 已实现，2026-11-09 真实验收通过 | 每群正则与统一布尔模型判断，支持 AND/OR 短路；失败不操作，不持久化审批记录，人工处理在原平台完成 | [审批实现](../internal/group/review.go)、[受控测试](../internal/group/review_test.go) |

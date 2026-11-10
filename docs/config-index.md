@@ -49,7 +49,7 @@
 | `native.reply_experience`：`empty_mention_prompt` `image_only_prompt` `search_progress_text` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook) |
 | `native.proactive_reply`：`scope` `yield_duration` `silence` `max_window` `max_buffered` `max_text_len` `max_concurrent` `context_messages` `groups` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook)；`scope` 与决策的关系见 [业务范围与决策](configuration.md#业务范围与决策botsystem_prompt--decision)；让位规则见 [默认行为表](default-behavior.md) |
 | `native.structured_search`：`document_root` `extensions` `default_results` `max_results` `min_match_ratio` `query_timeout` `build_timeout` `max_queries_per_turn` `max_context_chars` `max_section_chars` `max_file_bytes` `max_total_bytes` `max_files` | [配置手册 §5.5](configuration.md#55-modulesnativestructured_search) |
-| `native.knowledge_reflection`：`conversation_ids` `scan_interval` `message_ttl` `quiet_window` `max_session_duration` `max_messages_per_conversation` `max_messages_total` `max_message_chars` `max_pairs_per_scan` `min_confidence` `extra_directory` | [配置手册 §5.8](configuration.md#58-modulesnativeknowledge_reflection) |
+| `native.knowledge_reflection`：`conversation_ids` `scan_interval` `message_ttl` `quiet_window` `max_session_duration` `max_messages_per_conversation` `max_messages_total` `max_message_chars` `max_pairs_per_scan` `min_confidence` `extra_directory` | [配置手册 §5.8](configuration.md#58-modulesnativeknowledge_reflection)（v0.2.0 字段保留，周期/TTL/容量仅作用于已形成会话及模块处理标记） |
 | `native.join_review`：`regex` `model_enabled` `rule` `combine` `reject_reason` `groups` | [群管理：入群自动审批](group-management.md#入群自动审批)、[配置手册：入群自动审批](configuration.md#入群自动审批) |
 | `native.welcome`：`groups.<群ID>.enabled` `message` | [群管理：新人欢迎](group-management.md#新人欢迎) |
 

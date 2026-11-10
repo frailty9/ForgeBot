@@ -18,7 +18,7 @@ The project is preparing a `v0.1.0` source preview and has not been released. On
 - Short-term context isolated by group and user, held in memory without persisting full group history.
 - Shared model decisions using DM when enabled or an isolated answer LLM otherwise, with at most one request per decision, used for proactive replies, administrator takeover and join review; business scope is passed to the answer model as instructions.
 - Cautious proactive participation with group-level yielding when a trusted administrator answers; explicit mentions retain normal processing rules.
-- Periodic reflection that turns administrator answers into Markdown at a configurable location.
+- Bounded administrator reply sessions, resolved from recent history or quoted text, periodically reflected into Markdown after a quiet window at a configurable location.
 - Optional automatic join review and welcome templates, with explicit unsupported results.
 - Versioned configuration, history, rollback, component replacement, encrypted write-only credential management and a read-only capability catalog.
 

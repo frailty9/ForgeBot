@@ -7,7 +7,7 @@ import (
 
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/messaging"
-	"github.com/soleapi/forgebot/internal/reflection/buffer"
+	answersession "github.com/soleapi/forgebot/internal/reflection/session"
 )
 
 type fakeClient struct {
@@ -24,8 +24,8 @@ func (f *fakeClient) Stream(context.Context, llm.Request) (<-chan llm.StreamEven
 	return nil, nil
 }
 
-func testSession() buffer.AnswerSession {
-	return buffer.AnswerSession{
+func testSession() answersession.AnswerSession {
+	return answersession.AnswerSession{
 		Key:       "support\x00admin\x00q1",
 		Question:  messaging.InboundMessage{ConversationID: "support", MessageID: "q1", Text: "How do I rotate the key?"},
 		Answers:   []messaging.InboundMessage{{ConversationID: "support", MessageID: "a1", Text: "Open the console and create a replacement key."}},

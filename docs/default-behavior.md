@@ -1,6 +1,6 @@
 # 默认行为与验收边界
 
-2026-11-05，feat/v0.1.0。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
+2026-11-10 更新 v0.2.0 沉淀行为，其余沿用 v0.1.0 记录。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
 
 | 场景 | 默认行为 | 配置或约束 | 主要证据 |
 | --- | --- | --- | --- |
@@ -30,7 +30,9 @@
 | 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
 | 自动审核不确定 | 不同意也不拒绝，管理员在原平台处理 | 模型错误不映射为 false；无后备请求 | [审批测试](../internal/group/review_test.go) |
 | 新人欢迎 | 收到入群事件即发送；忽略自身/历史事件；不去重、不落盘 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go) |
-| 自动沉淀生成失败 | 不发布文档，已有归组/扫描/发布链路保留 | native.knowledge_reflection | [沉淀](../internal/reflection/pipeline/pipeline_test.go) |
+| 沉淀答题会话 | 仅管理员引用锚定后保存材料，同一管理员继续答复；静默后由定时任务分批处理 | 模块自己的周期、TTL 和容量；不保留全部普通消息候选池 | [归组与边界](../internal/modules/knowledgereflection/sessions_test.go) |
+| 沉淀原问题已滑出 | 先查同群 history，再使用适配器已带回的引用原文；两处没有正文才放弃；已捕获会话不随 history 滑动失效 | 只订阅新消息，不钉住记录或依赖移出事件 | [会话快照](../internal/modules/knowledgereflection/sessions_test.go)、[引用文本](../internal/history/quote_test.go) |
+| 自动沉淀生成失败 | 保留未过期会话，后续批次再处理；低置信度、拒绝和重复结束会话 | native.knowledge_reflection；换代取消，不重放旧回答 | [批处理与取消](../internal/modules/knowledgereflection/sessions_test.go)、[流水线](../internal/reflection/pipeline/pipeline_test.go) |
 | 能力目录 | 展示投影，not_probed不冒充健康 | 认证API与CLI同源 | [目录](../internal/runtime/catalog_test.go) |
 | 初次使用 | init不覆盖；doctor不要求先启动Bot | 远程与stdio探测须显式 | [CLI](../cmd/forgebot/commands_test.go) |
 

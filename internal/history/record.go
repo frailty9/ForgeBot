@@ -17,18 +17,22 @@ const (
 // “群 + Seq”稳定指向一条记录。Bot 发出的消息目前没有平台消息 ID（MessageID 为空）。
 // At 是宿主收到或发出的时间，保证同群内按 Seq 单调，不使用平台时间。
 type Record struct {
-	Seq            uint64    `json:"seq"`
-	ConversationID string    `json:"conversation_id"`
-	MessageID      string    `json:"message_id,omitempty"`
-	ReplyTo        string    `json:"reply_to,omitempty"`
-	UserID         string    `json:"user_id,omitempty"`
-	UserName       string    `json:"user_name,omitempty"`
-	Role           Role      `json:"role"`
-	Text           string    `json:"text,omitempty"`
-	HasMedia       bool      `json:"has_media,omitempty"`
-	Mentioned      bool      `json:"mentioned,omitempty"`
-	Command        bool      `json:"command,omitempty"`
-	At             time.Time `json:"at"`
+	Seq            uint64 `json:"seq"`
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id,omitempty"`
+	ReplyTo        string `json:"reply_to,omitempty"`
+	// QuotedMessageID/QuotedText 保存适配器已解析的引用原文，不触发额外查询。
+	// 文本沿用容器字符上限；纯值字段保持 Reader 和事件的副本语义。
+	QuotedMessageID string    `json:"quoted_message_id,omitempty"`
+	QuotedText      string    `json:"quoted_text,omitempty"`
+	UserID          string    `json:"user_id,omitempty"`
+	UserName        string    `json:"user_name,omitempty"`
+	Role            Role      `json:"role"`
+	Text            string    `json:"text,omitempty"`
+	HasMedia        bool      `json:"has_media,omitempty"`
+	Mentioned       bool      `json:"mentioned,omitempty"`
+	Command         bool      `json:"command,omitempty"`
+	At              time.Time `json:"at"`
 }
 
 type EvictReason string

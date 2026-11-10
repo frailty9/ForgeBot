@@ -42,7 +42,7 @@ import (
 var (
 	ErrStaticConfigChanged   = operation.New(operation.Conflict, "static configuration requires a process restart")
 	ErrReflectionDisabled    = operation.New(operation.Disabled, "reflection is disabled")
-	ErrReflectionUnavailable = operation.New(operation.Unavailable, "reflection scanner is unavailable")
+	ErrReflectionUnavailable = operation.New(operation.Unavailable, "reflection worker is unavailable")
 	ErrRuntimeBusy           = operation.New(operation.Busy, "runtime_busy: previous generation is still retiring")
 )
 

@@ -9,21 +9,18 @@ import (
 	"errors"
 	"io"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/soleapi/forgebot/internal/agent"
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/conversation"
+	"github.com/soleapi/forgebot/internal/history"
 	"github.com/soleapi/forgebot/internal/hooks"
 	"github.com/soleapi/forgebot/internal/knowledge"
-	"github.com/soleapi/forgebot/internal/messaging"
 	"github.com/soleapi/forgebot/internal/modules"
 	reflectioncontract "github.com/soleapi/forgebot/internal/reflection"
-	reflectionbuffer "github.com/soleapi/forgebot/internal/reflection/buffer"
 	reflectionpipeline "github.com/soleapi/forgebot/internal/reflection/pipeline"
 	reflectionreflector "github.com/soleapi/forgebot/internal/reflection/reflector"
-	reflectionscanner "github.com/soleapi/forgebot/internal/reflection/scanner"
 	searchcontract "github.com/soleapi/forgebot/internal/search"
 )
 
@@ -49,8 +46,8 @@ func (Factory) Descriptor() modules.Descriptor {
 	return modules.Descriptor{
 		ID: ID, DefaultEnabled: false,
 		Provides:      []capability.ID{reflectioncontract.ControlKey.ID()},
-		Requires:      []capability.ID{agent.CompleterKey.ID(), searchcontract.ControlKey.ID(), knowledge.PublisherFactoryKey.ID(), conversation.CatalogKey.ID()},
-		Registrations: []modules.RegistrationKind{modules.RegistrationObservers, modules.RegistrationJobs, modules.RegistrationStatus},
+		Requires:      []capability.ID{agent.CompleterKey.ID(), searchcontract.ControlKey.ID(), knowledge.PublisherFactoryKey.ID(), conversation.CatalogKey.ID(), history.ReaderKey.ID()},
+		Registrations: []modules.RegistrationKind{modules.RegistrationHistory, modules.RegistrationJobs, modules.RegistrationStatus},
 	}
 }
 
@@ -197,9 +194,9 @@ func (Factory) BuildWithContext(_ context.Context, build modules.BuildContext, r
 	if err := validate(options, true, catalog); err != nil {
 		return nil, err
 	}
-	buf, err := reflectionbuffer.New(reflectionbuffer.Config{ConversationIDs: options.ConversationIDs, MessageTTL: options.MessageTTL, QuietWindow: options.QuietWindow, MaxSessionDuration: options.MaxSessionDuration, MaxMessagesPerConversation: options.MaxMessagesPerConversation, MaxMessagesTotal: options.MaxMessagesTotal, MaxMessageChars: options.MaxMessageChars})
-	if err != nil {
-		return nil, err
+	reader, ok := capability.Resolve(build.Capabilities, history.ReaderKey)
+	if !ok || reader == nil {
+		return nil, errors.New("message history reader capability is unavailable")
 	}
 	reflector, err := reflectionreflector.New(completer, completer.Model())
 	if err != nil {
@@ -213,44 +210,15 @@ func (Factory) BuildWithContext(_ context.Context, build modules.BuildContext, r
 	if err != nil {
 		return nil, err
 	}
-	scanner, err := reflectionscanner.New(reflectionscanner.Config{Interval: options.ScanInterval, MaxSessions: options.MaxPairsPerScan, Buffer: buf, ProcessBatch: processor.ProcessBatch})
-	if err != nil {
-		return nil, err
-	}
-	return &instance{buffer: buf, scanner: scanner, pipeline: processor}, nil
-}
-
-type instance struct {
-	buffer   *reflectionbuffer.Buffer
-	scanner  *reflectionscanner.Scanner
-	pipeline *reflectionpipeline.Processor
-	active   atomic.Bool
+	return newInstance(options, reader, processor), nil
 }
 
 func (i *instance) Registrations() hooks.Registrations { return hooks.Registrations{} }
 func (i *instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 	return modules.ExtendedRegistrations{
-		Observers:    []modules.ObserverRegistration{{ID: "observe_messages", Observe: func(message messaging.InboundMessage) { i.buffer.Observe(message) }}},
+		History:      []history.Subscriber{{ID: "answer_sessions", Appended: i.observe}},
 		Jobs:         []modules.BackgroundJob{{ID: "periodic_scan", Run: i.run}},
 		Capabilities: []modules.CapabilityRegistration{{ID: reflectioncontract.ControlKey.ID(), Value: reflectioncontract.Control(i)}},
 		Status:       func() any { return i.Status() },
 	}
 }
-func (i *instance) run(ctx context.Context) error {
-	if err := i.scanner.Start(ctx); err != nil {
-		return err
-	}
-	i.active.Store(true)
-	defer i.active.Store(false)
-	<-ctx.Done()
-	i.scanner.Stop()
-	return nil
-}
-func (i *instance) Scan(ctx context.Context) (reflectioncontract.ScanResult, error) {
-	processed, retried, skipped := i.scanner.ScanOnce(ctx)
-	return reflectioncontract.ScanResult{Processed: processed, Retried: retried, Skipped: skipped, Status: i.Status()}, nil
-}
-func (i *instance) Status() reflectioncontract.Status {
-	return reflectioncontract.Status{Enabled: true, Active: i.active.Load(), Buffer: i.buffer.Stats(time.Now().UTC()), Scanner: i.scanner.Stats(), Pipeline: i.pipeline.Stats()}
-}
-func (i *instance) Close(context.Context) error { i.scanner.Stop(); return nil }

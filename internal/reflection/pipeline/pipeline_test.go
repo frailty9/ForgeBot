@@ -8,8 +8,8 @@ import (
 
 	"github.com/soleapi/forgebot/internal/knowledge"
 	"github.com/soleapi/forgebot/internal/messaging"
-	"github.com/soleapi/forgebot/internal/reflection/buffer"
 	"github.com/soleapi/forgebot/internal/reflection/reflector"
+	answersession "github.com/soleapi/forgebot/internal/reflection/session"
 )
 
 type fakeReflector struct {
@@ -17,7 +17,7 @@ type fakeReflector struct {
 	called int
 }
 
-func (f *fakeReflector) Reflect(context.Context, buffer.AnswerSession) (reflector.Result, error) {
+func (f *fakeReflector) Reflect(context.Context, answersession.AnswerSession) (reflector.Result, error) {
 	f.called++
 	return f.result, nil
 }
@@ -29,8 +29,8 @@ func (f *fakePublisher) Publish(entry knowledge.Entry) (knowledge.PublishResult,
 	return knowledge.PublishResult{Status: knowledge.Published}, nil
 }
 
-func session(id string) buffer.AnswerSession {
-	return buffer.AnswerSession{Key: id, Question: structMessage("q")[0], Answers: structMessage("a"), StartedAt: time.Now()}
+func session(id string) answersession.AnswerSession {
+	return answersession.AnswerSession{Key: id, Question: structMessage("q")[0], Answers: structMessage("a"), StartedAt: time.Now()}
 }
 
 func structMessage(id string) []messaging.InboundMessage {
@@ -45,7 +45,7 @@ func TestProcessBatchReloadsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	errs := processor.ProcessBatch(context.Background(), []buffer.AnswerSession{session("s1"), session("s2")})
+	errs := processor.ProcessBatch(context.Background(), []answersession.AnswerSession{session("s1"), session("s2")})
 	if errs[0] != nil || errs[1] != nil || len(p.entries) != 2 || reloads != 1 {
 		t.Fatalf("errs=%v entries=%d reloads=%d", errs, len(p.entries), reloads)
 	}
@@ -55,7 +55,7 @@ func TestProcessBatchRejectsWithoutReload(t *testing.T) {
 	r := &fakeReflector{result: reflector.Result{Accept: false, Confidence: .2}}
 	reloads := 0
 	processor, _ := New(Config{Reflector: r, Publisher: &fakePublisher{}, MinConfidence: .9, Reload: func(context.Context) error { reloads++; return nil }})
-	errs := processor.ProcessBatch(context.Background(), []buffer.AnswerSession{session("s1")})
+	errs := processor.ProcessBatch(context.Background(), []answersession.AnswerSession{session("s1")})
 	if errs[0] != nil || reloads != 0 {
 		t.Fatalf("errs=%v reloads=%d", errs, reloads)
 	}
@@ -64,7 +64,7 @@ func TestProcessBatchRejectsWithoutReload(t *testing.T) {
 func TestProcessBatchKeepsPublishedSessionsRetryableOnReloadFailure(t *testing.T) {
 	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Question: "question", Answer: "answer", Confidence: .95}}
 	processor, _ := New(Config{Reflector: r, Publisher: &fakePublisher{}, MinConfidence: .9, Reload: func(context.Context) error { return errors.New("offline") }})
-	errs := processor.ProcessBatch(context.Background(), []buffer.AnswerSession{session("s1")})
+	errs := processor.ProcessBatch(context.Background(), []answersession.AnswerSession{session("s1")})
 	if errs[0] == nil || !errors.Is(errs[0], ErrReloadFailed) {
 		t.Fatalf("err=%v", errs[0])
 	}
@@ -81,7 +81,7 @@ func TestProcessBatchRetriesPendingReloadBeforeNewCandidates(t *testing.T) {
 		}
 		return nil
 	}})
-	first := processor.ProcessBatch(context.Background(), []buffer.AnswerSession{session("s1")})
+	first := processor.ProcessBatch(context.Background(), []answersession.AnswerSession{session("s1")})
 	if first[0] == nil {
 		t.Fatal("first reload failure was lost")
 	}

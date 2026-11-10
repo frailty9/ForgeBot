@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/soleapi/forgebot/internal/llm"
-	"github.com/soleapi/forgebot/internal/reflection/buffer"
+	answersession "github.com/soleapi/forgebot/internal/reflection/session"
 )
 
 var (
@@ -50,7 +50,7 @@ func New(client Completer, model string) (*Reflector, error) {
 
 // Reflect asks the model whether a bounded administrator answer is reusable
 // knowledge and returns a validated candidate when accepted.
-func (r *Reflector) Reflect(ctx context.Context, session buffer.AnswerSession) (Result, error) {
+func (r *Reflector) Reflect(ctx context.Context, session answersession.AnswerSession) (Result, error) {
 	if strings.TrimSpace(session.Question.Text) == "" || len(session.Answers) == 0 {
 		return Result{}, ErrInvalidResult
 	}

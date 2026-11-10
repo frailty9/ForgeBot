@@ -12,12 +12,17 @@ func FromInbound(message messaging.InboundMessage) Record {
 	if message.TrustedResponder() {
 		role = RoleAdmin
 	}
-	return Record{
+	record := Record{
 		ConversationID: message.ConversationID, MessageID: strings.TrimSpace(message.MessageID),
 		ReplyTo: strings.TrimSpace(message.ReplyToMessageID), UserID: message.UserID, UserName: message.UserName,
 		Role: role, Text: message.Text, HasMedia: message.HasMedia(),
 		Mentioned: message.Mentioned, Command: message.Command,
 	}
+	if message.Quoted != nil && record.ReplyTo != "" && message.Quoted.MessageID == record.ReplyTo {
+		record.QuotedMessageID = message.Quoted.MessageID
+		record.QuotedText = message.Quoted.Text
+	}
+	return record
 }
 
 // FromOutbound 把 Bot 发送成功的消息转换成记录。ReplyTo 是 Bot 回复所引用的那条消息。
