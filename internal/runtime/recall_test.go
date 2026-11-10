@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/soleapi/forgebot/internal/capability"
 	"github.com/soleapi/forgebot/internal/group"
@@ -219,4 +220,27 @@ func TestRegistryRecallReportsSupportAndPropagatesErrors(t *testing.T) {
 	if err := registry.Recall(context.Background(), "g", "m"); !errors.Is(err, sender.fail) {
 		t.Fatal(err)
 	}
+}
+
+func TestInboundWaitingForConnectorReplacementCanBeCanceled(t *testing.T) {
+	manager, err := NewManager(context.Background(), testSnapshot(), Builder{Sender: registeredSender(t).registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	manager.routeMu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := manager.HandleInbound(ctx, messaging.InboundMessage{}); done <- err }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		manager.routeMu.Unlock()
+		t.Fatal("canceled inbound remained blocked on replacement")
+	}
+	manager.routeMu.Unlock()
 }

@@ -26,6 +26,13 @@ type ConnectorBuildRequest struct {
 	ConnectorOptions json.RawMessage
 	Bindings         []ConnectorBinding
 	Logger           *slog.Logger
+	// Credentials 只包含该 Provider 为当前连接器声明的凭据，不能读取其他键。
+	Credentials map[string]string
+}
+
+// CredentialProvider 声明实例构建所需的凭据引用，由宿主解析和跟踪换代。
+type CredentialProvider interface {
+	CredentialRefs(moduleOptions, connectorOptions json.RawMessage) ([]string, error)
 }
 
 // ConnectorProvider creates adapters for one stable connector type. Providers

@@ -153,6 +153,8 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 
 2026-11-10 实施补充：为外部审批等按引用配置的凭据提供运行中管理入口，新增 Bearer 认证的 `GET/PUT/DELETE /v1/admin/secrets/{ref}`。GET 只返回配置状态/版本/更新时间，PUT 使用 `value`，不提供读取明文；复用 Secret Manager 候选激活和 Runtime.ReplaceSecret/DeleteSecret，保留回答/DM 必需凭据保护。外部审批在后续请求读取当前凭据。本批不包含 QQ Provider 或连接器凭据换代。
 
+连接器凭据生命周期补充：Provider 可选实现 CredentialProvider，宿主仅向当前实例传入其声明的键值。凭据替换将候选值用于构建新运行代和整个连接器集合，沿用停止旧集合、启动新集合、激活保存凭据、发布的顺序；失败尝试恢复旧集合并保留旧凭据，恢复失败返回错误。必需凭据删除在候选构建时拒绝。入站等待换代时可取消，避免 Stop 与路由屏障互相等待。QQ Provider 和 doctor 的具体接入留待后续批次。
+
 每个工作包同步更新自己的 specs 进度、用户 docs 和示例；变更配置同时更新 `docs/config-index.md`。计划文档不能让用户文档提前声称新功能可用，不改本地部署配置或密钥。
 
 每次业务代码修改后执行 gofmt、`go build ./...`、`go vet ./...`，并运行覆盖关键行为的测试。提交前还需完整 `go test ./... -count=1` 与 `go test -race ./internal/... -count=1`。规划提交前的基线验证结果见 tasks，实施后继续更新。

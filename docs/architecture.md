@@ -27,6 +27,17 @@ fails. Existing Engine
 requests finish on their previous generation while new requests use the
 replacement.
 
+Connector Providers may implement `platform.CredentialProvider` to declare
+secret references for an instance. The host resolves only these references into
+that instance's `ConnectorBuildRequest.Credentials`; it does not pass a Store.
+Rotating a referenced credential builds a candidate generation with the staged
+value and rebuilds the entire Connector Set. When running, the host stops the
+old set and starts the candidate before persisting the credential and publishing
+the generation. Startup or persistence failure restores the previous set;
+restoration errors are returned. Required active connector credentials cannot
+be deleted. Inbound calls waiting at the replacement barrier observe context
+cancellation so adapter Stop can finish without waiting on the routing lock.
+
 The process selects one persistence Backend and obtains domain-specific
 configuration, credential and group-operation repositories. Short-term
 conversation memory and proactive yielding belong to the process Runtime,

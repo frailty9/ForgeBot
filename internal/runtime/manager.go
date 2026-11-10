@@ -292,20 +292,21 @@ func (m *Manager) ReplaceSecret(ctx context.Context, ref, value string, activate
 		return errors.New("runtime is stopped")
 	}
 	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (!current.snapshot.Runtime.Decision.DMEnabled() || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
-		return activate()
+		if !connectorUsesSecret(current, ref) {
+			return activate()
+		}
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, value)
+	connectors := current.connectors
+	if connectorUsesSecret(current, ref) {
+		connectors = nil
+	}
+	next, err := m.buildGeneration(ctx, current.snapshot, connectors, ref, value)
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
-	if err := activate(); err != nil {
-		next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
-		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
-		return err
-	}
-	if _, err := m.publish(ctx, current, next, nil); err != nil {
+	if _, err := m.publish(ctx, current, next, func() (config.Snapshot, error) { return current.snapshot, activate() }); err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
@@ -324,20 +325,21 @@ func (m *Manager) DeleteSecret(ctx context.Context, ref string, remove func() er
 		return errors.New("runtime is stopped")
 	}
 	if ref != current.snapshot.Runtime.LLM.APIKeyRef && (!current.snapshot.Runtime.Decision.DMEnabled() || ref != current.snapshot.Runtime.Decision.DM.APIKeyRef) {
-		return remove()
+		if !connectorUsesSecret(current, ref) {
+			return remove()
+		}
 	}
 	m.setStatus(StateApplying, ActionReplaceSecret, current.snapshot.Version, "")
-	next, err := m.buildGeneration(ctx, current.snapshot, current.connectors, ref, "")
+	connectors := current.connectors
+	if connectorUsesSecret(current, ref) {
+		connectors = nil
+	}
+	next, err := m.buildGeneration(ctx, current.snapshot, connectors, ref, "")
 	if err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
-	if err := remove(); err != nil {
-		next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
-		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
-		return err
-	}
-	if _, err := m.publish(ctx, current, next, nil); err != nil {
+	if _, err := m.publish(ctx, current, next, func() (config.Snapshot, error) { return current.snapshot, remove() }); err != nil {
 		m.setStatus(StateReady, ActionReplaceSecret, current.snapshot.Version, err.Error())
 		return err
 	}
@@ -428,13 +430,16 @@ func (m *Manager) buildGeneration(ctx context.Context, snapshot config.Snapshot,
 	if err != nil {
 		return nil, err
 	}
+	if secretRef != "" {
+		generationBuilder.Secrets = candidateSecretReader{Reader: m.builder.Secrets, ref: secretRef, value: secretValue}
+	}
 	initial := generationBuilder.initialCapabilities(snapshot, client)
 	moduleSet, err := m.builder.Modules.BuildWithCapabilities(ctx, snapshot.Runtime.Modules, nil, initial)
 	if err != nil {
 		return nil, err
 	}
 	if connectors == nil && len(moduleSet.ConnectorProviderTypes()) > 0 {
-		connectors, err = m.builder.buildConnectors(ctx, snapshot.Runtime.Platforms, moduleSet)
+		connectors, err = generationBuilder.buildConnectors(ctx, snapshot.Runtime.Platforms, moduleSet)
 		if err != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
@@ -503,10 +508,27 @@ func (b Builder) buildConnectors(ctx context.Context, cfg config.PlatformConfig,
 		if err := registration.Provider.ValidateOptions(registration.ModuleOptions, options, providerBindings); err != nil {
 			return nil, fmt.Errorf("connector %s: %w", connector.ID, err)
 		}
+		credentials := map[string]string{}
+		if provider, ok := registration.Provider.(platform.CredentialProvider); ok {
+			refs, err := provider.CredentialRefs(registration.ModuleOptions, options)
+			if err != nil {
+				return nil, err
+			}
+			for _, ref := range refs {
+				if b.Secrets == nil {
+					return nil, operation.New(operation.NotConfigured, "connector credential is not configured")
+				}
+				value, err := b.Secrets.Get(ctx, ref)
+				if err != nil || value == "" {
+					return nil, operation.New(operation.NotConfigured, "connector credential is unavailable")
+				}
+				credentials[ref] = value
+			}
+		}
 		adapter, err := registration.Provider.Build(ctx, platform.ConnectorBuildRequest{
 			ConnectorID: connector.ID, PromptSuffix: connector.PromptSuffix,
 			ModuleOptions: registration.ModuleOptions, ConnectorOptions: options,
-			Bindings: providerBindings, Logger: b.Logger,
+			Bindings: providerBindings, Logger: b.Logger, Credentials: credentials,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("connector %s: %w", connector.ID, err)
@@ -862,7 +884,17 @@ func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontra
 }
 
 func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
-	m.routeMu.RLock()
+	// Webhook 工作者可能在连接器换代屏障外等待；Stop 取消它时必须能退出，
+	// 不能阻塞在 RLock 后让持写锁的换代反过来等待这个工作者。
+	for !m.routeMu.TryRLock() {
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return platform.HandleResult{Verdict: "canceled"}, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	defer m.routeMu.RUnlock()
 	generation := m.acquire()
 	if generation == nil {
