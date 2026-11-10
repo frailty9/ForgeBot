@@ -88,6 +88,16 @@ func (s *Sender) ReviewGroupRequest(ctx context.Context, target string, request 
 	return s.groupAPI(ctx, "set_group_add_request", payload, nil)
 }
 
+// RecallMessage 实现 group.Recaller，是调用链中实际请求 OneBot 的一层。
+// target 是 Registry 解析出的平台群号；OneBot delete_msg 本身只接收 message_id，
+// 因而 target 不进入请求体。其他协议可能需要同时把群目标传给平台 API。
+func (s *Sender) RecallMessage(ctx context.Context, target, messageID string) error {
+	if strings.TrimSpace(target) == "" || strings.TrimSpace(messageID) == "" {
+		return operation.New(operation.Invalid, "message recall target and id are required")
+	}
+	return s.groupAPI(ctx, "delete_msg", map[string]any{"message_id": numericOrString(messageID)}, nil)
+}
+
 // memberName 查询新成员的群名片或昵称；入群通知本身只带 user_id。失败时返回空串，
 // 欢迎语的 {user} 随之退回用户 ID，不因查询失败而不欢迎。
 func (s *Sender) memberName(ctx context.Context, target, user string) string {

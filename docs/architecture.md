@@ -33,10 +33,17 @@ conversation memory and proactive yielding belong to the process Runtime,
 not an individual generation. A generation leases those services without
 closing them when its own Engine retires.
 
-Group requests and member events are separate from chat messages. The only
-optional connector operation is join review; native event
+Group requests and member events are separate from chat messages. Optional
+connector operations include join review and message recall; native event
 modules return restricted reply intents for the current event. The host owns
 delivery, authorization, durable idempotency and execution certainty.
+
+The host provides `group.message_recall.v1` to modules as a narrow
+RecallProvider. It binds a logical conversation before exposing
+`Recall(ctx, messageID)`. Execution rechecks the binding and pause state and
+routes to the optional connector Recaller; it does not depend on history,
+message age, platform chat roles, a slash command, or a policy model. No caller
+strategy, LLM tool, HTTP action or history mutation is installed automatically.
 
 Operator groups are configured by logical `ConversationID`, never by protocol
 or external account identifiers. Their commands pass through a dedicated,

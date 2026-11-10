@@ -22,6 +22,7 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 		return group.Support{}, err
 	}
 	_, review := target.sender.(group.Reviewer)
+	_, recall := target.sender.(group.Recaller)
 	joinEvents, memberEvents := false, false
 	if reporter, ok := target.sender.(group.EventReporter); ok {
 		joinEvents, memberEvents = reporter.GroupEventSupport()
@@ -30,7 +31,22 @@ func (r *Registry) Support(_ context.Context, id string) (group.Support, error) 
 	if reporter, ok := target.sender.(group.ReviewReasonReporter); ok {
 		reviewReason = review && reporter.GroupReviewReasonSupported()
 	}
-	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, Permission: "unknown"}, nil
+	return group.Support{JoinEvents: joinEvents, MemberEvents: memberEvents, JoinReview: review, JoinReviewReason: reviewReason, MessageRecall: recall, Permission: "unknown"}, nil
+}
+
+// Recall 实现 group.MessageRecaller：id 为逻辑群 ID，先查群绑定得到
+// 具体发送器和平台 target，再调用它的 group.Recaller。只有这次下层调用
+// 会进入具体平台实现；Registry 不重复发起另一条撤回请求。
+func (r *Registry) Recall(ctx context.Context, id, messageID string) error {
+	target, err := r.groupDestination(id)
+	if err != nil {
+		return err
+	}
+	port, ok := target.sender.(group.Recaller)
+	if !ok {
+		return operation.New(operation.Unsupported, "connector does not support message recall")
+	}
+	return port.RecallMessage(ctx, target.target, messageID)
 }
 func (r *Registry) Review(ctx context.Context, id string, request group.ReviewRequest) error {
 	target, err := r.groupDestination(id)

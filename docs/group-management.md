@@ -140,14 +140,37 @@ OneBot 当前受控测试支持：
 | --- | --- | --- |
 | 入群申请 | request/group/add → `set_group_add_request` | 原样使用 flag/sub_type，绑定原群和连接器；invite 未纳入自动入群审核 |
 | 成员入群 | notice/group_increase | 与申请事件独立，不从审核结果伪造 |
+| 消息撤回 | 宿主共享能力 → `delete_msg` | 传入消息 ID，不依赖 history，不设宿主统一时限；平台决定账号权限和结果 |
 
 协议核对：[OneBot11 请求事件](https://github.com/botuniverse/onebot-11/blob/master/event/request.md)、[SnowLuma 请求操作](https://github.com/SnowLuma/SnowLuma/blob/main/packages/onebot/src/actions/request.ts)，2026-11-03。尚未对用户实际运行的 QQ 账号执行真实审核；受控测试不能替代权限与服务版本的真实验收。
 
-## 已挂起：公告与撤回
+## 宿主单条消息撤回能力
 
-v0.1.0 移除了群公告发布和消息撤回的接口、OneBot 实现与管理 API。原因：
+v0.2.0 提供 `group.message_recall.v1`，供宿主服务和内置模块调用。它只执行“撤回指定消息 ID”，不判断违规、不规定何时调用，也不要求消息仍在 history 中。2026-11-10 用户纠正了此前的产品偏差：删除管理员引用 `/recall` 的聊天入口，并撤掉附带的直接引用 Bot 让位增强；管理员手动处置仍直接使用聊天平台自身能力。
 
-- OneBot11 标准没有群公告接口，此前依赖的 `_send_group_notice` 是 go-cqhttp 系列与 SnowLuma 的扩展，换服务端就不能用。
-- 撤回的原始目的是处理违规消息，但管理员拿不到平台消息 ID，也没有“引用违规消息并撤回”之类的触发入口，只有一条需要原始 ID 的 API，实际无法使用。
+消息 ID 可能在不同连接器中重复，因此先按逻辑群取得绑定后的能力，执行时只传消息 ID：
 
-后续若恢复撤回，需要先设计触发方式（例如管理员引用违规消息加命令，或违规判定），再按支持该能力的服务端实现。
+```go
+// 模块在 Descriptor.Requires 中声明 group.RecallKey.ID()。
+provider, ok := capability.Resolve(build.Capabilities, group.RecallKey)
+// ok 应在模块构建边界检查；以下为运行时调用示意。
+recall, err := provider.ForConversation("support")
+if err != nil {
+    return err
+}
+return recall.Recall(ctx, messageID)
+```
+
+宿主也可直接调用 `Manager.ForConversation` 取得同样的小接口，不向模块交付完整 Runtime。操作使用绑定的连接器和平台群目标；执行前复核当前绑定。无关配置热更新后仍可使用原能力；改绑或解绑后原能力返回 conflict，调用方应重新按群取得能力，不会把旧平台消息 ID 发往新目标。全局暂停和运行时关闭仍有效。
+
+能力不要求管理员发起聊天消息，不使用引用关系，不检索或重放历史，也不读取消息正文。宿主不设两分钟撤回限制；消息超过 history TTL、已滑出窗口，或者来自更早的时间，都可按 ID 发起操作。OneBot 直接调用 `delete_msg`，具体权限/平台规则由返回结果表达，不能把某一平台的规则当成所有连接器的统一限制。
+
+支持查询中的 `message_recall` 只表示连接器实现该操作，账号权限独立为 unknown 或已知结果。不支持、无权限、平台拒绝等都作为操作失败返回，不停止整个连接器。请求超时保留“超时 + 执行结果未知”，不自动重试、不自动发群提示。能力层不提供通用去重；调用者根据其业务和副作用确定性决定如何避免重复执行。
+
+本版只注册可调用能力，不默认增加撤回 HTTP API、LLM 工具、定时审查、独立违规模型请求或其他业务触发。后续功能可以在已做的判断中复用它，避免为撤回本身重复付出模型调用成本；这些调用策略不是当前实现。
+
+撤回操作不自动修订 history、短期问答上下文、已捕获的沉淀会话或已发布 Markdown。它不依赖这些容器，也不额外添加 removed 事件或改绑清理 history 的机制。真实平台副作用验收仍待完成。
+
+## 仍挂起：群公告
+
+v0.1.0 移除了公告和撤回，v0.2.0 仅恢复上述基础撤回能力。OneBot11 标准没有群公告接口，此前依赖的 `_send_group_notice` 是部分服务端扩展，公告保持挂起。

@@ -20,6 +20,7 @@ The project is preparing a `v0.1.0` source preview and has not been released. On
 - Cautious proactive participation with group-level yielding when a trusted administrator answers; explicit mentions retain normal processing rules.
 - Bounded administrator reply sessions, resolved from recent history or quoted text, periodically reflected into Markdown after a quiet window at a configurable location.
 - Optional automatic join review and welcome templates, with explicit unsupported results.
+- A host capability for recalling one message by ID within a bound conversation; triggering and moderation policy are left to consuming features.
 - Versioned configuration, history, rollback, component replacement, encrypted write-only credential management and a read-only capability catalog.
 
 Implementation and live acceptance are tracked separately in the [default behavior matrix](docs/default-behavior.md) and [version tasks](specs/v0.1.0/tasks.md).

@@ -94,6 +94,8 @@ type Persist func() (config.Snapshot, error)
 
 // Builder contains factories for all replaceable runtime components.
 type Builder struct {
+	// recalls 是宿主准备的受限操作能力，不参与模块提供的连接器构建。
+	recalls   group.RecallProvider
 	Yield     *proactive.YieldState
 	Decisions decision.Decider
 	Memory    *conversation.Memory
@@ -254,6 +256,9 @@ func (b Builder) buildClient(ctx context.Context, snapshot config.Snapshot, secr
 
 func (b Builder) initialCapabilities(snapshot config.Snapshot, client llm.Client) capability.Values {
 	values := capability.NewValues()
+	if b.recalls != nil {
+		_ = values.Provide(group.RecallKey.ID(), b.recalls)
+	}
 	if b.Yield != nil {
 		_ = values.Provide(proactive.YieldKey.ID(), b.Yield)
 	}
@@ -388,6 +393,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 		builder.History = newHistory(snapshot, builder)
 	}
 	manager := &Manager{builder: builder, errors: make(chan error, 8), status: Status{State: StateReady, Action: ActionNone, Version: snapshot.Version, UpdatedAt: time.Now().UTC()}}
+	manager.builder.recalls = manager
 	generation, err := manager.buildGeneration(ctx, snapshot, nil, "", "")
 	if err != nil {
 		return nil, err

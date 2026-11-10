@@ -43,6 +43,8 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml
 
 诊断不会完整构建文档索引或运行反思任务，因此不能把本地 ready 当作全部功能验收；索引内容、权限和真实渠道仍需实际启动后验证。
 
+没有新增群聊 `/recall` 命令或运维白名单项。消息撤回仅作为宿主共享能力供功能代码按消息 ID 调用；目录中的 `message_recall` 表示协议实现支持，账号权限仍可能为 unknown，见[宿主撤回能力](group-management.md#宿主单条消息撤回能力)。
+
 主动探测必须显式选择：
 
 ```powershell

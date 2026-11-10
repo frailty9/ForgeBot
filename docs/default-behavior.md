@@ -26,7 +26,8 @@
 | 管理员事后纠正 | 管理员引用 Bot 在让位时长内刚回答过的问题，同样让位；未引用时由主动插话决策结合近期群聊判断管理员是否已接手 | 仅群主/管理员；引用无关消息、普通成员或超时均不触发；不增加模型调用 | [回归测试](../internal/modules/proactivereply/regression_test.go) |
 | 核心近期消息容器 | 始终启用：按群保存最近收到的消息和 Bot 发送成功的消息，逐条滑动 | 每群 50 条、30 分钟、单条 1000 字；只记已绑定的群，只在内存中，不存图片，重启清空 | [容器](../internal/history/window_test.go)、[宿主接入](../internal/runtime/history_test.go) |
 | 配置更新失败 | 保持原运行代，持久化恢复错误可诊断 | expected_version与候选构建 | [运行时](../internal/runtime/manager_test.go) |
-| 不支持群操作 | unsupported；权限未知不能伪装成功。公告与撤回已挂起 | 可选接口 | [群操作路由](../internal/platform/groups.go) |
+| 不支持群操作 | unsupported；权限未知不能伪装成功。公告仍挂起，撤回按可选能力执行 | 可选接口 | [群操作路由](../internal/platform/groups.go) |
+| 单条消息撤回能力 | 按群取得 capability 后传消息 ID 执行；不依赖 history/引用/发言角色，不做违规判断或群内提示 | 当前绑定和全局暂停有效；不设统一两分钟限制，无自动重试或业务入口 | [能力路由](../internal/runtime/recall_test.go)、[OneBot](../internal/platform/onebot/recall_test.go) |
 | 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
 | 自动审核不确定 | 不同意也不拒绝，管理员在原平台处理 | 模型错误不映射为 false；无后备请求 | [审批测试](../internal/group/review_test.go) |
 | 新人欢迎 | 收到入群事件即发送；忽略自身/历史事件；不去重、不落盘 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go) |

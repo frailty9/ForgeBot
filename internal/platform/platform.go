@@ -123,6 +123,12 @@ func (s *Set) Review(ctx context.Context, id string, request group.ReviewRequest
 	return s.registry.Review(ctx, id, request)
 }
 
+// Recall 让 ConnectorSet 对外满足 group.MessageRecaller，仅转交群路由。
+// id 是逻辑群 ID，平台 target 的查找和 Recaller 选择在 Registry 完成。
+func (s *Set) Recall(ctx context.Context, id, messageID string) error {
+	return s.registry.Recall(ctx, id, messageID)
+}
+
 func (s *Set) Start(ctx context.Context, handler Handler) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

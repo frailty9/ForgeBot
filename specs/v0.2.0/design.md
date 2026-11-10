@@ -10,13 +10,13 @@
 | --- | --- | --- |
 | BOT-14 沉淀 | `knowledgereflection` 用 Observer、独立 buffer 和周期 scanner；宿主已有 history.Reader 和 History 订阅 | 只替换候选来源、归组与调度，不改变模型提炼、置信度、去重、发布和索引重载行为 |
 | ARCH-P06 旁路 | `Builder.ConnectorFactory/ConnectorProviders` 仍存在；生产组合根只注册模块，测试仍走旁路 | 删除宿主旁路，测试迁到模块 Provider 注册 |
-| BOT-19 撤回 | Sender 只返回 error；OneBot 丢弃发送响应里的消息 ID；无撤回可选接口 | 最小发送回执、history 记录平台 ID、平台管理员引用 `/recall`、可选撤回路由 |
+| BOT-19 撤回 | Sender 只返回 error；OneBot 丢弃发送响应里的消息 ID；无撤回可选接口 | 保持 error-only 发送接口；宿主共享 capability 按群绑定后传消息 ID 撤回，业务触发后续确定 |
 | 外部入群审批 | 模块只提供 Policy，Core 的 group.Service 判断并执行 | 继续由 Core 发外部请求，接入三种判断及凭据解析 |
 | QQ 官方连接器 | 生产只注册 Echo/OneBot Provider | 独立 `native.qq_official` 模块及 `qq_official` 适配器 |
 
 代码核对纠正：pipeline 与 reflector 都依赖 `buffer.AnswerSession`；reflection.Status 还依赖 buffer/scanner 的 Stats。删除包前必须迁移这些类型。`quiet_window/max_session_duration` 当前属于归组和调度，不属于 pipeline。
 
-实施顺序：基线 → 沉淀重构 → Provider 旁路清理 → 发送回执 → 撤回与让位补齐 → 外部审批 → QQ 官方连接器 → 验收。提交、推送和发行仍需用户明确要求。
+实施顺序：基线 → 沉淀重构 → Provider 旁路清理 → 消息撤回能力 → 外部审批 → QQ 官方连接器 → 验收。提交、推送和发行仍需用户明确要求。
 
 ## 2. BOT-14：核心消息容器驱动沉淀
 
@@ -65,23 +65,25 @@ Core history 默认 50 条、30m、1000 字不自动扩大；它影响首次查�
 
 保留 Sender、ClientFactory 等与本项无关的边界测试注入。新 Provider 仍遵守：Build 只构建，Start 激活，Stop 释放，Errors 只报告生命周期故障。覆盖普通热更新复用、连接器更换、启动失败恢复、持久化失败恢复、禁用和关闭，不能为删注入删掉测试断言。
 
-## 4. BOT-19：发送回执、引用撤回与让位
+## 4. BOT-19：宿主单条消息撤回能力
 
-### 4.1 通用发送回执：已取消
+### 4.1 目标纠正与发送边界
 
-2026-11-10 用户明确要求完全撤回通用发送回执改动。Sender/ConnectorSender 保持 error-only，宿主不根据发送响应补全 Bot 平台消息 ID。既有成功出站正文记录和个人会话记忆不变，不新增自身消息回推；QQ 所需协议 ID/引用索引只在适配器内部使用。下节撤回入口方案仍待按后续用户决定修订，不以发送回执作为实现前置。
+2026-11-10 用户先取消通用发送回执，后明确撤回只做宿主开放能力。Sender/ConnectorSender 保持 error-only，出站正文记录与个人会话记忆不变，不新增自身消息回推。删除此前聊天 `/recall` 实现、管理员聊天授权、直接引用 Bot 的让位增强和 history 清理扩展，原主动插话行为保持已提交基线。
 
-### 4.2 引用撤回的权限与路由
+### 4.2 共享 capability 与路由
 
-- 增加可选 `group.Recaller` 接口及逻辑会话撤回路由，Support 增加 `message_recall`。支持仅代表适配器实现，账号权限继续独立为 unknown 或已知状态。
-- 入口建议为独立群管理命令处理器，在普通问答/主动介入前识别 `/recall`，无需 @。复用核心去重；不挂到仅凭运维群位置授权的 operations.Router，也不交给 LLM 工具。
-- 每次检查入站 `TrustedResponder()`，仅平台 owner/admin 可执行；只接受本条命令的引用目标，不接受任意参数消息 ID、群 ID 或模型生成目标。
-- 从当前同群 history 找引用目标，执行前复核群与连接器绑定，走当前连接器；查不到返回目标不可用，不从引用文本猜测 ID，不对其他群执行。
-- OneBot 使用 `delete_msg`。请求后超时保留“超时 + 结果未知”，不自动重发；unsupported/permission_denied/expired 等操作失败不进入 Adapter.Errors，不导致运行时退出。
-- 成功后移除对应 history 记录，并增加明确的 removed 移出原因。沉淀不依赖移出事件，已形成的会话持有自己的材料，不能据此承诺撤回同步取消待沉淀会话。已捕获材料或已发布知识的撤销策略另行明确；短期问答上下文的修订也不随本项扩展。
-- 同一命令重复事件不再执行。命令响应统一给简短结果，原始 HTTP 响应、凭据和堆栈只进入受控诊断，不直接发群。
+新增 `group.RecallKey`（`group.message_recall.v1`），值为窄接口 RecallProvider。调用方先 `ForConversation(conversationID)` 得到该群绑定的 MessageRecall，运行时 `Recall(ctx, messageID)` 只接收消息 ID。逻辑群作用域用于避免多个连接器的消息 ID 冲突，不是内容/违规策略。
 
-补齐让位：可信管理员直接引用 history 中尚在 yield_duration 内的 Bot 消息时，与引用已被 Bot 回答的问题一样让位；明确 @ 继续正常问答。普通成员引用、无关消息和超时引用不扩大触发范围。
+Runtime 在模块构建前提供此 capability；模块声明 Requires 后可解析，宿主服务也可调用 Manager.ForConversation。不向消费者暴露 Runtime 或凭据仓储。能力在创建时保存连接器 ID 和目标，执行时复核当前绑定，无关热更新不影响使用，改绑/解绑使旧能力返回 conflict。全局暂停、ctx 取消、20 秒操作截止时间和正常关闭继续适用。
+
+连接器提供可选 `group.Recaller`，Registry/ConnectorSet 路由具体平台目标，Support 的 message_recall 与账号权限分开。OneBot 直接调用 delete_msg；Core 和适配器不根据 history 可见性或本地消息年龄拒绝请求，QQ 等协议的实际时限/权限由平台响应表达，不施加通用两分钟限制。
+
+### 4.3 操作结果与明确留白
+
+不支持、权限、平台过期或未知原因沿用 operation 分类；请求后超时保留 effect=unknown，不自动重试、不写群提示。操作本身不修改 history/短期问答/沉淀内容，取消本批新增的 Remove/Clear/removed 事件和改绑清理。消费方如需标记或清理自身状态，后续按其业务设计，不作为基础撤回前置条件。
+
+暂不添加聊天命令、HTTP 操作 API、LLM Tool、违规判断模型或扫描任务。调用者负责选择业务目标与授权，不以“管理员发来一条消息”作为能力调用前提。未来可在既有功能/模型调用中合并违规判断并使用此能力，避免为动作本身增加模型请求；不把示例当成已确认实现范围。
 
 ## 5. 外部入群审批
 

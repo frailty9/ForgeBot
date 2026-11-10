@@ -67,6 +67,25 @@ type Reviewer interface {
 	ReviewGroupRequest(context.Context, string, ReviewRequest) error
 }
 
+// Recaller 是具体平台发送器可选实现的撤回接口，例如 OneBot Sender。
+// target 已由 Registry 从逻辑群转换为平台群标识（QQ 群号、group_openid 等）；
+// messageID 是该平台的消息 ID。此层把请求转换为 delete_msg 等真实平台调用。
+// 连接器不支持撤回时无需实现它，Registry 会返回 unsupported。
+type Recaller interface {
+	RecallMessage(ctx context.Context, target, messageID string) error
+}
+
+// MessageRecaller 是连接器集合内部的多群路由接口，由 platform.Set/Registry 实现。
+// conversationID 是逻辑群 ID，Registry 据此查到具体连接器和平台 target，
+// 然后调用该连接器的 Recaller.RecallMessage；它本身不直接请求平台 API。
+//
+// 它与面向业务模块的 MessageRecall 都有 Recall 方法，但参数和职责不同：
+// MessageRecall 已绑定群，只收 messageID；此接口服务多个群，必须再收群 ID。
+// 业务模块应从 RecallKey 取得 RecallProvider，而不是直接依赖此路由接口。
+type MessageRecaller interface {
+	Recall(ctx context.Context, conversationID, messageID string) error
+}
+
 // ReviewReasonReporter 是可选能力；未声明时拒绝仍执行，只忽略理由。
 type ReviewReasonReporter interface {
 	GroupReviewReasonSupported() bool
@@ -76,8 +95,10 @@ type Support struct {
 	MemberEvents     bool   `json:"member_events"`
 	JoinReview       bool   `json:"join_review"`
 	JoinReviewReason bool   `json:"join_review_reason"`
+	MessageRecall    bool   `json:"message_recall"`
 	Permission       string `json:"permission"`
 }
+
 type Actions interface {
 	// Support 只读本地适配能力元数据，不主动探测远端权限或触发网络请求。
 	Support(context.Context, string) (Support, error)
