@@ -3,6 +3,7 @@ package joinreview
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/soleapi/forgebot/internal/modules"
@@ -65,5 +66,26 @@ func TestJoinReviewOptionsValidation(t *testing.T) {
 		if err := (Factory{}).ValidateOptions(json.RawMessage(invalid)); err == nil {
 			t.Fatalf("invalid options accepted: %s", invalid)
 		}
+	}
+}
+
+func TestExternalReviewNestedOptionsAreStrictAndPublicHeadersAreRedacted(t *testing.T) {
+	raw := json.RawMessage(`{"external_review":{"url":"https://review.example.com","method":"POST","headers":{"Authorization":"Bearer {review/token}"},"result_expression":".approved"},"groups":{"g":{"enabled":true}}}`)
+	if err := (Factory{}).ValidateOptions(raw); err != nil {
+		t.Fatal(err)
+	}
+	public, err := (Factory{}).PublicOptions(raw)
+	encoded, _ := json.Marshal(public)
+	if err != nil || strings.Contains(string(encoded), "review/token") || !strings.Contains(string(encoded), "configured") {
+		t.Fatalf("public=%s err=%v", encoded, err)
+	}
+	registration := registration(t, string(raw))
+	policy, ok := registration.Policy("g")
+	if !ok || policy.ExternalReview.Headers["Authorization"] != "Bearer {review/token}" {
+		t.Fatal("public redaction mutated policy", policy)
+	}
+	invalid := json.RawMessage(strings.Replace(string(raw), `"method":"POST"`, `"method":"POST","typo":true`, 1))
+	if err := (Factory{}).ValidateOptions(invalid); err == nil {
+		t.Fatal("unknown nested field accepted")
 	}
 }

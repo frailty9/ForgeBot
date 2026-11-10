@@ -8,6 +8,8 @@ go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol anthropic_me
 
 支持三种既有 LLM 协议。图片能力缺省 false，模型支持图片时加 `-images`；无认证本地模型加 `-anonymous`，不能靠漏填 Key 自动启用匿名。目录会生成 `forgebot.local.yaml`、`runtime.local.json` 和本地忽略规则（已有 `.gitignore` 不覆盖）。主密钥写在 `forgebot.local.yaml` 的 `secret_key` 中，配置文件使用受限文件模式；Windows 权限仍由所在目录的 ACL 决定。已有目标文件或凭据时拒绝覆盖，不替换密钥。
 
+`init` 生成的 `runtime.local.json` 也包含 `native.join_review` 的完整关闭示例：正则、模型规则、AND 组合、拒绝理由、关闭的 `local` 群及 `external_review` 的 URL、方法、Header 凭据引用、JSON body 和结果表达式。生成时不执行审批或访问外部校验服务。启用前绑定支持审批的连接器和逻辑群、填写真实 URL 并初始化 `review/token`；不需要外部判断时删除整个 `external_review`。模型开关保持 `false`，需要三项组合时改为 `true`，按正则 → HTTP → 模型依次执行，详见[外部 HTTP 审批](group-management.md#外部-http-审批)。
+
 首次写入回答 Key：
 
 ```powershell

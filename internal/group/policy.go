@@ -2,6 +2,7 @@ package group
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -25,6 +26,10 @@ func (p Policy) Equal(other Policy) bool {
 	if p.ModelEnabled() != other.ModelEnabled() || p.Combine() != other.Combine() {
 		return false
 	}
+	if !reflect.DeepEqual(p.ExternalReview, other.ExternalReview) {
+		return false
+	}
+	p.ExternalReview, other.ExternalReview = nil, nil
 	p.ReviewModelEnabled, other.ReviewModelEnabled = nil, nil
 	p.ReviewCombine, other.ReviewCombine = "", ""
 	return p == other
@@ -45,8 +50,13 @@ func (p Policy) Validate() error {
 	if p.ModelEnabled() && strings.TrimSpace(p.ReviewRule) == "" {
 		return fmt.Errorf("group model review requires a nonblank review_rule")
 	}
-	if p.ReviewRegex == "" && !p.ModelEnabled() {
-		return fmt.Errorf("automatic group review requires review_regex or model review")
+	if p.ExternalReview != nil {
+		if err := p.ExternalReview.Validate(); err != nil {
+			return err
+		}
+	}
+	if p.ReviewRegex == "" && !p.ModelEnabled() && p.ExternalReview == nil {
+		return fmt.Errorf("automatic group review requires regex, model or external review")
 	}
 	return nil
 }

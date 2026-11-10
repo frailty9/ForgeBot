@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -131,5 +133,55 @@ func TestAutomaticReviewKeepsNoRecordsAndHonorsPause(t *testing.T) {
 	_, _ = manager.HandleGroupEvent(context.Background(), event)
 	if port.calls.Load() != 1 {
 		t.Fatal("paused runtime called connector")
+	}
+}
+
+func TestExternalReviewUsesCurrentStoredCredentialAcrossReplacement(t *testing.T) {
+	var received []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = append(received, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"approved":true}`))
+	}))
+	defer api.Close()
+	snapshot, registry := joinReviewSnapshot(t, "")
+	enabled := true
+	options, _ := json.Marshal(map[string]any{"external_review": map[string]any{
+		"url": api.URL, "method": "POST", "headers": map[string]string{"Authorization": "Bearer {review/key}"}, "result_expression": ".approved",
+	}, "groups": map[string]any{"local": map[string]bool{"enabled": true}}})
+	snapshot.Runtime.Modules[joinreview.ID] = config.ModuleConfig{Enabled: &enabled, Options: options}
+	store := configuredSecrets(t, "llm")
+	stage, err := store.Stage(context.Background(), "review/key", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Activate(context.Background(), stage); err != nil {
+		t.Fatal(err)
+	}
+	port := &groupPort{Sender: registeredSender(t).registry}
+	manager, err := NewManager(context.Background(), snapshot, Builder{Sender: port, Modules: registry, Secrets: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	event := group.Event{ID: "first", Kind: group.JoinRequested, ConversationID: "local", ConnectorID: "echo", UserID: "u", Reference: "opaque", At: time.Now()}
+	if result, err := manager.HandleGroupEvent(context.Background(), event); err != nil || result.Verdict != "approved" {
+		t.Fatal(result, err)
+	}
+	if err := manager.ReplaceSecret(context.Background(), "review/key", "second", func() error {
+		candidate, err := store.Stage(context.Background(), "review/key", "second")
+		if err != nil {
+			return err
+		}
+		_, err = store.Activate(context.Background(), candidate)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	event.ID = "second"
+	if result, err := manager.HandleGroupEvent(context.Background(), event); err != nil || result.Verdict != "approved" {
+		t.Fatal(result, err)
+	}
+	if len(received) != 2 || received[0] != "Bearer first" || received[1] != "Bearer second" {
+		t.Fatal(received)
 	}
 }

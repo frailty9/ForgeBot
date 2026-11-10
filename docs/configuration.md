@@ -364,7 +364,7 @@ OneBot `options` 字段：
 OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被引用消息，并将引用文字和图片作为独立上下文传给 LLM；引用内容不会并入当前消息文本，因此不会影响命令识别、消息准入或去重。
 
 注意：当前 `send_token` 和 `receive_secret` 仍以明文保存在运行时 JSON 中；管理 API
-的公开配置响应只显示它们是否已配置。只有 LLM API Key 已接入加密 SecretStore。未知
+的公开配置响应只显示它们是否已配置。回答/DM、MCP 与本批外部审批凭据使用加密 SecretStore。未知
 且禁用的未来 Provider 实例不会在公开响应中回显其原始 `options`。
 
 #### OneBot 配置迁移（破坏式）
@@ -786,8 +786,12 @@ Invoke-RestMethod `
 
 ## 入群自动审批
 
+全字段见 [`runtime.example.json`](../configs/runtime.example.json)（模块与群关闭）；正则、HTTP、模型三项 AND 组合的完整 OneBot 配置见 [`runtime.onebot.external-review.example.json`](../configs/runtime.onebot.external-review.example.json)。[群管理说明](group-management.md#外部-http-审批)列出各项启停方式、请求/响应示例和凭据初始化步骤。总示例的 `external_review` 已配置，单独关闭它应删除整个对象；模型通过 `model_enabled` 控制。
+
+入群审批可在 `modules.native.join_review.options.external_review` 配置 HTTP 判断，和正则/模型共用 AND/OR；完整配置、有限表达式语法、JSON 模板与凭据引用见[外部 HTTP 审批](group-management.md#外部-http-审批)。请求限时 5 秒、响应最大 64KiB，字段严格解析，外部配置非空即启用，不另加开关。
+
 入群自动审批由 `modules.native.join_review` 配置，默认关闭。规则在模块 `options` 中统一写一份，所有开启的群共用：`regex`（可选 Go 正则，RE2 语法，最多 4096 字节）、`model_enabled`（是否使用共享模型决策）、`rule`（模型判断标准，最多 4096 字节）、`combine`（`and` 默认或 `or`）与 `reject_reason`（最多 2048 字节的固定拒绝理由）。`options.groups.<群ID>.enabled` 决定该群是否开启。顶层 `group_management` 已删除。
 
-正则先执行：AND 中正则不通过立即拒绝，OR 中正则通过立即同意，其余情况才调用模型。模型失败或无法判断时不操作，管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例见 [群管理](group-management.md)。
+多个判断启用时，固定按成本升序串行执行：**正则 → 外部 HTTP 校验 → 模型判断**；跳过未启用项，不并发执行。AND 遇到不通过即拒绝，OR 遇到通过即同意，短路后不执行后续判断。外部 HTTP 失败或超时为 unknown：AND 立即拒绝，OR 继续；配置外部判断时最终没有通过则拒绝。未配置外部判断时，保留模型失败或无法判断时不操作的行为，由管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例及凭据初始化见 [群管理](group-management.md#外部-http-审批)，通用凭据轮换 API 不包含在本批中。
 
 单次工具结果默认 64 KiB，包含 JSON 信封和转义开销，可容纳默认 12000 字符的正常中文检索上下文。字符数不等于字节数；显式更小预算或自定义更大检索输出仍可能得到 `budget_exhausted`。

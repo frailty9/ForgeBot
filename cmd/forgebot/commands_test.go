@@ -50,6 +50,28 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	review, exists := cfg.Runtime.Modules[joinreview.ID]
+	if !exists || review.Enabled == nil || *review.Enabled {
+		t.Fatal("init must include a disabled join review example")
+	}
+	var options joinreview.Options
+	if err := json.Unmarshal(review.Options, &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.Regex == "" || options.ModelEnabled == nil || *options.ModelEnabled || options.Rule == "" || options.Combine != "and" || options.RejectReason == "" {
+		t.Fatal("init must include the regex/model combination fields")
+	}
+	if local, exists := options.Groups["local"]; !exists || local.Enabled {
+		t.Fatal("init must include the disabled local group")
+	}
+	external := options.ExternalReview
+	if external == nil || external.URL != "https://review.example.com/join" || external.Method != http.MethodPost || external.Headers["Authorization"] != "Bearer {review/token}" || external.ResultExpression != ".data.approved == true" {
+		t.Fatal("init must include the external HTTP review fields")
+	}
+	var template map[string]string
+	if err := json.Unmarshal([]byte(external.Body), &template); err != nil || template["application"] != "{application}" || template["user_id"] != "{user_id}" || template["conversation_id"] != "{conversation_id}" {
+		t.Fatal("init must include a valid JSON body template", err)
+	}
 	cfg.Static.Server.Addr = "127.0.0.1:0"
 	// init 把主密钥写进 YAML，无需再设置环境变量。
 	if _, err = secret.ParseKey(cfg.Static.SecretKey); err != nil {

@@ -45,6 +45,13 @@ routes to the optional connector Recaller; it does not depend on history,
 message age, platform chat roles, a slash command, or a policy model. No caller
 strategy, LLM tool, HTTP action or history mutation is installed automatically.
 
+Join-review modules contribute data-only policies. The Core group service
+combines regex, optional external HTTP review, and the shared decision model;
+external requests resolve only configured Header secret references through the
+host and enforce a 5-second deadline and 64KiB response limit. JSON templates
+replace decoded string values and are serialized afterwards. Policies are
+compared by effective content, including external headers, before execution.
+
 Operator groups are configured by logical `ConversationID`, never by protocol
 or external account identifiers. Their commands pass through a dedicated,
 allow-listed operations boundary before ordinary Bot handling. This boundary

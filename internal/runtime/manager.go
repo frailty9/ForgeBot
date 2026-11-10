@@ -401,6 +401,7 @@ func NewManager(ctx context.Context, snapshot config.Snapshot, builder Builder) 
 	manager.current.Store(generation)
 	builder.History.SetSubscribers(generation.modules.HistorySubscribers())
 	manager.groups = group.New(manager, manager.groupPolicy, builder.Logger)
+	manager.groups.SetReviewSecrets(builder.Secrets)
 	generation.modules.Mark("active")
 	manager.storeSnapshot(snapshot)
 	return manager, nil

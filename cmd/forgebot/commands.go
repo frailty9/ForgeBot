@@ -114,6 +114,28 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if anonymous {
 		cfg.LLM.Authentication = config.AuthenticationNone
 	}
+	// 初始化文件列出关闭的审批配置，便于按需填写；不改变运行时缺省行为。
+	reviewEnabled := false
+	cfg.Modules = map[string]config.ModuleConfig{
+		"native.join_review": {
+			Enabled: &reviewEnabled,
+			Options: json.RawMessage(`{
+  "regex": "\\S",
+  "model_enabled": false,
+  "rule": "申请内容须说明入群目的，并符合本群主题。",
+  "combine": "and",
+  "reject_reason": "请填写符合本群要求的入群申请说明。",
+  "groups": {"local": {"enabled": false}},
+  "external_review": {
+    "url": "https://review.example.com/join",
+    "method": "POST",
+    "headers": {"Authorization": "Bearer {review/token}"},
+    "body": "{\"application\":\"{application}\",\"user_id\":\"{user_id}\",\"conversation_id\":\"{conversation_id}\"}",
+    "result_expression": ".data.approved == true"
+  }
+}`),
+		},
+	}
 	runtimeData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err

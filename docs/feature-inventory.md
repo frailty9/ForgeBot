@@ -2,7 +2,7 @@
 
 原清单核对日期：2026-11-05；v0.2.0 相关入口复核：2026-11-10，`feat/v0.2.0@1103bc7`。下方历史明细未逐项重新审计，初始盘点基于 `master@c982e73`。
 
-**当前实施 [v0.2.0](../specs/v0.2.0/requirements.md)，本批为宿主单条消息撤回能力。** 沉淀 `6230796`、Connector 旁路清理 `38796f2` 已提交；通用回执已取消。本批仅提供按群绑定、传入消息 ID 执行的共享 capability，纠正并撤掉管理员引用命令及附带让位/history 扩展；不依赖 history，不加统一两分钟限制。外部 HTTP 审批、QQ 与凭据入口另行分批整理，真实验收待补。
+**当前实施 [v0.2.0](../specs/v0.2.0/requirements.md)，本批为外部 HTTP 入群审批。** 沉淀 `6230796`、Connector 旁路清理 `38796f2`、宿主单条撤回能力 `a727d18` 已提交；回执取消。本批增加 external_review 请求模板、SecretStore 引用、有限布尔表达式及正则/HTTP/模型短路组合。QQ 连接器、通用凭据 API 与连接器凭据换代留待后续批次；新增外部审批的真实平台副作用验收待补。
 
 本清单按代码、测试文件、分支差异和会话决策整理。它记录实现范围，不替代发布验收；初次核对未重跑测试，随后分支实施已运行全量测试/vet，证据见 tasks；未刷新远端分支。
 
@@ -84,7 +84,7 @@
 | BOT-14 | 管理员回答自动沉淀 | 知识积累 | history 重构已实现，运营验收待补 | 新消息事件锚定管理员答复，问题先查 history 后用引用原文；仅保存已形成会话，独立于容器滑动，定时批处理；提炼、置信度、去重、发布和索引重载行为保持 | [会话测试](../internal/modules/knowledgereflection/sessions_test.go)、[反思模块](../internal/modules/knowledgereflection/)、[发布器](../internal/knowledge/markdown/) |
 | BOT-15 | 按会话追加行为与输出约束 | 行为定制 | 已实现 | 使用可选 Prompt suffix 调整渠道格式、群组语气和主题；这是模型指令，不是强制格式转换器 | [配置](../internal/config/config.go)、[指令组装](../internal/bot/engine.go) |
 | BOT-16 | 连续追问与短期会话记忆 | 对话连续性 | 已实现 | 进程内按群+用户隔离，TTL/容量/字节上限与顺序队列；仅提交确认发送成功的问答，重启清空，不持久化完整聊天记录 | [会话记忆](../internal/conversation/memory.go)、[投递提交](../internal/bot/memory_test.go)、[版本 R7](../specs/v0.1.0/requirements.md) |
-| BOT-17 | 入群申请自动审批 | 群管理 | 已实现，2026-11-09 真实验收通过 | 每群正则与统一布尔模型判断，支持 AND/OR 短路；失败不操作，不持久化审批记录，人工处理在原平台完成 | [审批实现](../internal/group/review.go)、[受控测试](../internal/group/review_test.go) |
+| BOT-17 | 入群申请自动审批 | 群管理 | 已实现，原正则/模型已真实验收，新增 HTTP 待验 | 正则、外部 HTTP、模型 AND/OR 短路；外部失败按组合处理，未配置外部时沿用模型故障不操作；不持久化审批记录 | [审批实现](../internal/group/review.go)、[外部 HTTP 测试](../internal/group/external_review_test.go) |
 | BOT-18 | 群公告 | 群管理 | 暂缓 | 2026-11-05 挂起并删除实现：OneBot11 标准无群公告接口，原实现依赖非标准 `_send_group_notice` 扩展 | [挂起说明](group-management.md) |
 | BOT-19 | 单条消息撤回能力 | 群管理与处置 | 已实现，真实验收待补 | 宿主共享 capability 按群绑定后传消息 ID，OneBot delete_msg；不依赖 history，不设统一两分钟时限，不含聊天命令/违规策略/LLM 工具 | [能力测试](../internal/runtime/recall_test.go)、[使用说明](group-management.md#宿主单条消息撤回能力) |
 | BOT-20 | 共享模型决策与业务范围 | 决策 | 已实现，2026-11-09 真实验收通过 | DM 显式 enabled 时用 DM、缺省用 LLM；每次最多一次模型请求，无故障后备；布尔入口区分 false 与 error | [决策契约](decision-service.md)、[测试](../internal/decision/routing_test.go) |
@@ -173,7 +173,7 @@ BOT-17–19 是 Bot 核心的可选群管理能力契约，不要求每种连接
 | APP-P06 | 统一能力目录、诊断与 CLI init/doctor | 已实现 | 目录投影、init、doctor、capabilities 与管理 API 同源；2026-11-09 真实 OneBot/LLM 联合教程验收通过 |
 | APP-P07 | 自动沉淀审核与候选运营 | 仅讨论 / 待复核 | 核心扫描发布已有实现；人工审核、候选编辑/撤销等运营流程没有形成当前实现 |
 | APP-P08 | 更完整的平台投递体验 | 仅讨论 / 路线图 | 2026-11-10 用户取消通用发送回执；分类重试与幂等、长消息处理、合并转发继续延后，不为了补齐自身 history 扩大发送接口 |
-| APP-P09 | 入群申请审核与撤回能力（BOT-17/19），公告暂缓 | 审核已真实验收，撤回能力待真实验收 | 撤回只提供共享执行能力，消费方和策略后续确定；审批保持原正则/模型路径，公告继续挂起 |
+| APP-P09 | 入群申请审核与撤回能力（BOT-17/19），公告暂缓 | 原审批已真实验收，新增 HTTP 与撤回待验 | 审批增加外部 HTTP 并沿用 AND/OR，模块只提供策略；撤回继续只提供基础 capability，公告继续挂起 |
 | APP-P10 | 新人入群欢迎语（BOT-21） | 已实现，2026-11-09 真实验收通过 | 独立于入群申请审核；基于真实成员事件，按群模板发送并报告不支持状态 |
 
 ## 架构演进需求

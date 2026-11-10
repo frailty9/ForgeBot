@@ -118,6 +118,7 @@ type Policy struct {
 	ReviewModelEnabled *bool
 	ReviewCombine      string
 	RejectReason       string
+	ExternalReview     *ExternalReview
 }
 
 // ReviewTarget 是宿主对某个逻辑群的审批视图：Bound 表示群已绑定，

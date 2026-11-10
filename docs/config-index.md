@@ -51,6 +51,7 @@
 | `native.structured_search`：`document_root` `extensions` `default_results` `max_results` `min_match_ratio` `query_timeout` `build_timeout` `max_queries_per_turn` `max_context_chars` `max_section_chars` `max_file_bytes` `max_total_bytes` `max_files` | [配置手册 §5.5](configuration.md#55-modulesnativestructured_search) |
 | `native.knowledge_reflection`：`conversation_ids` `scan_interval` `message_ttl` `quiet_window` `max_session_duration` `max_messages_per_conversation` `max_messages_total` `max_message_chars` `max_pairs_per_scan` `min_confidence` `extra_directory` | [配置手册 §5.8](configuration.md#58-modulesnativeknowledge_reflection)（v0.2.0 字段保留，周期/TTL/容量仅作用于已形成会话及模块处理标记） |
 | `native.join_review`：`regex` `model_enabled` `rule` `combine` `reject_reason` `groups` | [群管理：入群自动审批](group-management.md#入群自动审批)、[配置手册：入群自动审批](configuration.md#入群自动审批) |
+| `native.join_review.external_review`：`url` `method` `headers` `body` `result_expression` | [外部 HTTP 审批](group-management.md#外部-http-审批)（位于模块 options，凭据用 Header 占位符引用）；[三项组合完整示例](../configs/runtime.onebot.external-review.example.json)，[init](cli.md) 生成文件也列全这些字段（审批关闭） |
 | `native.welcome`：`groups.<群ID>.enabled` `message` | [群管理：新人欢迎](group-management.md#新人欢迎) |
 
 ### `extensions`

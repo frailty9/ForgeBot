@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/soleapi/forgebot/internal/operation"
+	"github.com/soleapi/forgebot/internal/secret"
 )
 
 // Policies 返回逻辑群当前的审批视图；每次调用都读取最新运行代。
@@ -19,7 +20,11 @@ type Service struct {
 	logger  *slog.Logger
 	mu      sync.Mutex
 	reviews map[string]time.Time
+	secrets secret.Reader
 }
+
+// SetReviewSecrets 在服务发布前接入宿主凭据读取边界，不向模块或外部服务暴露。
+func (s *Service) SetReviewSecrets(reader secret.Reader) { s.secrets = reader }
 
 func New(actions Actions, policy Policies, loggers ...*slog.Logger) *Service {
 	if policy == nil {

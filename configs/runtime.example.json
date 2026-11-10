@@ -163,6 +163,15 @@
           "local": {
             "enabled": false
           }
+        },
+        "external_review": {
+          "url": "https://review.example.com/join",
+          "method": "POST",
+          "headers": {
+            "Authorization": "Bearer {review/token}"
+          },
+          "body": "{\"application\":\"{application}\",\"user_id\":\"{user_id}\",\"conversation_id\":\"{conversation_id}\"}",
+          "result_expression": ".data.approved == true"
         }
       }
     },

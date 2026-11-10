@@ -79,7 +79,7 @@ func (s *Service) HandleEvent(ctx context.Context, event Event) (result EventRes
 	if s.actions == nil {
 		return EventResult{}, operation.New(operation.Unsupported, "group actions are unavailable")
 	}
-	approve, err := s.evaluateReview(decision.WithBudget(ctx, 1), policy, decider, event.Comment)
+	approve, err := s.evaluateEventReview(decision.WithBudget(ctx, 1), policy, decider, event)
 	if err != nil {
 		s.logger.WarnContext(ctx, "group review undecided", "conversation_id", event.ConversationID,
 			"event_id", event.ID, "failure", operation.Describe(err))

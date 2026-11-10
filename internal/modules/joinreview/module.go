@@ -31,16 +31,17 @@ type GroupOptions struct {
 
 // Options 的规则字段对所有开启的群生效；字段含义见 docs/group-management.md。
 type Options struct {
-	Regex        string                  `json:"regex,omitempty"`
-	ModelEnabled *bool                   `json:"model_enabled,omitempty"`
-	Rule         string                  `json:"rule,omitempty"`
-	Combine      string                  `json:"combine,omitempty"`
-	RejectReason string                  `json:"reject_reason,omitempty"`
-	Groups       map[string]GroupOptions `json:"groups"`
+	Regex          string                  `json:"regex,omitempty"`
+	ModelEnabled   *bool                   `json:"model_enabled,omitempty"`
+	Rule           string                  `json:"rule,omitempty"`
+	Combine        string                  `json:"combine,omitempty"`
+	RejectReason   string                  `json:"reject_reason,omitempty"`
+	Groups         map[string]GroupOptions `json:"groups"`
+	ExternalReview *group.ExternalReview   `json:"external_review,omitempty"`
 }
 
 func (o Options) policy() group.Policy {
-	return group.Policy{ReviewRegex: o.Regex, ReviewModelEnabled: o.ModelEnabled, ReviewRule: o.Rule, ReviewCombine: o.Combine, RejectReason: o.RejectReason}
+	return group.Policy{ReviewRegex: o.Regex, ReviewModelEnabled: o.ModelEnabled, ReviewRule: o.Rule, ReviewCombine: o.Combine, RejectReason: o.RejectReason, ExternalReview: o.ExternalReview}
 }
 
 type Factory struct{}
@@ -82,8 +83,22 @@ func parse(raw json.RawMessage) (Options, error) {
 	return result, nil
 }
 
-func (Factory) ValidateOptions(raw json.RawMessage) error      { _, err := parse(raw); return err }
-func (Factory) PublicOptions(raw json.RawMessage) (any, error) { return parse(raw) }
+func (Factory) ValidateOptions(raw json.RawMessage) error { _, err := parse(raw); return err }
+func (Factory) PublicOptions(raw json.RawMessage) (any, error) {
+	options, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if options.ExternalReview != nil {
+		external := *options.ExternalReview
+		external.Headers = make(map[string]string, len(options.ExternalReview.Headers))
+		for name := range options.ExternalReview.Headers {
+			external.Headers[name] = "[configured]"
+		}
+		options.ExternalReview = &external
+	}
+	return options, nil
+}
 
 func (Factory) ReferencedGroups(raw json.RawMessage) ([]string, error) {
 	options, err := parse(raw)
