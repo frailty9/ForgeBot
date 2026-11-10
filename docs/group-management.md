@@ -196,7 +196,7 @@ Header `Authorization` 为 `Bearer ` 加上 SecretStore 中 `review/token` 的�
 
 Header 中 `{review/token}` 表示 SecretStore 键名，必须提前写入凭据；不把真实 Token 写在 JSON。每次请求读取当前已激活凭据，替换后后续请求立即使用新值，缺失或空值不发送。公开配置 Header 值只显示 `[configured]`，不会回显模板或解析后的 Token。
 
-本批使用现有 CLI 首次写入：`-init-api-key review/token`。已有引用不能通过该命令覆盖；如需更换凭据，可先写入一个新引用，再热更新 Header 模板指向它。按引用直接轮换的通用管理 API 另行分批审阅，本批不新增该 API。
+首次写入可用 `-init-api-key review/token`；运行中用 Bearer 认证的 `PUT /v1/admin/secrets/review/token`，正文为 `{"value":"NEW_TOKEN"}`。GET 只查配置状态，不能读取明文。 具体方法与示例见[按引用管理凭据](configuration.md#63-按引用管理凭据)。
 
 #### 初始化外部校验凭据
 

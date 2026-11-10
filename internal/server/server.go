@@ -69,6 +69,9 @@ func New(cfg config.Snapshot, logger *slog.Logger, engine Engine, adminService *
 	mux.Handle("GET /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyStatus)))
 	mux.Handle("PUT /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyReplace)))
 	mux.Handle("DELETE /v1/admin/decision/api-key", s.authorize(http.HandlerFunc(s.adminDecisionAPIKeyDelete)))
+	mux.Handle("GET /v1/admin/secrets/{ref...}", s.authorize(http.HandlerFunc(s.adminSecret)))
+	mux.Handle("PUT /v1/admin/secrets/{ref...}", s.authorize(http.HandlerFunc(s.adminSecret)))
+	mux.Handle("DELETE /v1/admin/secrets/{ref...}", s.authorize(http.HandlerFunc(s.adminSecret)))
 	mux.Handle("GET /v1/admin/groups/support", s.authorize(http.HandlerFunc(s.adminGroupSupport)))
 	s.server = &http.Server{
 		Addr:         cfg.Static.Server.Addr,
@@ -291,6 +294,43 @@ func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) error {
 		return operation.New(operation.Invalid, "request body must contain one JSON value")
 	}
 	return nil
+}
+
+func (s *Server) adminSecret(w http.ResponseWriter, r *http.Request) {
+	ref := r.PathValue("ref")
+	if strings.TrimSpace(ref) == "" || len(ref) > 1024 {
+		s.writeAdminError(w, operation.New(operation.Invalid, "credential reference is required and at most 1024 bytes"))
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		status, err := s.admin.SecretStatus(r.Context(), ref)
+		if err != nil {
+			s.writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	case http.MethodPut:
+		var input struct {
+			Value string `json:"value"`
+		}
+		if err := decodeAdminJSON(w, r, &input); err != nil {
+			s.writeAdminError(w, err)
+			return
+		}
+		status, err := s.admin.ReplaceSecret(r.Context(), ref, input.Value)
+		if err != nil {
+			s.writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	case http.MethodDelete:
+		if err := s.admin.DeleteSecret(r.Context(), ref); err != nil {
+			s.writeAdminError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (s *Server) writeAdminError(w http.ResponseWriter, err error) {

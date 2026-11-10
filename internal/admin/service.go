@@ -215,6 +215,26 @@ func (s *Service) DeleteDecisionAPIKey(ctx context.Context) error {
 	return s.secrets.Delete(ctx, ref)
 }
 
+// 按引用管理连接器/外部审批凭据，仍只提供状态和写入生命周期，无明文读取。
+func (s *Service) SecretStatus(ctx context.Context, ref string) (secret.Status, error) {
+	if s.secrets == nil {
+		return secret.Status{}, ErrUnavailable
+	}
+	return s.secrets.Status(ctx, ref)
+}
+func (s *Service) ReplaceSecret(ctx context.Context, ref, value string) (secret.Status, error) {
+	if s.secrets == nil {
+		return secret.Status{}, ErrUnavailable
+	}
+	return s.secrets.Replace(ctx, ref, value)
+}
+func (s *Service) DeleteSecret(ctx context.Context, ref string) error {
+	if s.secrets == nil {
+		return ErrUnavailable
+	}
+	return s.secrets.Delete(ctx, ref)
+}
+
 func (s *Service) GroupSupport(ctx context.Context, id string) (group.Support, error) {
 	return s.runtime.Support(ctx, id)
 }

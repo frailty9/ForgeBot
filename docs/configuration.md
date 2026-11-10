@@ -521,6 +521,31 @@ Invoke-RestMethod `
 
 `GET /v1/admin/llm/api-key` 只返回是否配置及更新时间，永远不会返回密钥值。正式实例要求回答凭据时，删除正在使用的必需 Key 会被拒绝，原值保留；先切到显式无认证配置后才可删除。切换 `api_key_ref` 前应确保新引用已有密钥。
 
+### 6.3 按引用管理凭据
+
+外部审批、MCP 等凭据可以通过 `GET/PUT/DELETE /v1/admin/secrets/{ref}` 管理，三个方法都要求管理端 Bearer 认证。`ref` 是 SecretStore 键名，例如 `review/token`，斜杠层级完整保留；它不是文件路径。CLI `-init-api-key` 仍只做首次写入，已有引用用此 API 替换，无需修改 Header 中的引用。
+
+| 方法 | 请求正文 | 成功结果 |
+| --- | --- | --- |
+| GET | 无 | HTTP 200，返回 `configured`、`version`、`updated_at` 等状态，不返回明文 |
+| PUT | `{"value":"NEW_TOKEN"}` | HTTP 200，创建或替换后返回状态，不返回明文 |
+| DELETE | 无 | HTTP 204，无响应正文 |
+
+PUT 正文使用 `value`，与回答/DM 单用途接口的 `api_key` 字段不同；未知字段和多余 JSON 会被拒绝。原有回答/DM 接口仍可用，两种入口共用加密仓储及候选激活生命周期，删除正在使用的必需回答/DM 凭据同样会被拒绝。
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:FORGEBOT_ADMIN_TOKEN" }
+$body = @{ value = 'replace-with-review-service-token' } | ConvertTo-Json -Compress
+Invoke-RestMethod `
+  -Method Put `
+  -Uri http://127.0.0.1:8080/v1/admin/secrets/review/token `
+  -Headers $headers `
+  -ContentType application/json `
+  -Body $body
+```
+
+`external_review.headers.Authorization` 写 `Bearer {review/token}`；替换成功后，后续外部审批请求读取新值，不重新发起已有审批。删除引用后，后续 HTTP 判断缺少凭据时不发送请求，按 unknown 参与 AND/OR 组合；它不会自动关闭审批。
+
 ## 6.5 外部扩展（MCP 与 Skill）
 
 应用层扩展位于运行时 JSON 的 `extensions` 字段，因此可以通过管理 API
@@ -792,6 +817,6 @@ Invoke-RestMethod `
 
 入群自动审批由 `modules.native.join_review` 配置，默认关闭。规则在模块 `options` 中统一写一份，所有开启的群共用：`regex`（可选 Go 正则，RE2 语法，最多 4096 字节）、`model_enabled`（是否使用共享模型决策）、`rule`（模型判断标准，最多 4096 字节）、`combine`（`and` 默认或 `or`）与 `reject_reason`（最多 2048 字节的固定拒绝理由）。`options.groups.<群ID>.enabled` 决定该群是否开启。顶层 `group_management` 已删除。
 
-多个判断启用时，固定按成本升序串行执行：**正则 → 外部 HTTP 校验 → 模型判断**；跳过未启用项，不并发执行。AND 遇到不通过即拒绝，OR 遇到通过即同意，短路后不执行后续判断。外部 HTTP 失败或超时为 unknown：AND 立即拒绝，OR 继续；配置外部判断时最终没有通过则拒绝。未配置外部判断时，保留模型失败或无法判断时不操作的行为，由管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例及凭据初始化见 [群管理](group-management.md#外部-http-审批)，通用凭据轮换 API 不包含在本批中。
+多个判断启用时，固定按成本升序串行执行：**正则 → 外部 HTTP 校验 → 模型判断**；跳过未启用项，不并发执行。AND 遇到不通过即拒绝，OR 遇到通过即同意，短路后不执行后续判断。外部 HTTP 失败或超时为 unknown：AND 立即拒绝，OR 继续；配置外部判断时最终没有通过则拒绝。未配置外部判断时，保留模型失败或无法判断时不操作的行为，由管理员在原平台处理。模型开关缺省时，非空 `rule` 表示启用模型；显式 false 可保留规则但关闭模型。启用自动审批必须至少启用一种判断。完整示例及凭据初始化见 [群管理](group-management.md#外部-http-审批)；凭据轮换见[按引用管理凭据](#63-按引用管理凭据)。
 
 单次工具结果默认 64 KiB，包含 JSON 信封和转义开销，可容纳默认 12000 字符的正常中文检索上下文。字符数不等于字节数；显式更小预算或自定义更大检索输出仍可能得到 `budget_exhausted`。

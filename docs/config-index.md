@@ -12,7 +12,7 @@
 | `server.addr` `server.read_timeout` `server.write_timeout` `server.shutdown_timeout` | [配置手册 §4](configuration.md#4-启动-yaml) |
 | `log.console.enabled` `level` `format`；`log.file.enabled` `level` `format` `path` `max_size_mb` `rotate_after_days` `max_age_days` `compress` | [配置手册 §4](configuration.md#4-启动-yaml)；环境变量 `FORGEBOT_LOG_LEVEL` 见 [§3](configuration.md#3-环境变量) |
 | `runtime_config_path` | [配置手册 §2 启动方式与优先级](configuration.md#2-启动方式与优先级) |
-| `secret_store_path` `secret_key` | [配置手册 §4](configuration.md#4-启动-yaml)、[§6 配置 LLM API Key](configuration.md#6-配置-llm-api-key)、[存储与数据恢复](storage.md) |
+| `secret_store_path` `secret_key` | [配置手册 §4](configuration.md#4-启动-yaml)、[§6 配置 LLM API Key](configuration.md#6-配置-llm-api-key)、[按引用管理凭据](configuration.md#63-按引用管理凭据)、[存储与数据恢复](storage.md) |
 | `admin_token` | [配置手册 §4](configuration.md#4-启动-yaml)、[§7 管理 API](configuration.md#7-管理-api-与热更新) |
 
 ## 运行时 JSON（可热更新）
