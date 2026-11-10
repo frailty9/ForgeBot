@@ -105,16 +105,7 @@ v0.1.0 的 `native.knowledge_reflection` 有功能实现，但运营效果未验
 
 **来源**：`docs/feature-inventory.md` BOT-19。
 
-v0.1.0 挂起原因已消除：OneBot v11 `send_msg` 响应带回 `message_id`（`{"status":"ok","retcode":0,"data":{"message_id":123456}}`），发送层可以把它写入 `internal/history` 对应记录。`internal/history` 已存每条群消息的平台消息 ID，因此管理员触发时可从容器里查到目标 ID。
-
-**方案：Option A — 管理员引用 + `/recall` 命令**
-
-- 可信管理员引用违规消息并发送 `/recall`，Bot 从引用消息 ID 查 `internal/history`，取出平台消息 ID，调 OneBot `delete_msg`。
-- Bot 自己发出的消息：发送成功后需将 `send_msg` 返回的 `message_id` 写回 history 条目，管理员引用 Bot 回复也可触发撤回。这同时修复 `tasks.md` 2026-11-09 记录的让位已知缺口（"管理员直接引用 Bot 自己发出的回复消息暂不触发"）。
-
-**前置工作（BOT-19 子任务）**：在 OneBot 适配器发送成功回调里，将 `data.message_id` 写回 `internal/history` 中对应 Bot 消息条目。这是实现层缺口，协议层已具备能力。
-
-**适配器失败语义**：不支持 `delete_msg` 的连接器隐式失败，记一条 DEBUG/WARN 日志或向上返回 runtime error；不得向上抛停止级别的错误，调用方决定是否告知管理员。
+2026-11-10 用户取消通用发送回执方案。Sender/ConnectorSender 继续只返回 error，不为补齐 history 的 Bot 平台消息 ID 扩大发送接口；既有出站正文记录和个人会话记忆不变。撤回能力的具体入口另按后续用户纠正的目标设计，不再以前置发送回执为实施条件。本次只记录发送边界决策，不声明撤回功能已经实现。
 
 ---
 

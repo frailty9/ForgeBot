@@ -35,13 +35,13 @@
 
 出口：宿主旁路已不存在；Echo/OneBot 注册、禁用、热替换、启动失败/保存失败恢复、关闭均通过；不删无关 Sender/LLM 注入。
 
-## 3. 最小发送回执（BOT-19 前置，需求 §2.1）
+## 3. 通用发送回执：已取消并撤回（2026-11-10）
 
-- [ ] 定义仅带 MessageID 的 DeliveryReceipt，贯通 Sender、ConnectorSender、Registry、Set、Engine、运维、通知和测试发送器。
-- [ ] OneBot 解析 send_msg 的 data.message_id，处理数字/字符串；宿主 recordingSender 成功后一次写入带 ID 的 Bot 记录。
-- [ ] 更新 history Reader/Record 的旧限制说明及相关用户文档。
+用户明确要求“完全撤回回执改动”。此前为本功能暂存的 27 个文件片段已取消暂存，DeliveryReceipt、发送接口迁移、OneBot 发送 ID 读取、宿主按发送响应补全 history ID 及专用测试已从工作区撤回；保留其他功能的未提交片段。
 
-出口：回答、主动回复、欢迎、进度及运维发送记录均使用同一回执路径；发送失败不记 history；无 ID 的成功发送保留空 ID；不重复发送、不添加投递重试。
+后续代码恢复使用原 error-only 发送接口。QQ 发送结果中的协议 ID/引用索引只留在适配器内部，不构成通用回执或填入 Core history；移除能力目录 message_receipts 字段和相关承诺。已提交的宿主无 ID 出站正文记录和个人连续问答记忆保持原样，本次不实现自消息回推识别。
+
+回退验证（2026-11-10）：`go build ./...`、`go vet ./...`、`go test ./... -count=1`、`go test -race ./internal/... -count=1` 全部通过。已确认原 27 个回执暂存片段清空，其他功能改动保留，未创建提交。
 
 ## 4. 管理员引用撤回与让位补齐（BOT-19，需求 §2.1）
 

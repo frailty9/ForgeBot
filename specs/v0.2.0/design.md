@@ -67,11 +67,9 @@ Core history 默认 50 条、30m、1000 字不自动扩大；它影响首次查�
 
 ## 4. BOT-19：发送回执、引用撤回与让位
 
-### 4.1 最小发送回执
+### 4.1 通用发送回执：已取消
 
-将内部 `Sender.Send/ConnectorSender.SendTo` 的返回值扩展为 `messaging.DeliveryReceipt, error`，回执仅含 `MessageID`。逐层贯通 Registry、Set、recordingSender、Engine、运维/通知和测试发送器；不增加分段、投递重试或持久发送队列。
-
-OneBot 解析 `data.message_id`，数字/字符串都按平台原样转为字符串。发送确认成功后，由宿主 recordingSender 一次 Append 带 ID 的 Bot history 记录；适配器不直接持有或写入 Core history。无 ID 的成功回执允许保留空值，不合成平台 ID、不把已成功发送改判为失败；该条消息无法按 ID 撤回。
+2026-11-10 用户明确要求完全撤回通用发送回执改动。Sender/ConnectorSender 保持 error-only，宿主不根据发送响应补全 Bot 平台消息 ID。既有成功出站正文记录和个人会话记忆不变，不新增自身消息回推；QQ 所需协议 ID/引用索引只在适配器内部使用。下节撤回入口方案仍待按后续用户决定修订，不以发送回执作为实现前置。
 
 ### 4.2 引用撤回的权限与路由
 
