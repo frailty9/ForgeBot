@@ -268,8 +268,10 @@ ForgeBot protocol surface.
 
 ## First Migration Targets
 
-1. Telegram adapter: reuse MuseBot SDK setup, message parsing, media send, and
-   streaming edit behavior.
+1. Telegram adapter: planned in v0.2.0 using the official Bot API over HTTP.
+   Support regular groups and non-forum supergroups, long polling or Webhook,
+   text replies, bounded inbound images, welcome events and recall. No SDK reuse,
+   streaming edits, automatic join review or message splitting is planned.
 2. Personal QQ / OneBot adapter: reuse DTOs, HMAC-SHA1 verification, segment
    parsing, reply segment construction, and HTTP send API.
 3. Structured search: implemented as a native Tool module with an isolated

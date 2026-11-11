@@ -6,7 +6,7 @@ ForgeBot 是面向群组协作的通用 AI Bot：通过配置组合问答、知�
 
 **一个部署对应一个业务。** 一个 ForgeBot 实例可以同时接入多个平台的多个群，但它们共用同一份业务范围（`bot.system_prompt`）、知识库、回答模型和功能规则（如入群审批规则），各群只决定开启哪些功能。需要服务多个互不相关的业务时，请为每个业务各部署一个实例。
 
-`v0.1.0` 已合并并有本地标签，当前开发 `v0.2.0`。已有 OneBot 11、用于本地验证的 Echo，以及[QQ 官方群聊连接器](docs/qqbot.md)（新增真实验收待补）；WebUI、FPP 外部插件协议、Telegram、SQL/NoSQL 后端和向量检索留待后续迭代。
+`v0.1.0` 已合并并有本地标签，当前开发 `v0.2.0`。已有 OneBot 11、用于本地验证的 Echo，以及[QQ 官方群聊连接器](docs/qqbot.md)（新增真实验收待补）。[Telegram 群聊接入](specs/v0.2.0/requirements.md#15-telegram-群聊-connector2026-11-11-新增)已纳入 v0.2.0 规划，尚未实现；WebUI、FPP 外部插件协议、SQL/NoSQL 后端和向量检索留待后续迭代。
 
 ## 可以做什么
 

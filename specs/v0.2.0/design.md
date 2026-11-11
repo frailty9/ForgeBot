@@ -4,6 +4,8 @@
 
 状态：用户已于 2026-11-10 授权先提交规划文档，再开始实施。沉淀职责按用户补充的原始讨论修正；配置迁移、表达式子集和 QQ 首期接入按本设计执行，进度与验证见 tasks。
 
+2026-11-11 范围追加：Telegram 已由用户确认并入 v0.2.0，需求见 requirements §1.5；以下 §8 为本次设计方案，尚未实施。原表和基线描述保留用于追溯，不表示当前代码仍停在原基线。
+
 ## 1. 当前代码与实施边界
 
 | 目标 | 当前代码事实 | 本版改动 |
@@ -13,10 +15,11 @@
 | BOT-19 撤回 | Sender 只返回 error；OneBot 丢弃发送响应里的消息 ID；无撤回可选接口 | 保持 error-only 发送接口；宿主共享 capability 按群绑定后传消息 ID 撤回，业务触发后续确定 |
 | 外部入群审批 | 模块只提供 Policy，Core 的 group.Service 判断并执行 | 继续由 Core 发外部请求，接入三种判断及凭据解析 |
 | QQ 官方连接器 | 生产只注册 Echo/OneBot Provider | 独立 `native.qqbot` 模块及 `qqbot` 适配器 |
+| Telegram 连接器 | 截至 `6a386b5` 无 Telegram Provider，现有凭据和群操作契约可复用 | 新增 `native.telegram`；普通群/非论坛超级群，长轮询或 Webhook；不做自动入群审批 |
 
 代码核对纠正：pipeline 与 reflector 都依赖 `buffer.AnswerSession`；reflection.Status 还依赖 buffer/scanner 的 Stats。删除包前必须迁移这些类型。`quiet_window/max_session_duration` 当前属于归组和调度，不属于 pipeline。
 
-实施顺序：基线 → 沉淀重构 → Provider 旁路清理 → 消息撤回能力 → 外部审批 → QQ 官方连接器 → 验收。提交、推送和发行仍需用户明确要求。
+实施顺序：基线 → 沉淀重构 → Provider 旁路清理 → 消息撤回能力 → 外部审批 → QQ 官方连接器 → Telegram 连接器 → 验收。提交、推送和发行仍需用户明确要求。
 
 ## 2. BOT-14：核心消息容器驱动沉淀
 
@@ -161,3 +164,68 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 每次业务代码修改后执行 gofmt、`go build ./...`、`go vet ./...`，并运行覆盖关键行为的测试。提交前还需完整 `go test ./... -count=1` 与 `go test -race ./internal/... -count=1`。规划提交前的基线验证结果见 tasks，实施后继续更新。
 
 人工审核闭环、自动分段/重试、FPP、WebUI、数据库后端和公开 SDK 继续延后。真实沉淀、OneBot 撤回与 QQ 官方链路分别保留验收证据；不以模拟服务代替真实平台验收。
+
+## 8. Telegram 群聊连接器（需求 §1.5）
+
+### 8.1 官方依据与总体边界
+
+协议核对日期：2026-11-11。Telegram 接入以以下官方资料为依据：
+
+- [Bot API：更新接收、getUpdates、setWebhook、deleteWebhook](https://core.telegram.org/bots/api#getting-updates)。
+- [Message 与实体](https://core.telegram.org/bots/api#message)、[MessageEntity](https://core.telegram.org/bots/api#messageentity)：实体偏移使用 UTF-16，引用随 update 提供。
+- [getMe](https://core.telegram.org/bots/api#getme)、[getChat](https://core.telegram.org/bots/api#getchat)、[getChatAdministrators](https://core.telegram.org/bots/api#getchatadministrators)。
+- [PhotoSize](https://core.telegram.org/bots/api#photosize)、[getFile](https://core.telegram.org/bots/api#getfile)、[sendMessage](https://core.telegram.org/bots/api#sendmessage)、[deleteMessage](https://core.telegram.org/bots/api#deletemessage)。
+- [隐私模式](https://core.telegram.org/bots/features#privacy-mode)、[Webhook 部署](https://core.telegram.org/bots/webhooks)。
+- 官方 [TDLib 文本长度检查](https://github.com/tdlib/td/blob/master/td/telegram/MessageContent.cpp) 使用 `utf8_length`，与 [UTF-16 长度函数](https://github.com/tdlib/td/blob/master/td/utils/utf8.h) 区分；纯文本上限按 Unicode 字符计数，不能照搬实体偏移单位。
+
+新增 `internal/modules/telegram` 和 `internal/platform/telegram`。前者只提供严格 options、凭据声明、脱敏和 Provider，后者以标准库 HTTP 对接官方 Bot API，不引入 SDK。发送和媒体沿用现有 messaging 类型，Send/SendTo 继续只返回 error，不为 Telegram 恢复回执或扩展 thread 字段。
+
+### 8.2 配置与账号
+
+模块 ID 为 `native.telegram`，默认关闭，模块 options 只接受空对象。connector 类型为 `telegram`，实例 options 如下；新增字段均限于该 Provider，不进入 Core 配置结构。
+
+| 字段 | 约定 |
+| --- | --- |
+| `token_ref` | 必填，SecretStore 中 Bot Token 的引用 |
+| `mode` | 必填，`long_polling` 或 `webhook`；只能选择已实现的方式，不运行两套接收器 |
+| `timeout` | 可选，普通 API/下载超时默认 15s，必须为正；长轮询请求预算为 30s 加该超时 |
+| `webhook_url` | webhook 必填，公网 HTTPS 地址，无 userinfo/fragment |
+| `webhook_addr`、`webhook_path` | webhook 必填，本地监听 host:port 与绝对路径；不强制公网路径等于本地路径，允许反向代理映射 |
+| `webhook_secret_ref` | webhook 必填，SecretStore 中回调认证文本的引用；实际值遵守官方 1..256 字符、字母/数字/下划线/短横线约束 |
+
+长轮询可省略 webhook 字段，也允许保留通过结构校验的 webhook 示例值；仅在 webhook 模式解析其凭据。Provider 仅声明当前模式所需的凭据，公开配置返回是否设置，不回显 Token、认证文本或其解析结果。init 与总示例默认关闭模块和连接器，显式填写 mode，独立示例分别展示两种启用方式；使用现有按引用凭据 API 轮换。
+
+群绑定 target 使用稳定的十进制 chat_id，按有符号 int64 校验并以字符串传递，不接受用户名代替。Start 调 getMe 获取自身 ID/username，并逐个 getChat 验证绑定只为 group 或非论坛 supergroup。私聊、频道、论坛群、不可访问群使候选启动失败；运行中也忽略私聊、频道、论坛/话题消息，群转为论坛后不把话题合并到既有会话。普通群升级导致 chat_id 变化时返回可诊断的绑定冲突，部署者更新配置，不自动改写绑定。
+
+### 8.3 两种接收方式、确认与恢复
+
+两种方式显式选择相同 allowed_updates：`message` 和 `my_chat_member`；旧订阅遗留的其他 update 仍按不支持忽略。不订阅 chat_join_request、chat_member、channel_post 或 edited_message。
+
+- **长轮询**：Start 成功执行 deleteWebhook(drop_pending_updates=false)，用 timeout=0、limit=20、同一 allowed_updates 的首个 getUpdates 验证可用，再启动唯一轮询器。首个响应若含更新，必须走正常接纳流程，不能丢弃返回值后跳 offset；接纳后把当前 offset 交给轮询器。每次 getUpdates 使用 timeout=30s、limit=20；按收到的顺序逐项入队或明确忽略后才推进 offset，不能直接确认整批最大 ID。队列满时等待空间，等待可取消。暂时网络故障/429 在读取循环中可取消退避（普通指数退避 1s 起、最高 30s；存在 parameters.retry_after 时完整遵守平台等待值，即使超过 30s），不把读取重连扩展为发送重试；401/403 或重复消费者的 409 结束本接收器并报告生命周期故障。
+- **Webhook**：先准备监听和队列，再调用 setWebhook，传当前公网地址、secret_token、allowed_updates、max_connections=1 和 drop_pending_updates=false。Telegram 没有 QQ 的 op=13 挑战；只接收 Update。每次请求校验 `X-Telegram-Bot-Api-Secret-Token`，请求体上限 1MiB；非法认证/报文不入队。成功入队或明确忽略才回 200，队列满/尚未就绪回 503，留给平台重投，不能等模型完成才 ACK。
+- **共同接纳边界**：固定 128 个更新的内存队列、4 个后台工作者，队列只存 DTO/file_id，不预下载图片。以 update_id 做 5 分钟内、最多 10000 个的有界去重；满容量不确认新 update。去重检查、入队与记账原子完成，未接纳的更新不留去重标记。offset 和短期去重标记属于 adapter 实例：同对象 Stop/恢复 Start 不清零，新的 adapter 或进程从平台未确认更新重新开始；队列和在途任务在 Stop 时取消。首个探测也使用该实例保留的 offset，只有下次 getUpdates 携更大的 offset 才在平台确认之前的更新；不使用负 offset 丢弃积压，不要求 update_id 连续无缺口。offset、队列和标记都不持久化，ACK 只表示进入内存；停机可能丢失已 ACK 的排队/在途工作，不承诺跨重启 exactly-once 或补处理历史。
+- **启停/换代**：Build 不联网。Start 失败自行清理自己已创建的监听/协程，远端登记结果未知时尽力撤销；不能依赖 Set 为启动失败的那个 adapter 调 Stop。Stop 先停止接纳、取消轮询/下载/处理并关闭本地资源；webhook 再用独立、有界上下文尽力 deleteWebhook(false)。远端清理失败记脱敏诊断，不在本地已停止后伪装本地 Stop 失败；本地资源未退出仍返回错误。每次重新 Start 都按当前账号/模式执行登记，不使用“曾经登记过”的缓存。复用 Runtime 的整组连接器换代和旧集合恢复，不增加另一套凭据事务。
+
+为避免切换期间新欢迎事件访问旧代，给 HandleGroupEvent 补上与 HandleInbound 相同的可取消 routeMu 读取屏障，复用私有等待逻辑；不改公共 Handler 或模块接口。测试必须覆盖候选 Start 后、publish 前的群事件，以及 Stop 取消等待，不能用延迟启动工作者猜测代已发布。 兼容既有 OneBot：其处理当前使用 WithoutCancel 脱离 HTTP 请求取消，加入屏障后不能等到 Stop 超时才退出。OneBot Start 为每次启动创建生命周期上下文并由回调捕获，处理上下文仍不随客户端断开取消，但必须绑定该生命周期；Stop 先取消等待中的处理再关闭服务。仅补必要的生命周期关联，不改 OneBot 协议行为或配置；已有进入处理的旧代事件由读取屏障保证先完成，尚未进入的等待者可取消。
+
+### 8.4 消息、引用、角色与欢迎
+
+- `message_id`、`from.id` 转十进制字符串；ConversationID 来自显式群绑定。过滤自身和其他 Bot 消息；含 sender_chat 的匿名管理员/频道身份首期忽略，不伪造普通用户或可信管理员。
+- Text 使用 text 或 caption；entities/caption_entities 的 offset/length 以原文 UTF-16 码元解析，先校验范围和代理对边界，再解析 bot_command 的目标，不能先删文本破坏原始偏移。依据 getMe 的 username/ID 识别 mention/text_mention，按 offset 逆序清理而不依赖数组顺序，移除只属于自身的 @ 文本后再确定命令；其他正文保留。回复同群 Bot 消息也置 Mentioned。对显式 `/command@OtherBot`，适配器直接忽略，不能只设 Command=false，因为现运维路由仍会解析 Text；本 Bot 后缀去掉后交给现有路由。
+- 同群 reply_to_message 的 ID、正文和图片分别映射到 ReplyToMessageID/Quoted，不并入当前 Text；只处理一层，不把 external_reply、跨群引用或单独 quote 片段伪装成完整同群原文。没有通用 getMessage，不新增按 ID 远端取原文。
+- 绑定群按需 getChatAdministrators，creator→owner、administrator→admin；成功缓存 5 分钟，失败丢弃过期权限并保守 member，负缓存 30 秒。缓存只包含绑定群，my_chat_member 使相关缓存失效；能力目录仍分开表示支持与权限，不能由配置或用户名赋权。
+- 仅将 message.new_chat_members 作为首期新人来源，每位真人分别生成 MemberJoined；UserID/UserName 取该成员元素而不是 message.from（可能是邀请人），事件 ID 由 connector/chat/update_id/user_id 生成，At 取服务消息的有效正数 date，时间缺失或非法时不伪造当前时间。机器人/自身加入不触发欢迎，服务消息不再作为空文本问答。不订阅第二套成员事件，不承诺补齐平台未投递的成员变化。复用 native.welcome 的开关、暂停和纯文本模板，不增加模板语法；不提供 Telegram Reviewer，join_events=false、member_events=true、join_review=false。
+
+### 8.5 图片与投递
+
+photo 的多个尺寸是一张图，不假定数组有序；按像素面积选择最大且已知大小不超本地限制的版本，未知大小仍在下载时限流。没有可选尺寸时返回超限失败，不能当作无图消息继续问答；下载后超限不再自动换小尺寸重试。支持 MIME 为 image/* 的图片 document；缺 MIME 时按文件名的常见图片后缀补类型。当前与同群引用图合计最多 4 张，每张 5MiB、单条总计 20MiB，已知超限不下载，实际读取使用 limit+1 验证。超过数量/体积或下载失败时停止该条处理并返回分类失败，不静默丢图后让模型猜测；不聚合相册。非图片附件只映射现有类型/元数据，不额外下载。
+
+在后台工作者中调用 getFile 并有界读取文件，只访问固定的官方 HTTPS API/文件主机、禁止自动重定向。getFile 的 file_path 只用于构造固定官方主机下的文件路径，不把它解释成外部地址或本地文件。PhotoSize 不含 MIME，getFile 不保证原名/类型；下载后用文件头识别实际图片 MIME（JPEG/PNG/GIF/WebP/BMP），图片 document 的声明/文件名只作下载前候选识别，类型无法确认则返回 unsupported，不凭 HTTP 通用类型或一律 JPEG 构造错误的模型输入。首期不新增缩放、转码或图片持久化。图片只设置 Media.Data/MimeType/Name，不把含 Token 的下载地址填入 Media.URL；保留现有 history 不存图片、短期记忆不保留内联 Data 的行为。适配器不读取宿主模型配置：即使图片理解关闭也可能完成下载，随后仍由 Core 返回既有不支持提示，不为省下载新增跨层接口。
+
+SendTo 调 sendMessage，不设 parse_mode，不渲染 Markdown/HTML，Segments 使用已有 Text 形式降级；首期不发 Media。UTF-8 无效、空文本或超过 4096 个 Unicode 字符，在请求前返回 invalid；不按实体的 UTF-16 单位计算正文上限，不拆分/截断。ReplyToMessageID 用 reply_parameters 指向同群原消息，显式 allow_sending_without_reply=false；引用不可用交平台错误处理，不自动去引用重发。主动插话/通知/欢迎可无 ReplyTo 投递，passive_replies_only=false，outbound_segments=false。
+
+RecallMessage 使用绑定 chat_id 和给定 message_id 调 deleteMessage；平台决定权限/时限，不按本地缓存存在性或年龄拒绝，不触发聊天提示。发送结果中的平台 ID 仅留协议内部，不补写 Core history。API 响应以固定 8MiB+1 限量读取，读取失败、超限、无效 JSON 不使用截断结果，不推进轮询 offset；HTTP 非 2xx 或 ok=false 都按失败处理，沿用 operation 分类，并解析 parameters.retry_after/migrate_to_chat_id。收到 migrate_to_chat_id 时返回绑定 conflict，诊断给出新 chat_id（int64），不自动修改绑定、重定向发送或重试；getChat 启动检查也处理该结果。请求已发出后超时保留 effect=unknown，发送/删除不自动重试。限流、权限和单条操作失败不进入 Adapter.Errors；底层错误含 Token URL 时必须先去除地址，再包装可公开分类，不记录原始请求地址、文件路径或响应正文。
+
+### 8.6 验证与交付
+
+逐批实现见 tasks §7。每批同步 specs、docs、config-index、init 与相应示例，只暂存当前功能范围供用户审阅，不创建提交。受控测试要独立验证两种接收、自动切换、凭据替换失败恢复、取消、去重确认、UTF-16 实体、普通/跨群引用、角色失败降级、欢迎和撤回、图片体积及 Token 不泄露。真实群聊两种模式分别验证后才能宣称接入完成；v0.2.0 的其他真实验收仍独立保留。
