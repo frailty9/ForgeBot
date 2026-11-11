@@ -229,19 +229,11 @@ func (a *Adapter) inbound(data groupMessage, binding Group, mentioned bool) (mes
 	message := messaging.InboundMessage{ConversationID: binding.ConversationID, UserID: userID, UserName: data.Author.Name, MessageID: data.ID, Text: text,
 		Mentioned: mentioned, Command: strings.HasPrefix(text, "/"), PlatformRole: role, At: at, PromptSuffix: strings.TrimSpace(a.cfg.PromptSuffix + "\n" + binding.PromptSuffix)}
 	for _, item := range data.Attachments {
-		if !strings.HasPrefix(item.URL, "https://") && !strings.HasPrefix(item.URL, "http://") {
+		media, ok := attachmentMedia(item)
+		if !ok {
 			continue
 		}
-		kind := messaging.MediaFile
-		switch {
-		case strings.HasPrefix(item.ContentType, "image/"):
-			kind = messaging.MediaImage
-		case strings.HasPrefix(item.ContentType, "video/"):
-			kind = messaging.MediaVideo
-		case item.ContentType == "voice" || strings.HasPrefix(item.ContentType, "audio/"):
-			kind = messaging.MediaAudio
-		}
-		message.Media = append(message.Media, messaging.Media{Kind: kind, URL: item.URL, MimeType: item.ContentType, Name: item.Name})
+		message.Media = append(message.Media, media)
 		if len(message.Media) == 16 {
 			break
 		}

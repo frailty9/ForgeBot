@@ -475,10 +475,13 @@ func TestTokenFailureDoesNotActivateWebhook(t *testing.T) {
 	}
 }
 
-type answerClient struct{}
+type answerClient struct{ requests chan llm.Request }
 
 func (answerClient) Protocol() llm.Protocol { return llm.OpenAIResponses }
-func (answerClient) Complete(context.Context, llm.Request) (llm.Response, error) {
+func (c answerClient) Complete(_ context.Context, request llm.Request) (llm.Response, error) {
+	if c.requests != nil {
+		c.requests <- request
+	}
 	return llm.Response{Text: "controlled answer"}, nil
 }
 func (answerClient) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent, error) {
@@ -486,8 +489,26 @@ func (answerClient) Stream(context.Context, llm.Request) (<-chan llm.StreamEvent
 }
 
 func TestControlledWebhookToRuntimeAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		image      bool
+		understand bool
+	}{
+		{"text", false, false},
+		{"image enabled", true, true},
+		{"image disabled", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testWebhookToRuntimeAnswer(t, tc.image, tc.understand)
+		})
+	}
+}
+
+func testWebhookToRuntimeAnswer(t *testing.T, image, understand bool) {
+	t.Helper()
 	a := testAdapter(t)
 	sent := make(chan map[string]any, 1)
+	requests := make(chan llm.Request, 1)
 	a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/app/getAppAccessToken" {
 			return response(200, `{"access_token":"token","expires_in":7200}`), nil
@@ -505,9 +526,10 @@ func TestControlledWebhookToRuntimeAnswer(t *testing.T) {
 	snapshot := config.DefaultSnapshot()
 	snapshot.Runtime.LLM.Model = "test"
 	snapshot.Runtime.LLM.Authentication = config.AuthenticationNone
+	snapshot.Runtime.LLM.ImageUnderstanding = understand
 	snapshot.Runtime.Platforms = config.PlatformConfig{Connectors: []config.ConnectorConfig{{ID: a.ID(), Type: "qqbot", Enabled: true}}, Groups: []config.GroupBindingConfig{{ID: "support", ConnectorID: a.ID(), Target: "group"}}}
 	window := history.New(history.Policy{}, []string{"support"}, nil)
-	manager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, History: window, ClientFactory: func(llm.ClientConfig) (llm.Client, error) { return answerClient{}, nil }})
+	manager, err := runtimecfg.NewManager(context.Background(), snapshot, runtimecfg.Builder{Sender: registry, History: window, ClientFactory: func(llm.ClientConfig) (llm.Client, error) { return answerClient{requests: requests}, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,20 +538,51 @@ func TestControlledWebhookToRuntimeAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Stop(context.Background())
-	dispatch(t, a, eventWithMentions(t, a, "GROUP_MESSAGE_CREATE", "<@BOT> question", []mention{{MemberOpenID: "BOT", IsYou: true}}), 0)
-	dispatch(t, a, eventWithMentions(t, a, "GROUP_AT_MESSAGE_CREATE", "question", nil), 0)
+	wantID, wantText := "mention", "controlled answer"
+	if image {
+		wantID = "attachment"
+		if !understand {
+			wantText = "当前暂不支持图片"
+		}
+		dispatch(t, a, eventWithAttachments(t, a, []attachment{{URL: "//cdn.example/download?key=a%2Fb", Name: "a.PNG"}}), 0)
+	} else {
+		dispatch(t, a, eventWithMentions(t, a, "GROUP_MESSAGE_CREATE", "<@BOT> question", []mention{{MemberOpenID: "BOT", IsYou: true}}), 0)
+		dispatch(t, a, eventWithMentions(t, a, "GROUP_AT_MESSAGE_CREATE", "question", nil), 0)
+	}
 	select {
 	case body := <-sent:
-		if body["content"] != "controlled answer" || body["msg_id"] != "mention" {
+		if body["content"] != wantText || body["msg_id"] != wantID {
 			t.Fatal(body)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("runtime did not send answer")
 	}
+	if image && !understand {
+		if len(requests) != 0 {
+			t.Fatal("disabled image understanding called model")
+		}
+	} else {
+		select {
+		case request := <-requests:
+			foundImage := false
+			for _, message := range request.Messages {
+				for _, part := range message.Content {
+					if part.Type == "image" && part.MediaURL == "https://cdn.example/download?key=a%2Fb" && part.MimeType == "image/png" {
+						foundImage = true
+					}
+				}
+			}
+			if image && !foundImage {
+				t.Fatal("normalized attachment missing from model request")
+			}
+		default:
+			t.Fatal("model request missing")
+		}
+	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		for _, record := range window.Recent("support", 0) {
-			if record.Role == history.RoleBot && record.ReplyTo == "mention" && record.Text == "controlled answer" {
+			if record.Role == history.RoleBot && record.ReplyTo == wantID && record.Text == wantText {
 				if record.MessageID != "" {
 					t.Fatal("platform ID leaked into host history", record)
 				}
