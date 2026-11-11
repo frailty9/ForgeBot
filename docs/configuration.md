@@ -443,7 +443,7 @@ v0.2.0 保留上述配置键，调整其约束对象：
 | `scan_interval` | 检查已形成会话的批处理周期，默认 15m；达到安静窗口后在下一批处理，不是立即执行 |
 | `quiet_window`、`max_session_duration` | 最后答复后等待时长与单会话最长时长，先到者决定处理资格 |
 | `message_ttl` | 会话最后答复后的保留时长，及处理标记保留时长；会话另受“开始时间 + message_ttl + max_session_duration”限制，独立于 history 的 TTL。必须不小于 `quiet_window + scan_interval`，否则会话总在处理前过期，加载时报错 |
-| `max_messages_per_conversation`、`max_messages_total` | 已形成会话的问题与回答总条数上限，每个问题也计一条；超限释放整个最旧的非在途会话；处理标记分别受同样的每群/全局条数上限约束 |
+| `max_messages_per_conversation`、`max_messages_total` | 已形成会话的问题与回答总条数上限，每个问题也计一条；超限释放整个最旧的非在途会话；处理标记分别受同样的每群/全局条数上限约束。取值 1..100000：容量检查在收消息路径上同步执行，开销随上限增长 |
 | `max_message_chars` | 参与会话的问题或单条回答的最大字符数，超限不采纳。history 先按 `message_history.max_text_chars`（默认 1000）截断；被截断的问题、引用原文或回答不完整，同样不采纳，需要沉淀长回答时应同时调大 `max_text_chars` |
 | `max_pairs_per_scan` | 单批最多处理的会话数；后台和手动批处理互斥 |
 

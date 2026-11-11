@@ -120,6 +120,8 @@ func parse(raw json.RawMessage) (Options, error) {
 	return result, nil
 }
 
+const maxMessages = 100000
+
 func validate(options Options, requireConversations bool, catalog conversation.Catalog) error {
 	if requireConversations && len(options.ConversationIDs) == 0 {
 		return errors.New("conversation_ids must not be empty")
@@ -144,6 +146,10 @@ func validate(options Options, requireConversations bool, catalog conversation.C
 	}
 	if options.MaxMessagesPerConversation <= 0 || options.MaxMessagesTotal <= 0 || options.MaxMessageChars <= 0 || options.MaxPairsPerScan <= 0 {
 		return errors.New("reflection limits must be positive")
+	}
+	// 容量检查在收消息的同步回调里持锁全量遍历，开销与上限成正比，必须有确定上界。
+	if options.MaxMessagesPerConversation > maxMessages || options.MaxMessagesTotal > maxMessages {
+		return errors.New("max_messages_per_conversation and max_messages_total must be at most 100000")
 	}
 	if options.MinConfidence <= 0 || options.MinConfidence > 1 {
 		return errors.New("min_confidence must be greater than 0 and at most 1")

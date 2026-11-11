@@ -162,3 +162,17 @@ func TestBuildRejectsMissingCapabilitiesAndUnknownConversation(t *testing.T) {
 		t.Fatal("missing dependencies were accepted")
 	}
 }
+
+func TestMessageCapacityHasUpperBound(t *testing.T) {
+	for _, raw := range []string{
+		`{"max_messages_per_conversation":100001}`,
+		`{"max_messages_total":100001}`,
+	} {
+		if (knowledgereflection.Factory{}).ValidateOptions(json.RawMessage(raw)) == nil {
+			t.Fatal("unbounded capacity accepted", raw)
+		}
+	}
+	if err := (knowledgereflection.Factory{}).ValidateOptions(json.RawMessage(`{"max_messages_per_conversation":100000,"max_messages_total":100000}`)); err != nil {
+		t.Fatal(err)
+	}
+}
