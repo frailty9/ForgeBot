@@ -122,27 +122,32 @@ func TestExternalReviewSerializesInputAndResolvesRotatedCredentials(t *testing.T
 	}
 }
 
-func TestExternalReviewCombinationShortCircuitsAndTreatsFailuresAsUnknown(t *testing.T) {
+func TestExternalReviewCombinationShortCircuitsAndTreatsFailuresAsUndecided(t *testing.T) {
 	for _, tc := range []struct {
 		name, combine, regex, body, model string
 		status                            int
 		want                              bool
 		httpCalls, modelCalls             int
 		wantOrder                         string
+		undecided                         bool
 	}{
-		{"only external", "and", "", `{"data":{"approved":true}}`, "", 200, true, 1, 0, "http"},
-		{"and all true", "and", "allowed", `{"data":{"approved":true}}`, "yes", 200, true, 1, 1, "http,model"},
-		{"and external false", "and", "allowed", `{"data":{"approved":false}}`, "yes", 200, false, 1, 0, "http"},
-		{"and regex false", "and", "never", `{"data":{"approved":true}}`, "yes", 200, false, 0, 0, ""},
-		{"and unknown", "and", "allowed", "", "yes", 503, false, 1, 0, "http"},
-		{"or regex true", "or", "allowed", "", "yes", 503, true, 0, 0, ""},
-		{"or external true", "or", "never", `{"data":{"approved":true}}`, "yes", 200, true, 1, 0, "http"},
-		{"or external false model yes", "or", "never", `{"data":{"approved":false}}`, "yes", 200, true, 1, 1, "http,model"},
-		{"or unknown model yes", "or", "never", "", "yes", 503, true, 1, 1, "http,model"},
-		{"or invalid JSON model yes", "or", "", "not-json", "yes", 200, true, 1, 1, "http,model"},
-		{"or non-boolean model yes", "or", "", `{"data":{"approved":"yes"}}`, "yes", 200, true, 1, 1, "http,model"},
-		{"or no true", "or", "", "", "no", 503, false, 1, 1, "http,model"},
-		{"and model error", "and", "", `{"data":{"approved":true}}`, "error", 200, false, 1, 1, "http,model"},
+		{"only external", "and", "", `{"data":{"approved":true}}`, "", 200, true, 1, 0, "http", false},
+		{"and all true", "and", "allowed", `{"data":{"approved":true}}`, "yes", 200, true, 1, 1, "http,model", false},
+		{"and external false", "and", "allowed", `{"data":{"approved":false}}`, "yes", 200, false, 1, 0, "http", false},
+		{"and regex false", "and", "never", `{"data":{"approved":true}}`, "yes", 200, false, 0, 0, "", false},
+		{"and unknown", "and", "allowed", "", "yes", 503, false, 1, 0, "http", true},
+		{"and invalid result", "and", "", `{"data":{}}`, "", 200, false, 1, 0, "http", true},
+		{"only external unknown", "and", "", "", "", 503, false, 1, 0, "http", true},
+		{"or regex true", "or", "allowed", "", "yes", 503, true, 0, 0, "", false},
+		{"or external true", "or", "never", `{"data":{"approved":true}}`, "yes", 200, true, 1, 0, "http", false},
+		{"or external false model yes", "or", "never", `{"data":{"approved":false}}`, "yes", 200, true, 1, 1, "http,model", false},
+		{"or external false model no", "or", "never", `{"data":{"approved":false}}`, "no", 200, false, 1, 1, "http,model", false},
+		{"or unknown model yes", "or", "never", "", "yes", 503, true, 1, 1, "http,model", false},
+		{"or invalid JSON model yes", "or", "", "not-json", "yes", 200, true, 1, 1, "http,model", false},
+		{"or non-boolean model yes", "or", "", `{"data":{"approved":"yes"}}`, "yes", 200, true, 1, 1, "http,model", false},
+		{"or unknown model no", "or", "", "", "no", 503, false, 1, 1, "http,model", true},
+		{"or unknown no model", "or", "never", "", "", 503, false, 1, 0, "http", true},
+		{"and model error", "and", "", `{"data":{"approved":true}}`, "error", 200, false, 1, 1, "http,model", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			httpCalls, modelCalls := 0, 0
@@ -183,8 +188,18 @@ func TestExternalReviewCombinationShortCircuitsAndTreatsFailuresAsUnknown(t *tes
 			if gotOrder != tc.wantOrder {
 				t.Fatalf("evaluation order = %q, want %q", gotOrder, tc.wantOrder)
 			}
-			if err != nil || len(actions.requests) != 1 || actions.requests[0].Approve != tc.want || httpCalls != tc.httpCalls || modelCalls != tc.modelCalls {
-				t.Fatalf("result=%+v err=%v requests=%+v http=%d model=%d", result, err, actions.requests, httpCalls, modelCalls)
+			if err != nil || httpCalls != tc.httpCalls || modelCalls != tc.modelCalls {
+				t.Fatalf("result=%+v err=%v http=%d model=%d", result, err, httpCalls, modelCalls)
+			}
+			// 服务或模型故障不得落成拒绝：未决时不执行任何平台审批。
+			if tc.undecided {
+				if result.Verdict != "undecided" || len(actions.requests) != 0 {
+					t.Fatalf("failure became a decision: result=%+v requests=%+v", result, actions.requests)
+				}
+				return
+			}
+			if len(actions.requests) != 1 || actions.requests[0].Approve != tc.want {
+				t.Fatalf("result=%+v requests=%+v", result, actions.requests)
 			}
 		})
 	}

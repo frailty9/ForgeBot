@@ -31,7 +31,7 @@
 | 单条消息撤回能力 | 按群取得 capability 后传消息 ID 执行；不依赖 history/引用/发言角色，不做违规判断或群内提示 | 当前绑定和全局暂停有效；不设统一两分钟限制，无自动重试或业务入口 | [能力路由](../internal/runtime/recall_test.go)、[OneBot](../internal/platform/onebot/recall_test.go) |
 | 自动入群审批 | 正则与模型支持 AND/OR 短路，不持久化审批记录 | 默认关闭；仅内存事件键防重，跨热更新保留、重启清空 | [审批测试](../internal/group/review_test.go) |
 | 自动审核不确定 | 不同意也不拒绝，管理员在原平台处理 | 模型错误不映射为 false；无后备请求 | [审批测试](../internal/group/review_test.go) |
-| 外部 HTTP 入群审批 | 正则 → HTTP → 模型短路；AND 遇 false/unknown 拒绝，OR 继续直到有 true，否则拒绝；取消不操作 | 仅配置 external_review 后适用；5s/64KiB，无重定向；不配置外部时保留原模型故障语义 | [外部审批](../internal/group/external_review_test.go) |
+| 外部 HTTP 入群审批 | 正则 → HTTP → 模型短路；明确 false/true 才参与 AND/OR 判定；服务或模型故障、响应不符为 unknown，不执行审批（undecided），由管理员在平台处理；取消不操作 | 仅配置 external_review 后适用；5s/64KiB，无重定向；不配置外部时保留原模型故障语义 | [外部审批](../internal/group/external_review_test.go) |
 | 新人欢迎 | 收到入群事件即发送；忽略自身/历史事件；不去重、不落盘 | 默认关闭，群模板；全局暂停有效 | [欢迎测试](../internal/runtime/groups_test.go) |
 | 沉淀答题会话 | 仅管理员引用锚定后保存材料，同一管理员继续答复；静默后由定时任务分批处理 | 模块自己的周期、TTL 和容量；不保留全部普通消息候选池 | [归组与边界](../internal/modules/knowledgereflection/sessions_test.go) |
 | 沉淀原问题已滑出 | 先查同群 history，再使用适配器已带回的引用原文；两处没有正文才放弃；已捕获会话不随 history 滑动失效 | 只订阅新消息，不钉住记录或依赖移出事件 | [会话快照](../internal/modules/knowledgereflection/sessions_test.go)、[引用文本](../internal/history/quote_test.go) |

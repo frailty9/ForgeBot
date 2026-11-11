@@ -78,7 +78,10 @@ func (r ExternalReview) Validate() error {
 }
 
 // evaluateEventReview 按成本升序串行执行启用项：正则 → 外部 HTTP → 模型。
-// AND 遇 false/unknown、OR 遇 true 时立即短路，避免后续请求成本；未启用项跳过。
+// 只有明确结论参与组合：AND 遇 false、OR 遇 true 立即短路。外部服务或模型无法给出结论时
+// 记为未决（返回 error，宿主不操作申请，由管理员在平台处理）：AND 遇未决即停，
+// OR 继续尝试其余项，全部未给出 true 且有未决项时同样不操作。拒绝是不可逆副作用，
+// 不能由服务故障触发。
 func (s *Service) evaluateEventReview(ctx context.Context, p Policy, decider decision.Decider, event Event) (bool, error) {
 	if p.ExternalReview == nil {
 		return s.evaluateReview(ctx, p, decider, event.Comment)
@@ -94,29 +97,31 @@ func (s *Service) evaluateEventReview(ctx context.Context, p Policy, decider dec
 			return matches, nil
 		}
 	}
+	var undecided error
 	approved, err := s.externalReview(ctx, *p.ExternalReview, event)
 	if err != nil {
-		s.logger.WarnContext(ctx, "external join review unknown", "conversation_id", event.ConversationID, "failure", operation.Describe(err))
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		approved = false
-	}
-	if approved != and {
+		s.logger.WarnContext(ctx, "external join review undecided", "conversation_id", event.ConversationID, "failure", operation.Describe(err))
+		if and {
+			return false, err
+		}
+		undecided = err
+	} else if approved != and {
 		return approved, nil
 	}
 	if !p.ModelEnabled() {
-		return approved, nil
+		return approved, undecided
 	}
 	modelPolicy := p
 	modelPolicy.ReviewRegex = ""
-	model, modelErr := s.evaluateReview(ctx, modelPolicy, decider, event.Comment)
-	if modelErr != nil {
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
-		s.logger.WarnContext(ctx, "external combined model review unknown", "conversation_id", event.ConversationID, "failure", operation.Describe(modelErr))
-		return false, nil
+	model, err := s.evaluateReview(ctx, modelPolicy, decider, event.Comment)
+	if err != nil {
+		return false, err
+	}
+	if !model && undecided != nil {
+		return false, undecided
 	}
 	return model, nil
 }
@@ -127,6 +132,10 @@ func (s *Service) externalReview(ctx context.Context, config ExternalReview, eve
 	body, err := reviewBody(config.Body, event)
 	if err != nil {
 		return false, err
+	}
+	// 模板可多次引用申请内容，替换后再限一次总长。
+	if len(body) > 256<<10 {
+		return false, operation.New(operation.Invalid, "external review request body exceeds 256KiB")
 	}
 	request, err := http.NewRequestWithContext(ctx, config.Method, config.URL, bytes.NewReader(body))
 	if err != nil {
@@ -176,10 +185,10 @@ func (s *Service) externalReview(ctx context.Context, config ExternalReview, eve
 	if len(data) > 65536 {
 		return false, operation.New(operation.Invalid, "external review response exceeds 64KiB")
 	}
+	// 响应不符合约定（非 JSON、路径缺失、非布尔）说明服务契约失效，是未决而不是拒绝。
 	approved, err := reviewResult(data, config.ResultExpression)
 	if err != nil {
-		s.logger.WarnContext(ctx, "external join review rejected invalid result", "conversation_id", event.ConversationID)
-		return false, nil
+		return false, operation.New(operation.Invalid, "external review response does not match result_expression")
 	}
 	return approved, nil
 }
