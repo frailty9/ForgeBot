@@ -155,6 +155,8 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 
 ## 7. 文档、验证与交付
 
+2026-11-11 配置示例约定：只保留 configs/runtime.example.json，尽数列出当前支持的运行时字段、连接器和模块 options，空值、各 MCP transport 字段及 OneBot 模块默认项也不省略。删除独立平台/组合示例，文档解释取值、绑定与启用；不删除其他平台的教程。init 将唯一文件内嵌到二进制，直接生成完整 runtime.local.json，仅覆盖 CLI 指定模型参数，保留空字段与顶层顺序；不维护第二份手写运行时配置。覆盖唯一示例、字段覆盖、各连接器启用校验及 init 与示例一致性测试，不改变 DefaultRuntime 的缺省语义。
+
 2026-11-10 实施补充：为外部审批等按引用配置的凭据提供运行中管理入口，新增 Bearer 认证的 `GET/PUT/DELETE /v1/admin/secrets/{ref}`。GET 只返回配置状态/版本/更新时间，PUT 使用 `value`，不提供读取明文；复用 Secret Manager 候选激活和 Runtime.ReplaceSecret/DeleteSecret，保留回答/DM 必需凭据保护。外部审批在后续请求读取当前凭据。QQ Provider 与凭据换代随后分批实施，完成情况见 tasks。
 
 连接器凭据生命周期补充：Provider 可选实现 CredentialProvider，宿主仅向当前实例传入其声明的键值。凭据替换将候选值用于构建新运行代和整个连接器集合，沿用停止旧集合、启动新集合、激活保存凭据、发布的顺序；失败尝试恢复旧集合并保留旧凭据，恢复失败返回错误。必需凭据删除在候选构建时拒绝。入站等待换代时可取消，避免 Stop 与路由屏障互相等待。QQ Provider 和 doctor 在本批接入，配置示例与 init 同步列出默认关闭的 QQ 参数。

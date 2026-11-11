@@ -15,7 +15,7 @@ modules.native.proactive_reply.options.groups.support  ← 主动插话
 operator.conversation_id = "ops"               ← 唯一的运维群：运维命令与故障通知
 ```
 
-完整可加载的 QQ 示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)：一个 QQ 账号绑定两个群，`support` 开启入群审批、新人欢迎和主动插话，`ops` 只作为运维群。使用时把 `target` 换成你的 QQ 群号，`user_id` 换成管理员 QQ 号，并配置 OneBot 端点与回答模型。
+所有字段统一在 [`configs/runtime.example.json`](../configs/runtime.example.json) 中列出。要启用 OneBot，打开 `platforms.connectors` 的 qq-main 和 `modules.native.onebot`，填写端点与认证参数，再在 `platforms.groups` 添加 `{"id":"support","connector_id":"qq-main","target":"10001","prompt_suffix":""}` 和 `{"id":"ops","connector_id":"qq-main","target":"10002","prompt_suffix":""}`，群号换成实际值。将 operator.conversation_id 改为 ops；需要审批/欢迎/主动插话时，分别启用模块并把 options.groups 中的目标群改为 support。保留 local 时原有引用可继续使用；删除 local 时同步删除或修改其他模块的 local 引用，关闭的配置也会检查绑定。
 
 几条约束：
 
@@ -128,13 +128,7 @@ operator.conversation_id = "ops"               ← 唯一的运维群：运维�
 
 ### 外部 HTTP 审批
 
-可直接对照的配置文件：
-
-| 文件 | 展示内容 |
-| --- | --- |
-| [`runtime.example.json`](../configs/runtime.example.json) | 全字段示例；审批模块和 `local` 群均关闭，`external_review` 已列全，模型判断关闭 |
-| [`runtime.onebot.example.json`](../configs/runtime.onebot.example.json) | OneBot 完整配置，`support` 群仅使用正则审批 |
-| [`runtime.onebot.external-review.example.json`](../configs/runtime.onebot.external-review.example.json) | OneBot 完整配置，`support` 群按 AND 依次执行正则、外部 HTTP、模型判断 |
+唯一的 [`runtime.example.json`](../configs/runtime.example.json) 列全审批字段：审批模块和 local 群的审批均关闭，external_review 对象完整保留，模型判断关闭。下面的片段只解释同一份部署配置如何组合启用，不提供独立运行时示例文件。
 
 `init` 生成的 `runtime.local.json` 同样列出完整、关闭的审批配置（含 `external_review`）；不会请求示例服务。总配置和 init 中的 `local` 都是 Echo 群，不能执行平台入群审批。实际使用时先配置支持审批的连接器（如 OneBot）并绑定逻辑群，再打开模块与目标群开关。组合示例中的域名、群号和模型配置需要替换为实际值；启用前还需初始化回答模型凭据及外部校验凭据。
 

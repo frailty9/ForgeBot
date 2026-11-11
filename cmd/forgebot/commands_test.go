@@ -77,7 +77,13 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if !exists || qqModule.Enabled == nil || *qqModule.Enabled {
 		t.Fatal("init must include the disabled QQ official module")
 	}
-	if len(cfg.Runtime.Platforms.Connectors) != 2 || cfg.Runtime.Platforms.Connectors[1].Type != "qqbot" || cfg.Runtime.Platforms.Connectors[1].Enabled {
+	qqDeclared := false
+	for _, connector := range cfg.Runtime.Platforms.Connectors {
+		if connector.Type == "qqbot" {
+			qqDeclared = !connector.Enabled
+		}
+	}
+	if !qqDeclared {
 		t.Fatal("init must include the disabled QQ official connector")
 	}
 	cfg.Static.Server.Addr = "127.0.0.1:0"

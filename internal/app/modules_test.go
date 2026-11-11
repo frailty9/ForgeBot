@@ -90,34 +90,6 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 	}
 }
 
-func TestOfficialQQExampleValidatesWithoutStartingPlatform(t *testing.T) {
-	cfg, _, err := config.Load(config.LoadOptions{RuntimePath: filepath.Join("..", "..", "configs", "runtime.qqbot.example.json"), LookupEnv: func(string) string { return "" }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := NativeModules()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms); err != nil {
-		t.Fatal(err)
-	}
-	providers, err := registry.BuildConnectorProviders(context.Background(), cfg.Runtime.Modules, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer providers.Close(context.Background())
-	registration, ok := providers.ConnectorProvider("qqbot")
-	if !ok {
-		t.Fatal("official QQ provider not enabled by example")
-	}
-	connector := cfg.Runtime.Platforms.Connectors[0]
-	bindings := []platform.ConnectorBinding{{ConversationID: cfg.Runtime.Platforms.Groups[0].ID, Target: cfg.Runtime.Platforms.Groups[0].Target}}
-	if err := registration.Provider.ValidateOptions(registration.ModuleOptions, connector.Options, bindings); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAppRejectsInvalidModuleBeforeServing(t *testing.T) {
 	snapshot := config.DefaultSnapshot()
 	snapshot.Runtime.Modules = map[string]config.ModuleConfig{replyexperience.ID: {Options: json.RawMessage(`{"typo":true}`)}}
@@ -126,16 +98,72 @@ func TestAppRejectsInvalidModuleBeforeServing(t *testing.T) {
 	}
 }
 
-// QQ 完整示例展示“连接器 → 逻辑群 → 群级功能”的绑定链路，必须能直接加载并通过模块校验。
+func TestExampleConnectorsValidateWhenEnabled(t *testing.T) {
+	for _, tc := range []struct{ kind, module, target string }{
+		{"onebot", "native.onebot", "10001"},
+		{"qqbot", "native.qqbot", "group-openid"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			cfg, _, err := config.Load(config.LoadOptions{RuntimePath: filepath.Join("..", "..", "configs", "runtime.example.json"), LookupEnv: func(string) string { return "" }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			on := true
+			entry := cfg.Runtime.Modules[tc.module]
+			entry.Enabled = &on
+			cfg.Runtime.Modules[tc.module] = entry
+			var connector config.ConnectorConfig
+			for index := range cfg.Runtime.Platforms.Connectors {
+				if cfg.Runtime.Platforms.Connectors[index].Type == tc.kind {
+					cfg.Runtime.Platforms.Connectors[index].Enabled = true
+					connector = cfg.Runtime.Platforms.Connectors[index]
+				}
+			}
+			cfg.Runtime.Platforms.Groups = append(cfg.Runtime.Platforms.Groups, config.GroupBindingConfig{ID: "support", ConnectorID: connector.ID, Target: tc.target})
+			registry, err := NativeModules()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.ValidateRuntime(cfg.Runtime.Modules, cfg.Runtime.Platforms); err != nil {
+				t.Fatal(err)
+			}
+			providers, err := registry.BuildConnectorProviders(context.Background(), cfg.Runtime.Modules, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer providers.Close(context.Background())
+			registration, ok := providers.ConnectorProvider(tc.kind)
+			if !ok {
+				t.Fatal("example provider missing", tc.kind)
+			}
+			if err := registration.Provider.ValidateOptions(registration.ModuleOptions, connector.Options, []platform.ConnectorBinding{{ConversationID: "support", Target: tc.target}}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// 从唯一完整示例启用 OneBot 并添加业务/运维群，验证群功能绑定链路。
 func TestOneBotExampleBindsGroupsEndToEnd(t *testing.T) {
 	cfg, _, err := config.Load(config.LoadOptions{
 		Path:        filepath.Join("..", "..", "configs", "forgebot.example.yaml"),
-		RuntimePath: filepath.Join("..", "..", "configs", "runtime.onebot.example.json"),
+		RuntimePath: filepath.Join("..", "..", "configs", "runtime.example.json"),
 		LookupEnv:   func(string) string { return "" },
 	})
 	if err != nil {
 		t.Fatal("OneBot example no longer loads", err)
 	}
+	on := true
+	for index := range cfg.Runtime.Platforms.Connectors {
+		if cfg.Runtime.Platforms.Connectors[index].Type == "onebot" {
+			cfg.Runtime.Platforms.Connectors[index].Enabled = true
+		}
+	}
+	cfg.Runtime.Modules["native.onebot"] = config.ModuleConfig{Enabled: &on, Options: cfg.Runtime.Modules["native.onebot"].Options}
+	cfg.Runtime.Modules["native.join_review"] = config.ModuleConfig{Enabled: &on, Options: json.RawMessage(`{"regex":"^.{4,}$","model_enabled":false,"groups":{"support":{"enabled":true}}}`)}
+	cfg.Runtime.Platforms.Groups = append(cfg.Runtime.Platforms.Groups,
+		config.GroupBindingConfig{ID: "support", ConnectorID: "qq-main", Target: "10001"},
+		config.GroupBindingConfig{ID: "ops", ConnectorID: "qq-main", Target: "10002"})
 	registry, err := NativeModules()
 	if err != nil {
 		t.Fatal(err)

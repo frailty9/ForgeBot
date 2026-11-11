@@ -1,6 +1,6 @@
 # 配置字段索引
 
-按配置文件里的字段反查说明文档。顺序与 [`configs/forgebot.example.yaml`](../configs/forgebot.example.yaml)、[`configs/runtime.example.json`](../configs/runtime.example.json) 一致；完整的 QQ 群示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)。
+按配置文件里的字段反查说明文档。顺序与 [`configs/forgebot.example.yaml`](../configs/forgebot.example.yaml)、[`configs/runtime.example.json`](../configs/runtime.example.json) 一致。运行时配置只维护这一个完整示例，所有平台和功能字段都在其中列出；具体启用和绑定方法见相应文档。
 
 键名约定：缺省启用的功能用 `disabled` 关闭，缺省关闭的功能用 `enabled` 开启，见 [配置手册](configuration.md)。
 
@@ -35,7 +35,7 @@
 | --- | --- |
 | `platforms.connectors[].id` `type` `enabled` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms) |
 | `platforms.connectors[].options`（OneBot：`api_url` `send_token` `receive_secret` `webhook_addr` `webhook_path` `request_limit` `timeout` `replay_ttl` `replay_max`） | [配置手册 §5.6](configuration.md#56-platforms)，旧写法迁移见该节“OneBot 配置迁移” |
-| `platforms.connectors[].options`（QQ 官方：`app_id` `secret_ref` `webhook_addr` `webhook_path` `timeout` `request_limit` `replay_ttl` `replay_max`） | [QQ 官方机器人接入](qqbot.md)，`target` 使用 group_openid；[完整示例](../configs/runtime.qqbot.example.json) |
+| `platforms.connectors[].options`（QQ 官方：`app_id` `secret_ref` `webhook_addr` `webhook_path` `timeout` `request_limit` `replay_ttl` `replay_max`） | [QQ 官方机器人接入](qqbot.md)，`target` 使用 group_openid；[完整示例](../configs/runtime.example.json) |
 | `platforms.groups[].id` `connector_id` `target` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms)、[群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot) |
 | `operator.conversation_id` `operator.notifications` `operator.commands` | [配置手册 §5.7](configuration.md#57-operator) |
 
@@ -46,14 +46,14 @@
 | 模块与字段 | 说明 |
 | --- | --- |
 | `native.echo` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook) |
-| `native.onebot`：`replay_ttl` `replay_max` `timeout` 等 | [配置手册 §5.6](configuration.md#56-platforms)（连接器协议由该模块提供） |
+| `native.onebot`：`api_url` `send_token` `receive_secret` `webhook_addr` `webhook_path` `request_limit` `timeout` `replay_ttl` `replay_max` | [配置手册 §5.6](configuration.md#56-platforms)（连接器协议由该模块提供） |
 | `native.qqbot`：`enabled`、空 `options` | [QQ 官方机器人接入](qqbot.md)，默认关闭，账号参数放在 connector 实例 |
 | `native.reply_experience`：`empty_mention_prompt` `image_only_prompt` `search_progress_text` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook) |
 | `native.proactive_reply`：`scope` `yield_duration` `silence` `max_window` `max_buffered` `max_text_len` `max_concurrent` `context_messages` `groups` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook)；`scope` 与决策的关系见 [业务范围与决策](configuration.md#业务范围与决策botsystem_prompt--decision)；让位规则见 [默认行为表](default-behavior.md) |
 | `native.structured_search`：`document_root` `extensions` `default_results` `max_results` `min_match_ratio` `query_timeout` `build_timeout` `max_queries_per_turn` `max_context_chars` `max_section_chars` `max_file_bytes` `max_total_bytes` `max_files` | [配置手册 §5.5](configuration.md#55-modulesnativestructured_search) |
 | `native.knowledge_reflection`：`conversation_ids` `scan_interval` `message_ttl` `quiet_window` `max_session_duration` `max_messages_per_conversation` `max_messages_total` `max_message_chars` `max_pairs_per_scan` `min_confidence` `extra_directory` | [配置手册 §5.8](configuration.md#58-modulesnativeknowledge_reflection)（v0.2.0 字段保留，周期/TTL/容量仅作用于已形成会话及模块处理标记） |
 | `native.join_review`：`regex` `model_enabled` `rule` `combine` `reject_reason` `groups` | [群管理：入群自动审批](group-management.md#入群自动审批)、[配置手册：入群自动审批](configuration.md#入群自动审批) |
-| `native.join_review.external_review`：`url` `method` `headers` `body` `result_expression` | [外部 HTTP 审批](group-management.md#外部-http-审批)（位于模块 options，凭据用 Header 占位符引用）；[三项组合完整示例](../configs/runtime.onebot.external-review.example.json)，[init](cli.md) 生成文件也列全这些字段（审批关闭） |
+| `native.join_review.external_review`：`url` `method` `headers` `body` `result_expression` | [外部 HTTP 审批](group-management.md#外部-http-审批)（位于模块 options，凭据用 Header 占位符引用）；[三项组合说明](group-management.md#外部-http-审批)，[init](cli.md) 生成文件也列全这些字段（审批关闭） |
 | `native.welcome`：`groups.<群ID>.enabled` `message` | [群管理：新人欢迎](group-management.md#新人欢迎) |
 
 ### `extensions`

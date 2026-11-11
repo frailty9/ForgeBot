@@ -119,7 +119,7 @@ YAML 只接受上述字段，未知字段、无效 duration 或多个 YAML docum
 
 ## 5. 运行时 JSON
 
-可直接从 [`configs/runtime.example.json`](../configs/runtime.example.json) 复制。首次启动允许使用不带元数据的普通对象：
+仓库只维护一份完整运行时示例 [`configs/runtime.example.json`](../configs/runtime.example.json)，列出所有当前支持的字段、连接器及模块 options，包括空字符串、空数组、空对象和关闭状态。`init` 内嵌并复用这份示例，仅覆盖命令行指定的模型参数，生成 runtime.local.json；不会另维护按平台或功能拆分的示例。顶层顺序沿用 RuntimeConfig；空值字段同样保留。OneBot 模块级 options 与实例 options 的同名字段分别表示默认值和实例覆盖，MCP 的 endpoint/command/args 等分别服务不同 transport，未使用的字段以空值列出；动态映射（groups、headers、environment、消息段 data）按文档填写实际键。配置中不同协议/传输方式的字段用途见各节说明，尚未实现的字段不能提前添加。可直接复制这份文件作为部署配置。首次启动允许使用不带元数据的普通对象：
 
 完整示例显式列出全部内置模块及其参数；只启用本地 Echo 渠道，可选功能（包括回复体验、短期记忆、主动介入、检索、反思、欢迎和群管理）明确关闭。需要的功能直接在对应位置启用；这属于完整示例的取值，不改变程序缺省行为或 `init` 生成的最小配置。
 
@@ -336,7 +336,7 @@ OneBot 表情若附带 `summary`、`description`、`text` 或 `name`，适配器
 }
 ```
 
-逻辑群 ID 如何被入群审批、欢迎、主动插话、管理员和运维群引用，见 [群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot)；完整可加载的 QQ 示例见 [`configs/runtime.onebot.example.json`](../configs/runtime.onebot.example.json)。
+逻辑群 ID 如何被入群审批、欢迎、主动插话、管理员和运维群引用，见 [群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot)；完整字段统一见 [`configs/runtime.example.json`](../configs/runtime.example.json)，启用 OneBot 与逻辑群绑定步骤见群管理文档。
 
 `connectors` 支持同时启用多个实例。`type` 是 Provider 的稳定查找键；当前内置
 `native.echo` 提供 `echo`，`native.onebot` 提供 `onebot`。连接器 ID 必须唯一。启用
@@ -367,7 +367,7 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 的公开配置响应只显示它们是否已配置。回答/DM、MCP、外部审批及 QQ 官方 AppSecret 使用加密 SecretStore。未知
 且禁用的未来 Provider 实例不会在公开响应中回显其原始 `options`。
 
-QQ 官方机器人使用独立的 `qqbot` 类型和 `native.qqbot` 模块，默认关闭，Webhook、AppID/SecretStore、被动回复及撤回边界见 [QQ 官方接入](qqbot.md)。完整示例是 [`runtime.qqbot.example.json`](../configs/runtime.qqbot.example.json)，不要将其 options 混入 OneBot 实例。字段严格解析，secret_ref 不写真实 AppSecret。
+QQ 官方机器人使用独立的 `qqbot` 类型和 `native.qqbot` 模块，默认关闭，Webhook、AppID/SecretStore、被动回复及撤回边界见 [QQ 官方接入](qqbot.md)。完整字段统一在 [`runtime.example.json`](../configs/runtime.example.json) 的 qqbot-main 和 native.qqbot 中，不要将其 options 混入 OneBot 实例。字段严格解析，secret_ref 不写真实 AppSecret。
 
 #### OneBot 配置迁移（破坏式）
 
@@ -817,7 +817,7 @@ Invoke-RestMethod `
 
 ## 入群自动审批
 
-全字段见 [`runtime.example.json`](../configs/runtime.example.json)（模块与群关闭）；正则、HTTP、模型三项 AND 组合的完整 OneBot 配置见 [`runtime.onebot.external-review.example.json`](../configs/runtime.onebot.external-review.example.json)。[群管理说明](group-management.md#外部-http-审批)列出各项启停方式、请求/响应示例和凭据初始化步骤。总示例的 `external_review` 已配置，单独关闭它应删除整个对象；模型通过 `model_enabled` 控制。
+全字段只在 [`runtime.example.json`](../configs/runtime.example.json) 中列出（审批模块与群关闭）；正则、HTTP、模型三项 AND 组合见群管理文档中的 options 片段，按需调整同一份部署配置。[群管理说明](group-management.md#外部-http-审批)列出各项启停方式、请求/响应示例和凭据初始化步骤。总示例的 `external_review` 已配置，单独关闭它应删除整个对象；模型通过 `model_enabled` 控制。
 
 入群审批可在 `modules.native.join_review.options.external_review` 配置 HTTP 判断，和正则/模型共用 AND/OR；完整配置、有限表达式语法、JSON 模板与凭据引用见[外部 HTTP 审批](group-management.md#外部-http-审批)。请求限时 5 秒、响应最大 64KiB，字段严格解析，外部配置非空即启用，不另加开关。
 

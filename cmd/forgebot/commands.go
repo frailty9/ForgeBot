@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soleapi/forgebot/configs"
 	"github.com/soleapi/forgebot/internal/app"
 	"github.com/soleapi/forgebot/internal/catalog"
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/llm"
-	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/operation"
 	"github.com/soleapi/forgebot/internal/platform"
 	"github.com/soleapi/forgebot/internal/secret"
@@ -106,7 +106,11 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 		return err
 	}
 	keyText := base64.StdEncoding.EncodeToString(key)
-	cfg := config.DefaultRuntime()
+	runtimeData := configs.RuntimeExample()
+	var cfg config.RuntimeConfig
+	if err := json.Unmarshal(runtimeData, &cfg); err != nil {
+		return err
+	}
 	cfg.LLM.Protocol = protocol
 	cfg.LLM.Model = strings.TrimSpace(model)
 	cfg.LLM.BaseURL = strings.TrimSpace(endpoint)
@@ -115,34 +119,7 @@ func initializeProject(dir, model, endpoint string, protocol llm.Protocol, anony
 	if anonymous {
 		cfg.LLM.Authentication = config.AuthenticationNone
 	}
-	// 初始化文件列出关闭的审批配置，便于按需填写；不改变运行时缺省行为。
-	reviewEnabled := false
-	cfg.Modules = map[string]config.ModuleConfig{
-		qqbot.ID: {Enabled: &reviewEnabled, Options: json.RawMessage(`{}`)},
-		"native.join_review": {
-			Enabled: &reviewEnabled,
-			Options: json.RawMessage(`{
-  "regex": "\\S",
-  "model_enabled": false,
-  "rule": "申请内容须说明入群目的，并符合本群主题。",
-  "combine": "and",
-  "reject_reason": "请填写符合本群要求的入群申请说明。",
-  "groups": {"local": {"enabled": false}},
-  "external_review": {
-    "url": "https://review.example.com/join",
-    "method": "POST",
-    "headers": {"Authorization": "Bearer {review/token}"},
-    "body": "{\"application\":\"{application}\",\"user_id\":\"{user_id}\",\"conversation_id\":\"{conversation_id}\"}",
-    "result_expression": ".data.approved == true"
-  }
-}`),
-		},
-	}
-	cfg.Platforms.Connectors = append(cfg.Platforms.Connectors, config.ConnectorConfig{
-		ID: "qqbot-main", Type: "qqbot", Enabled: false,
-		Options: json.RawMessage(`{"app_id":"YOUR_APP_ID","secret_ref":"qqbot/main","webhook_addr":"127.0.0.1:18091","webhook_path":"/qqbot","timeout":"15s","request_limit":1048576,"replay_ttl":"5m","replay_max":10000}`),
-	})
-	runtimeData, err := json.MarshalIndent(cfg, "", "  ")
+	runtimeData, err = initialRuntime(runtimeData, cfg.LLM)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ v0.2.0 增加独立的 `qqbot` ConnectorProvider，模块为 `native.qqbot`，�
 
 在 QQ 机器人开放平台取得 AppID/AppSecret，为部署账号开放群聊消息权限并设置测试/可用群。当前仅实现群聊，不接频道或 C2C。账号认证、审核状态和是否开启全量群消息由平台控制；只收到 @ 事件时，history、主动插话和沉淀只能看到实际收到的消息。
 
-从 [官方 QQ 完整示例](../configs/runtime.qqbot.example.json) 复制运行时配置，替换模型地址/名称、`app_id` 和 `target`。`target` 是官方事件里的 `group_openid`，不是普通 QQ 群号；成员身份使用 `member_openid`。启动 YAML 的 `runtime_config_path` 指向这份部署配置，回答模型和 AppSecret 都先写入 SecretStore。
+从唯一的 [runtime.example.json](../configs/runtime.example.json) 复制部署配置，填写模型地址/名称及 qqbot-main 的 `app_id`，同时启用 `platforms.connectors` 中的 qqbot-main 与 `modules.native.qqbot`。在 `platforms.groups` 添加 `{"id":"support","connector_id":"qqbot-main","target":"YOUR_GROUP_OPENID","prompt_suffix":""}`。Echo 的 local 可保留；若删除它，须同步调整 operator 和所有群级模块对 local 的引用。`target` 是官方事件里的 `group_openid`，不是普通 QQ 群号；成员身份使用 `member_openid`。启动 YAML 的 `runtime_config_path` 指向这份部署配置，回答模型和 AppSecret 都先写入 SecretStore。
 
 ```powershell
 go run ./cmd/forgebot -config configs/forgebot.local.yaml -init-api-key qqbot/main 'YOUR_APP_SECRET'
@@ -26,7 +26,7 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml
 | `request_limit` | 入站请求字节上限，默认 1MiB，范围 1..8MiB |
 | `replay_ttl`、`replay_max` | 已接收消息去重时长/容量，默认 5m、10000；容量范围 1..100000 |
 
-`init` 生成文件和 `runtime.example.json` 均列出默认关闭的 `native.qqbot` 模块与完整 QQ connector options；填好参数并绑定 `group_openid` 后，再同时启用模块和连接器。仅打开模块不会自动绑定群。
+`init` 直接复用唯一的 `runtime.example.json` 生成部署文件，列全字段并保持 `native.qqbot` 模块和 QQ connector 默认关闭；填好参数并绑定 `group_openid` 后，再同时启用模块和连接器。仅打开模块不会自动绑定群。
 
 模块 options 只接受空对象，账号配置放在每个 connector 实例中；不提供第二套模块默认值。未知字段严格报错。API/Token 地址固定使用官方 HTTPS 地址，不对部署配置开放自定义地址。
 
