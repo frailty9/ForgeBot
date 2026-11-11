@@ -19,6 +19,7 @@ import (
 	"github.com/soleapi/forgebot/internal/llm"
 	"github.com/soleapi/forgebot/internal/modules/joinreview"
 	"github.com/soleapi/forgebot/internal/modules/qqbot"
+	"github.com/soleapi/forgebot/internal/modules/telegram"
 	"github.com/soleapi/forgebot/internal/secret"
 )
 
@@ -77,14 +78,21 @@ func TestInitDoctorAndAppPreparationFromEmptyDirectory(t *testing.T) {
 	if !exists || qqModule.Enabled == nil || *qqModule.Enabled {
 		t.Fatal("init must include the disabled QQ official module")
 	}
-	qqDeclared := false
+	qqDeclared, telegramDeclared := false, false
 	for _, connector := range cfg.Runtime.Platforms.Connectors {
 		if connector.Type == "qqbot" {
 			qqDeclared = !connector.Enabled
 		}
+		if connector.Type == "telegram" {
+			telegramDeclared = !connector.Enabled
+		}
 	}
 	if !qqDeclared {
 		t.Fatal("init must include the disabled QQ official connector")
+	}
+	telegramModule, exists := cfg.Runtime.Modules[telegram.ID]
+	if !exists || telegramModule.Enabled == nil || *telegramModule.Enabled || !telegramDeclared {
+		t.Fatal("init must include the disabled Telegram module and connector")
 	}
 	cfg.Static.Server.Addr = "127.0.0.1:0"
 	// init 把主密钥写进 YAML，无需再设置环境变量。
@@ -190,5 +198,31 @@ func TestInitRefusesExistingCredentialsEvenWithoutConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "forgebot.local.yaml")); !os.IsNotExist(err) {
 		t.Fatal("new key created over existing credentials")
+	}
+}
+
+func TestDoctorChecksTelegramTokenWithoutStartingReceiver(t *testing.T) {
+	dir := t.TempDir()
+	if err := initializeProject(dir, "test-model", "https://example.invalid/v1", llm.OpenAIResponses, true, false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.LoadOptions{Path: filepath.Join(dir, "forgebot.local.yaml"), LookupEnv: func(string) string { return "" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Static.Server.Addr = "127.0.0.1:0"
+	on := true
+	cfg.Runtime.Modules = map[string]config.ModuleConfig{telegram.ID: {Enabled: &on}}
+	cfg.Runtime.Platforms = config.PlatformConfig{Connectors: []config.ConnectorConfig{{ID: "telegram", Type: "telegram", Enabled: true, Options: json.RawMessage(`{"token_ref":"telegram/main","mode":"long_polling"}`)}}, Groups: []config.GroupBindingConfig{{ID: "support", ConnectorID: "telegram", Target: "-100"}}}
+	var output bytes.Buffer
+	if err := doctor(cfg, false, false, &output); err == nil || !strings.Contains(output.String(), "connector_credential:telegram") {
+		t.Fatal(output.String(), err)
+	}
+	if err := initializeAPIKey(cfg, "telegram/main", "123:test-token"); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := doctor(cfg, false, false, &output); err != nil || strings.Contains(output.String(), "123:test-token") {
+		t.Fatal(output.String(), err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/soleapi/forgebot/internal/config"
 	"github.com/soleapi/forgebot/internal/modules/qqbot"
 	"github.com/soleapi/forgebot/internal/modules/replyexperience"
+	"github.com/soleapi/forgebot/internal/modules/telegram"
 )
 
 func TestCapabilitiesReflectConfigurationWithoutLeakingSecrets(t *testing.T) {
@@ -40,6 +41,43 @@ func TestCapabilitiesReflectConfigurationWithoutLeakingSecrets(t *testing.T) {
 		if strings.Contains(string(data), secret) {
 			t.Fatal("catalog leaks secret")
 		}
+	}
+}
+
+func TestTelegramCatalogDeclaresOnlyImplementedCapabilities(t *testing.T) {
+	snapshot := testSnapshot()
+	on := true
+	snapshot.Runtime.Modules = map[string]config.ModuleConfig{telegram.ID: {Enabled: &on}}
+	snapshot.Runtime.Platforms.Connectors[0].Type = "telegram"
+	snapshot.Runtime.Platforms.Connectors[0].Options = json.RawMessage(`{"token_ref":"telegram/private","mode":"long_polling"}`)
+	snapshot.Runtime.Platforms.Groups[0].Target = "-100"
+	store := configuredSecrets(t, "answer")
+	candidate, err := store.Stage(context.Background(), "telegram/private", "123:private-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Activate(context.Background(), candidate); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(context.Background(), snapshot, Builder{Modules: moduleRegistry(t, telegram.Factory{}), Secrets: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	catalog := manager.Capabilities(context.Background())
+	found := false
+	for _, entry := range catalog.Entries {
+		if entry.Kind == "group" {
+			found = true
+			support := entry.GroupSupport
+			if support == nil || !support.TextMessages || !support.MessageRecall || support.PassiveRepliesOnly || support.OutboundSegments || support.MemberEvents || support.JoinEvents || support.JoinReview || support.Permission != "unknown" {
+				t.Fatal(entry)
+			}
+		}
+	}
+	data, _ := json.Marshal(catalog)
+	if !found || strings.Contains(string(data), "123:private-token") || strings.Contains(string(data), "telegram/private") {
+		t.Fatal("catalog missing or leaking private settings")
 	}
 }
 

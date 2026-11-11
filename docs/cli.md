@@ -12,6 +12,8 @@ go run ./cmd/forgebot init -dir configs -model YOUR_MODEL -protocol anthropic_me
 
 `init` 也列出默认关闭的 `native.qqbot` 模块及 QQ 官方 connector 完整参数。使用前填写 AppID/凭据引用、初始化 AppSecret、绑定 `group_openid`，然后启用模块和连接器；生成配置不会访问 QQ。完整启用示例见[QQ 官方接入](qqbot.md)。
 
+`init` 还列出默认关闭的 `native.telegram` 模块与 Telegram connector：`token_ref`、`mode: "long_polling"`、`timeout`。启用前初始化 Bot Token 引用并绑定十进制 chat_id；doctor 仅检查本地参数/凭据，不调用 getMe、不清除 Webhook。使用方法和当前范围见[Telegram 接入](telegram.md)。
+
 首次写入回答 Key：
 
 ```powershell

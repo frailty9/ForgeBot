@@ -4,7 +4,7 @@
 
 状态：用户已于 2026-11-10 授权先提交规划文档，再开始实施。沉淀职责按用户补充的原始讨论修正；配置迁移、表达式子集和 QQ 首期接入按本设计执行，进度与验证见 tasks。
 
-2026-11-11 范围追加：Telegram 已由用户确认并入 v0.2.0，需求见 requirements §1.5；以下 §8 为本次设计方案，尚未实施。原表和基线描述保留用于追溯，不表示当前代码仍停在原基线。
+2026-11-11 范围追加：Telegram 已由用户确认并入 v0.2.0，需求见 requirements §1.5；以下 §8 为完整方案；首批长轮询文本/引用/角色/撤回已实现待审阅，其他批次未开始。原表和基线描述保留用于追溯，不表示当前代码仍停在原基线。
 
 ## 1. 当前代码与实施边界
 
@@ -15,7 +15,7 @@
 | BOT-19 撤回 | Sender 只返回 error；OneBot 丢弃发送响应里的消息 ID；无撤回可选接口 | 保持 error-only 发送接口；宿主共享 capability 按群绑定后传消息 ID 撤回，业务触发后续确定 |
 | 外部入群审批 | 模块只提供 Policy，Core 的 group.Service 判断并执行 | 继续由 Core 发外部请求，接入三种判断及凭据解析 |
 | QQ 官方连接器 | 生产只注册 Echo/OneBot Provider | 独立 `native.qqbot` 模块及 `qqbot` 适配器 |
-| Telegram 连接器 | 截至 `6a386b5` 无 Telegram Provider，现有凭据和群操作契约可复用 | 新增 `native.telegram`；普通群/非论坛超级群，长轮询或 Webhook；不做自动入群审批 |
+| Telegram 连接器 | 原基线 `6a386b5` 无 Provider；当前首批已实现待审阅，复用既有凭据和群操作契约 | 新增 `native.telegram`；普通群/非论坛超级群，长轮询或 Webhook；不做自动入群审批 |
 
 代码核对纠正：pipeline 与 reflector 都依赖 `buffer.AnswerSession`；reflection.Status 还依赖 buffer/scanner 的 Stats。删除包前必须迁移这些类型。`quiet_window/max_session_duration` 当前属于归组和调度，不属于 pipeline。
 
@@ -184,7 +184,7 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 
 ### 8.2 配置与账号
 
-模块 ID 为 `native.telegram`，默认关闭，模块 options 只接受空对象。connector 类型为 `telegram`，实例 options 如下；新增字段均限于该 Provider，不进入 Core 配置结构。
+模块 ID 为 `native.telegram`，默认关闭，模块 options 只接受空对象。connector 类型为 `telegram`，实例 options 如下；新增字段均限于该 Provider，不进入 Core 配置结构。当前首批仅接受 token_ref/mode/timeout 和 long_polling；Webhook 字段及模式在第二批开放，不能提前写入严格配置。
 
 | 字段 | 约定 |
 | --- | --- |
@@ -195,7 +195,7 @@ Build 校验并准备资源，不监听或请求网络。Start 加载 Token 并�
 | `webhook_addr`、`webhook_path` | webhook 必填，本地监听 host:port 与绝对路径；不强制公网路径等于本地路径，允许反向代理映射 |
 | `webhook_secret_ref` | webhook 必填，SecretStore 中回调认证文本的引用；实际值遵守官方 1..256 字符、字母/数字/下划线/短横线约束 |
 
-长轮询可省略 webhook 字段，也允许保留通过结构校验的 webhook 示例值；仅在 webhook 模式解析其凭据。Provider 仅声明当前模式所需的凭据，公开配置返回是否设置，不回显 Token、认证文本或其解析结果。init 与总示例默认关闭模块和连接器，显式填写 mode，独立示例分别展示两种启用方式；使用现有按引用凭据 API 轮换。
+长轮询可省略 webhook 字段，也允许保留通过结构校验的 webhook 示例值；仅在 webhook 模式解析其凭据。Provider 仅声明当前模式所需的凭据，公开配置返回是否设置，不回显 Token、认证文本或其解析结果。init 与总示例默认关闭模块和连接器，显式填写 mode，只维护 configs/runtime.example.json 一份完整示例，两种方式的选择与启用步骤写在文档中；使用现有按引用凭据 API 轮换。
 
 群绑定 target 使用稳定的十进制 chat_id，按有符号 int64 校验并以字符串传递，不接受用户名代替。Start 调 getMe 获取自身 ID/username，并逐个 getChat 验证绑定只为 group 或非论坛 supergroup。私聊、频道、论坛群、不可访问群使候选启动失败；运行中也忽略私聊、频道、论坛/话题消息，群转为论坛后不把话题合并到既有会话。普通群升级导致 chat_id 变化时返回可诊断的绑定冲突，部署者更新配置，不自动改写绑定。
 
@@ -227,6 +227,8 @@ photo 的多个尺寸是一张图，不假定数组有序；按像素面积选�
 SendTo 调 sendMessage，不设 parse_mode，不渲染 Markdown/HTML，Segments 使用已有 Text 形式降级；首期不发 Media。UTF-8 无效、空文本或超过 4096 个 Unicode 字符，在请求前返回 invalid；不按实体的 UTF-16 单位计算正文上限，不拆分/截断。ReplyToMessageID 用 reply_parameters 指向同群原消息，显式 allow_sending_without_reply=false；引用不可用交平台错误处理，不自动去引用重发。主动插话/通知/欢迎可无 ReplyTo 投递，passive_replies_only=false，outbound_segments=false。
 
 RecallMessage 使用绑定 chat_id 和给定 message_id 调 deleteMessage；平台决定权限/时限，不按本地缓存存在性或年龄拒绝，不触发聊天提示。发送结果中的平台 ID 仅留协议内部，不补写 Core history。API 响应以固定 8MiB+1 限量读取，读取失败、超限、无效 JSON 不使用截断结果，不推进轮询 offset；HTTP 非 2xx 或 ok=false 都按失败处理，沿用 operation 分类，并解析 parameters.retry_after/migrate_to_chat_id。收到 migrate_to_chat_id 时返回绑定 conflict，诊断给出新 chat_id（int64），不自动修改绑定、重定向发送或重试；getChat 启动检查也处理该结果。请求已发出后超时保留 effect=unknown，发送/删除不自动重试。限流、权限和单条操作失败不进入 Adapter.Errors；底层错误含 Token URL 时必须先去除地址，再包装可公开分类，不记录原始请求地址、文件路径或响应正文。
+
+首批实施说明（2026-11-11）：文本接入及撤回已完成，媒体（含引用媒体）返回 unsupported，不丢图后仅按文字处理；入群服务消息明确忽略，未声明欢迎或审批事件支持。API/读取/入队/UTF-16/角色缓存及问答链路受控测试通过，无真实 Bot 调用；其余批次未开始。
 
 ### 8.6 验证与交付
 

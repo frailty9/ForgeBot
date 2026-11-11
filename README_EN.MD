@@ -6,7 +6,7 @@ ForgeBot is a general-purpose AI Bot for group collaboration. Combine question a
 
 **One deployment serves one business.** A single ForgeBot instance can join many groups across several platforms, but they all share one business scope (`bot.system_prompt`), one knowledge base, one answer model and one set of feature rules such as join review; individual groups only choose which features to turn on. To serve several unrelated businesses, run one instance per business.
 
-`v0.1.0` is merged and locally tagged; `v0.2.0` is in development. OneBot 11, local Echo, and an [official QQ group connector](docs/qqbot.md) are implemented; live acceptance for the new connector remains pending. A [Telegram group connector](specs/v0.2.0/requirements.md#15-telegram-群聊-connector2026-11-11-新增) is now planned for v0.2.0 and is not implemented. WebUI, FPP external plugins, SQL/NoSQL backends and vector retrieval are deferred.
+`v0.1.0` is merged and locally tagged; `v0.2.0` is in development. OneBot 11, local Echo, and an [official QQ group connector](docs/qqbot.md) are implemented; live acceptance for the new connector remains pending. The [Telegram group connector](docs/telegram.md) now implements long polling, text replies and recall; Webhook, images, welcome events and live acceptance remain pending. WebUI, FPP external plugins, SQL/NoSQL backends and vector retrieval are deferred.
 
 ## Capabilities
 

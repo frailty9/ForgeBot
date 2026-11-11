@@ -105,6 +105,11 @@ must not depend on or expose the complete Web administration service.
   options, defaults, redaction, binding conversion, and adapter construction.
 - `internal/platform/onebot`: OneBot 11 HTTP webhook adapter and `send_msg`
   sender, without RuntimeConfig knowledge.
+- `internal/modules/telegram`: default-disabled Telegram Provider, strict polling
+  instance options and scoped Bot Token credentials.
+- `internal/platform/telegram`: bounded long polling, text/entity normalization,
+  administrator caching, text delivery and recall; Webhook, images and welcome
+  events remain planned.
 - `internal/modules/qqbot`: default-disabled official QQ group Provider,
   strict instance options, redacted metadata and declared secret references.
 - `internal/platform/qqbot`: signed Webhook ingestion, bounded queue/replay

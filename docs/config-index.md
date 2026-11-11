@@ -36,6 +36,7 @@
 | `platforms.connectors[].id` `type` `enabled` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms) |
 | `platforms.connectors[].options`（OneBot：`api_url` `send_token` `receive_secret` `webhook_addr` `webhook_path` `request_limit` `timeout` `replay_ttl` `replay_max`） | [配置手册 §5.6](configuration.md#56-platforms)，旧写法迁移见该节“OneBot 配置迁移” |
 | `platforms.connectors[].options`（QQ 官方：`app_id` `secret_ref` `webhook_addr` `webhook_path` `timeout` `request_limit` `replay_ttl` `replay_max`） | [QQ 官方机器人接入](qqbot.md)，`target` 使用 group_openid；[完整示例](../configs/runtime.example.json) |
+| `platforms.connectors[].options`（Telegram：`token_ref` `mode` `timeout`） | [Telegram 群聊接入](telegram.md)，当前只接受 long_polling；[完整示例](../configs/runtime.example.json) |
 | `platforms.groups[].id` `connector_id` `target` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms)、[群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot) |
 | `operator.conversation_id` `operator.notifications` `operator.commands` | [配置手册 §5.7](configuration.md#57-operator) |
 
@@ -47,6 +48,7 @@
 | --- | --- |
 | `native.echo` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook) |
 | `native.onebot`：`api_url` `send_token` `receive_secret` `webhook_addr` `webhook_path` `request_limit` `timeout` `replay_ttl` `replay_max` | [配置手册 §5.6](configuration.md#56-platforms)（连接器协议由该模块提供） |
+| `native.telegram`：`enabled`、空 `options` | [Telegram 群聊接入](telegram.md)，默认关闭，账号参数放 connector 实例 |
 | `native.qqbot`：`enabled`、空 `options` | [QQ 官方机器人接入](qqbot.md)，默认关闭，账号参数放在 connector 实例 |
 | `native.reply_experience`：`empty_mention_prompt` `image_only_prompt` `search_progress_text` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook) |
 | `native.proactive_reply`：`scope` `yield_duration` `silence` `max_window` `max_buffered` `max_text_len` `max_concurrent` `context_messages` `groups` | [配置手册 §6.6](configuration.md#66-原生功能模块与-hook)；`scope` 与决策的关系见 [业务范围与决策](configuration.md#业务范围与决策botsystem_prompt--decision)；让位规则见 [默认行为表](default-behavior.md) |

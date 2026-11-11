@@ -67,6 +67,17 @@
           "replay_ttl": "5m",
           "replay_max": 10000
         }
+      },
+      {
+        "id": "telegram-main",
+        "type": "telegram",
+        "enabled": false,
+        "prompt_suffix": "",
+        "options": {
+          "token_ref": "telegram/main",
+          "mode": "long_polling",
+          "timeout": "15s"
+        }
       }
     ],
     "groups": [
@@ -176,6 +187,10 @@
       }
     },
     "native.qqbot": {
+      "enabled": false,
+      "options": {}
+    },
+    "native.telegram": {
       "enabled": false,
       "options": {}
     },

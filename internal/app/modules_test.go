@@ -76,7 +76,7 @@ func TestAppRegistersDefaultNativeModule(t *testing.T) {
 			t.Fatal(result)
 		}
 		_, status := root.runtime.Snapshot()
-		if len(status.Modules) != 9 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled {
+		if len(status.Modules) != 10 || status.Modules[0].ID != echo.ID || !status.Modules[0].Enabled || status.Modules[1].Enabled == disabled {
 			t.Fatal(status.Modules)
 		}
 		for _, module := range status.Modules[2:] {
@@ -102,6 +102,7 @@ func TestExampleConnectorsValidateWhenEnabled(t *testing.T) {
 	for _, tc := range []struct{ kind, module, target string }{
 		{"onebot", "native.onebot", "10001"},
 		{"qqbot", "native.qqbot", "group-openid"},
+		{"telegram", "native.telegram", "-1001234567890"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			cfg, _, err := config.Load(config.LoadOptions{RuntimePath: filepath.Join("..", "..", "configs", "runtime.example.json"), LookupEnv: func(string) string { return "" }})

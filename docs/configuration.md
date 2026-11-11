@@ -369,6 +369,8 @@ OneBot 入站消息包含引用段时，ForgeBot 会通过 `get_msg` 解析被�
 
 QQ 官方机器人使用独立的 `qqbot` 类型和 `native.qqbot` 模块，默认关闭，Webhook、AppID/SecretStore、被动回复及撤回边界见 [QQ 官方接入](qqbot.md)。完整字段统一在 [`runtime.example.json`](../configs/runtime.example.json) 的 qqbot-main 和 native.qqbot 中，不要将其 options 混入 OneBot 实例。字段严格解析，secret_ref 不写真实 AppSecret。
 
+Telegram 使用独立 `telegram` 类型与默认关闭的 `native.telegram` 模块，当前仅实现长轮询文本问答及宿主撤回。Bot Token 用 SecretStore 的 `token_ref`，普通群/非论坛超级群以十进制 chat_id 绑定；配置、隐私模式、接收通道独占及未实现能力见 [Telegram 接入](telegram.md)。
+
 #### OneBot 配置迁移（破坏式）
 
 未发布版本不兼容旧字段。把每个 `connectors[].onebot` 对象原样移动为该连接器的

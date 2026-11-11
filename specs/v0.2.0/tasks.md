@@ -4,7 +4,7 @@
 
 状态：用户已于 2026-11-10 授权提交规划文档并开始实施，先推进工作包 1。工作分支 `feat/v0.2.0`，核对基线 `1103bc7`。只在用户明确要求时提交，不自动推送、合并或打标签。
 
-2026-11-11 追加：用户确认 Telegram 群聊连接器纳入 v0.2.0，需求 §1.5、设计 §8；本次只补规划，不开始 Telegram 实现。原版本验收移为工作包 8，工作包 7 按以下批次推进，每次只暂存一批供用户审阅。
+2026-11-11 追加：用户确认 Telegram 群聊连接器纳入 v0.2.0，需求 §1.5、设计 §8；规划已提交 `10c5b2f`，用户确认后开始第一批，当前实现完成待审阅。原版本验收移为工作包 8，工作包 7 按以下批次推进，每次只暂存一批供用户审阅。
 
 ## 0. 上下文与基线
 
@@ -109,22 +109,26 @@
 
 ## 7. Telegram 群聊连接器（需求 §1.5；设计 §8）
 
-依赖既有 Provider、SecretStore、group.message_recall.v1 和 native.welcome；命名、配置和接口遵循 ForgeBot 现有约定，不引入 Telegram 自动入群审批。当前 Telegram 代码尚未实现，下面均为待办。
+依赖既有 Provider、SecretStore、group.message_recall.v1 和 native.welcome；命名、配置和接口遵循 ForgeBot 现有约定，不引入 Telegram 自动入群审批。首批长轮询文本/引用/角色/撤回已实现待审阅，下面按批次记录完成状态；Webhook、图片及欢迎未开始。
 
 ### 7.1 Provider、长轮询与文本问答（TG-R1/R2/R3/R4/R6/R8/R9/R10）
 
-- [ ] 新增默认关闭的 native.telegram 和 telegram Provider，空模块 options、严格实例配置、凭据声明与脱敏；固定官方 API 主机，Build 不联网，不增加 SDK。补齐 API 响应实际读取限额、读取错误/HTTP/ok 联合判定及 parameters.retry_after/migrate_to_chat_id 分类，禁止截断成功或发送自动重定向。
-- [ ] 实现 API 分类与 Token URL 脱敏，Start 的 getMe/getChat 检查；chat_id 绑定只接普通群和非论坛超级群，忽略私聊/频道/话题、匿名身份与机器人消息。
-- [ ] 实现 long_polling、deleteWebhook(false)、显式 allowed_updates、有界队列/去重/offset 确认、可取消退避与 Stop；首个非空探测批次不能丢弃，同实例恢复保留 offset/短期标记，retry_after 可大于 30s，不要求 update_id 连续。此批不接受尚未实现的 webhook mode。
-- [ ] 映射 UTF-16 实体、明确 @/回复本 Bot、当前文本与同群引用、管理员角色缓存；在原文坐标解析 bot_command 目标、校验代理对边界并逆序清理自身 mention，在进入宿主前过滤指向其他 Bot 的命令。
-- [ ] 实现纯文本 sendMessage 和 deleteMessage；超长预先拒绝，无发送重试或通用回执；暂不声明图片和欢迎已接通。
-- [ ] 注册组合根、能力目录、doctor、init 关闭参数与唯一 runtime.example.json 中的长轮询字段；覆盖首个非空探测批次/停止恢复/非连续 update_id、异常响应不确认、HTTP 非 2xx 但 ok=true、HTTP 200 但 ok=false、retry_after>30s、迁移 ID、OtherBot 命令，以及普通问答/角色故障/409/取消/撤回，回归 OneBot/QQ。
+- [x] 新增默认关闭的 native.telegram 和 telegram Provider，空模块 options、严格实例配置、凭据声明与脱敏；固定官方 API 主机，Build 不联网，不增加 SDK。补齐 API 响应实际读取限额、读取错误/HTTP/ok 联合判定及 parameters.retry_after/migrate_to_chat_id 分类，禁止截断成功或发送自动重定向。
+- [x] 实现 API 分类与 Token URL 脱敏，Start 的 getMe/getChat 检查；chat_id 绑定只接普通群和非论坛超级群，忽略私聊/频道/话题、匿名身份与机器人消息。
+- [x] 实现 long_polling、deleteWebhook(false)、显式 allowed_updates、有界队列/去重/offset 确认、可取消退避与 Stop；首个非空探测批次不能丢弃，同实例恢复保留 offset/短期标记，retry_after 可大于 30s，不要求 update_id 连续。此批不接受尚未实现的 webhook mode。
+- [x] 映射 UTF-16 实体、明确 @/回复本 Bot、当前文本与同群引用、管理员角色缓存；在原文坐标解析 bot_command 目标、校验代理对边界并逆序清理自身 mention，在进入宿主前过滤指向其他 Bot 的命令。
+- [x] 实现纯文本 sendMessage 和 deleteMessage；超长预先拒绝，无发送重试或通用回执；暂不声明图片和欢迎已接通。
+- [x] 注册组合根、能力目录、doctor、init 完整关闭配置和唯一 runtime.example.json 中的 Telegram 字段；覆盖首个非空探测批次/停止恢复/非连续 update_id、异常响应不确认、HTTP 非 2xx 但 ok=true、HTTP 200 但 ok=false、retry_after>30s、迁移 ID、OtherBot 命令，以及普通问答/角色故障/409/取消/撤回，回归 OneBot/QQ。
+
+第一批验证（2026-11-11）：独立暂存快照通过 go build ./...、go vet ./...、go test ./... -count=1、go test -race ./internal/... -count=1。配置示例加载、doctor 凭据检查、原首批暂存范围及新增文档链接/空白检查通过；未调用真实 Telegram 或模型服务，未创建实现提交。
 
 ### 7.1.1 唯一完整运行时示例（2026-11-11 用户补充）
 
 - [x] 仅保留 configs/runtime.example.json，补全空字段、OneBot 模块默认项与 MCP transport 字段，删除独立平台/组合示例，修正文档和测试引用。
 - [x] init 直接复用程序内嵌的唯一示例，保留完整配置和字段顺序，只覆盖 CLI 模型参数；不改变 DefaultRuntime。
 - [x] 验证字段覆盖、每个连接器启用后的 options/绑定、init 与唯一示例一致，使用文档中的步骤在内存构造业务配置进行测试，不另建运行时示例文件。
+
+唯一示例验证（2026-11-11）：独立暂存快照已通过 go build ./...、go vet ./...、go test ./... -count=1、go test -race ./internal/... -count=1；字段覆盖、init 完整性/顺序、各连接器启用及无遗留示例引用检查通过。本批仍未创建实现提交。
 
 ### 7.2 Webhook 与模式/凭据切换（TG-R2/R9/R10）
 
@@ -165,7 +169,7 @@
 
 ## 当前交接
 
-2026-11-11：规划已提交 `10c5b2f`。本次单独整理“唯一完整运行时示例”变更：仅保留 runtime.example.json，init 复用嵌入示例，字段/顺序/连接器启用测试及文档同步。暂存内容不包含 Telegram 接入代码或其配置，Telegram 实现保留工作区另批审阅。尚未创建提交。
+2026-11-11：Telegram 规划已提交 `10c5b2f`。本批仅实现工作包 7.1：Provider、Bot Token 凭据声明、绑定检查、长轮询及逐项确认、文本/UTF-16/引用/角色、纯文本投递和宿主撤回；组合根、能力目录、doctor、init 与示例/用户文档同步。图片及引用媒体明确 unsupported，欢迎服务消息忽略，Webhook 不接受。未修改现有宿主接口，不新增通用回执，不调用真实账号。本批实现只暂存待用户审阅，不创建提交；后三批及真实验收未开始。
 
 用户补充原始讨论后，沉淀方案已修正：仅订阅新消息、模块保留已形成会话及处理标记、定时批处理；先查 history，再用适配器引用原文；不依赖 Evicted，不要求处理时原记录仍在容器。一并撤回“一次删除五个配置键”的建议。实现保留已有调度和上限字段，把约束对象缩到已形成会话。
 

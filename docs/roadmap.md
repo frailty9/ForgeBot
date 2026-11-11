@@ -7,7 +7,7 @@ The phase lists below are historical milestones, not a complete implementation a
 The current target is [v0.2.0](../specs/v0.2.0/requirements.md): history-based
 knowledge reflection, Connector injection cleanup, host message recall by ID,
 external HTTP join review, an official QQ connector, and the Telegram group connector
-added to the confirmed scope on 2026-11-11. Telegram is planned and not implemented. The
+added to the confirmed scope on 2026-11-11. Telegram long polling, text/entity handling and recall are implemented in the first batch under review; Webhook, inbound images and welcome events remain pending. The
 [design](../specs/v0.2.0/design.md) and [task plan](../specs/v0.2.0/tasks.md)
 are authorized for implementation. Reflection, injection cleanup, recall, external
 review, credential lifecycle and official QQ connector are committed; generic delivery receipts were canceled on
