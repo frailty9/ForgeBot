@@ -75,20 +75,32 @@ func (a *Adapter) call(ctx context.Context, method string, input, output any, ti
 		return operation.Wrap("telegram."+method, operation.Invalid, operation.EffectUnknown, errors.New("Telegram response exceeds 8MiB"))
 	}
 	var envelope struct {
-		OK         bool               `json:"ok"`
-		Result     json.RawMessage    `json:"result"`
-		ErrorCode  int                `json:"error_code"`
-		Parameters responseParameters `json:"parameters"`
+		OK          bool               `json:"ok"`
+		Result      json.RawMessage    `json:"result"`
+		ErrorCode   int                `json:"error_code"`
+		Description string             `json:"description"`
+		Parameters  responseParameters `json:"parameters"`
 	}
+	success := response.StatusCode >= 200 && response.StatusCode < 300
 	if json.Unmarshal(data, &envelope) != nil {
+		// 代理返回的 502/504 HTML 等非 JSON 正文按 HTTP 状态分类，保持可重试语义。
+		if !success {
+			code := operation.HTTPCode(response.StatusCode)
+			return operation.Wrap("telegram."+method, code, operation.EffectUnknown, operation.New(code, "Telegram API returned a non-JSON error"))
+		}
 		return operation.Wrap("telegram."+method, operation.Invalid, operation.EffectUnknown, errors.New("invalid Telegram response"))
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 || !envelope.OK {
+	if !success || !envelope.OK {
 		code := operation.HTTPCode(response.StatusCode)
-		if response.StatusCode >= 200 && response.StatusCode < 300 {
+		if success {
 			code = operation.HTTPCode(envelope.ErrorCode)
 		}
+		code = describedCode(code, envelope.Description)
 		message := "Telegram API rejected operation"
+		// 平台描述不含凭据，保留有界原文便于区分“消息不存在”“无权限”“被移出群”等原因。
+		if description := strings.TrimSpace(envelope.Description); description != "" {
+			message += ": " + truncateRunes(description, 200)
+		}
 		if envelope.Parameters.MigrateTo != 0 {
 			code = operation.Conflict
 			message = fmt.Sprintf("Telegram group migrated; update binding to chat_id %d", envelope.Parameters.MigrateTo)
@@ -103,6 +115,26 @@ func (a *Adapter) call(ctx context.Context, method string, input, output any, ti
 		return operation.Wrap("telegram."+method, operation.Invalid, operation.EffectUnknown, errors.New("invalid Telegram result"))
 	}
 	return nil
+}
+
+// describedCode 只细分 Bot API 用 400 返回、但调用方需要区别对待的几类常见描述。
+func describedCode(code operation.Code, description string) operation.Code {
+	description = strings.ToLower(description)
+	switch {
+	case strings.Contains(description, "not found"):
+		return operation.NotFound
+	case strings.Contains(description, "can't be deleted"), strings.Contains(description, "not enough rights"),
+		strings.Contains(description, "bot was kicked"), strings.Contains(description, "have no rights"):
+		return operation.PermissionDenied
+	}
+	return code
+}
+
+func truncateRunes(value string, limit int) string {
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit]) + "…"
 }
 
 func parseID(value string) (int64, error) {

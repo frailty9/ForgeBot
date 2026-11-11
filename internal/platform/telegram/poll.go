@@ -101,13 +101,20 @@ func (a *Adapter) poll(r *receiver) {
 		}
 		if err != nil {
 			code := operation.Describe(err).Code
-			if code == operation.Unauthenticated || code == operation.PermissionDenied || code == operation.Conflict {
+			if code == operation.Unauthenticated || code == operation.PermissionDenied {
+				// 只结束读取循环；接收资源保留到 Stop，已排队消息和发送/撤回不受影响。
 				select {
 				case a.errors <- err:
 				default:
 				}
-				r.cancel()
 				return
+			}
+			if code == operation.Conflict {
+				// 409 交给较旧的 getUpdates；滚动部署时新旧实例可能短暂重叠，上报后退避重试，不永久停收。
+				select {
+				case a.errors <- err:
+				default:
+				}
 			}
 			a.logger.WarnContext(r.ctx, "telegram polling failed", "connector_id", a.cfg.ID, "failure", operation.Describe(err))
 			if wait(r.ctx, retryDelay(err, backoff)) != nil {
