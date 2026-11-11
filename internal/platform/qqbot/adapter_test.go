@@ -81,7 +81,7 @@ func dispatch(t *testing.T, a *Adapter, body []byte, want int) *httptest.Respons
 }
 
 func TestWebhookValidatesOriginalBytesAppAndAge(t *testing.T) {
-	for _, mode := range []string{"body", "signature", "app", "old", "size"} {
+	for _, mode := range []string{"body", "signature", "unsigned", "app", "old", "size"} {
 		t.Run(mode, func(t *testing.T) {
 			a := testAdapter(t)
 			body := eventBody(a, "m", "GROUP_AT_MESSAGE_CREATE", "admin", "hi")
@@ -91,6 +91,9 @@ func TestWebhookValidatesOriginalBytesAppAndAge(t *testing.T) {
 				r.Body = io.NopCloser(strings.NewReader(string(body) + " "))
 			case "signature":
 				r.Header.Set("X-Signature-Ed25519", "00")
+			case "unsigned":
+				r.Header.Del("X-Signature-Ed25519")
+				r.Header.Del("X-Signature-Timestamp")
 			case "app":
 				r.Header.Set("X-Bot-Appid", "other")
 			case "old":
@@ -107,31 +110,112 @@ func TestWebhookValidatesOriginalBytesAppAndAge(t *testing.T) {
 	}
 }
 
-func TestChallengeAndHeartbeat(t *testing.T) {
+func TestChallengeAcceptsUnsignedAndSignedRequestsWithoutDispatch(t *testing.T) {
+	a := testAdapter(t)
+	ts := strconv.FormatInt(a.now().Unix(), 10)
+	token := "Challenge_09-+/="
+	body := []byte(`{"op":13,"d":{"plain_token":"` + token + `","event_ts":"` + ts + `"}}`)
+	for _, signed := range []bool{false, true} {
+		r := request(a, body)
+		if !signed {
+			r.Header.Del("X-Signature-Ed25519")
+			r.Header.Del("X-Signature-Timestamp")
+		}
+		w := httptest.NewRecorder()
+		a.webhook(w, r)
+		var result struct {
+			PlainToken string `json:"plain_token"`
+			Signature  string `json:"signature"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.PlainToken != token {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		sig, _ := hex.DecodeString(result.Signature)
+		if !ed25519.Verify(a.private.Public().(ed25519.PublicKey), []byte(ts+token), sig) {
+			t.Fatal("invalid validation signature")
+		}
+		if len(a.queue) != 0 || len(a.replays) != 0 || len(a.messages) != 0 {
+			t.Fatal("challenge changed business message state")
+		}
+	}
+}
+
+func TestChallengeRejectsInvalidTokenTimeAppAndSize(t *testing.T) {
+	for _, mode := range []string{"empty", "large_token", "json_token", "space", "control", "unicode", "old", "future", "invalid_time", "invalid_data", "app", "size"} {
+		t.Run(mode, func(t *testing.T) {
+			a := testAdapter(t)
+			token, timestamp := "challenge", strconv.FormatInt(a.now().Unix(), 10)
+			want := http.StatusBadRequest
+			switch mode {
+			case "empty":
+				token = ""
+			case "large_token":
+				token = strings.Repeat("a", 4097)
+			case "json_token":
+				token = string(eventBody(a, "forged", "GROUP_AT_MESSAGE_CREATE", "admin", "hello"))
+			case "space":
+				token = "two words"
+			case "control":
+				token = "a\nb"
+			case "unicode":
+				token = "令牌"
+			case "old":
+				timestamp = strconv.FormatInt(a.now().Add(-6*time.Minute).Unix(), 10)
+			case "future":
+				timestamp = strconv.FormatInt(a.now().Add(2*time.Minute).Unix(), 10)
+			case "invalid_time":
+				timestamp = "not-a-time"
+			case "app":
+				want = http.StatusUnauthorized
+			case "size":
+				a.cfg.RequestLimit = 2
+				want = http.StatusRequestEntityTooLarge
+			}
+			body, _ := json.Marshal(map[string]any{"op": 13, "d": map[string]string{"plain_token": token, "event_ts": timestamp}})
+			if mode == "invalid_data" {
+				body = []byte(`{"op":13,"d":[]}`)
+			}
+			r := httptest.NewRequest(http.MethodPost, "http://localhost/qq", strings.NewReader(string(body)))
+			r.Header.Set("X-Bot-Appid", a.cfg.AppID)
+			if mode == "app" {
+				r.Header.Set("X-Bot-Appid", "other")
+			}
+			w := httptest.NewRecorder()
+			a.webhook(w, r)
+			if w.Code != want || strings.Contains(w.Body.String(), `"signature"`) || len(a.queue) != 0 || len(a.replays) != 0 || len(a.messages) != 0 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestChallengeSignatureCannotAuthenticateBusinessEvent(t *testing.T) {
 	a := testAdapter(t)
 	ts := strconv.FormatInt(a.now().Unix(), 10)
 	body := []byte(`{"op":13,"d":{"plain_token":"challenge","event_ts":"` + ts + `"}}`)
-	unsigned := request(a, body)
-	unsigned.Header.Del("X-Signature-Ed25519")
-	denied := httptest.NewRecorder()
-	a.webhook(denied, unsigned)
-	if denied.Code != http.StatusUnauthorized || strings.Contains(denied.Body.String(), "signature\":") {
-		t.Fatal("unsigned challenge received a signature", denied.Code, denied.Body)
-	}
+	r := httptest.NewRequest(http.MethodPost, "http://localhost/qq", strings.NewReader(string(body)))
+	r.Header.Set("X-Bot-Appid", a.cfg.AppID)
 	w := httptest.NewRecorder()
-	a.webhook(w, request(a, body))
-	var result struct {
-		PlainToken string `json:"plain_token"`
-		Signature  string `json:"signature"`
+	a.webhook(w, r)
+	var challenge struct {
+		Signature string `json:"signature"`
 	}
-	if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.PlainToken != "challenge" {
-		t.Fatal(w.Body.String())
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &challenge) != nil {
+		t.Fatal(w.Code, w.Body.String())
 	}
-	sig, _ := hex.DecodeString(result.Signature)
-	if !ed25519.Verify(a.private.Public().(ed25519.PublicKey), []byte(ts+"challenge"), sig) {
-		t.Fatal("invalid validation signature")
-	}
+	forged := request(a, eventBody(a, "forged", "GROUP_AT_MESSAGE_CREATE", "admin", "hello"))
+	forged.Header.Set("X-Signature-Timestamp", ts)
+	forged.Header.Set("X-Signature-Ed25519", challenge.Signature)
 	w = httptest.NewRecorder()
+	a.webhook(w, forged)
+	if w.Code != http.StatusUnauthorized || len(a.queue) != 0 {
+		t.Fatal("challenge signature accepted for business event", w.Code)
+	}
+}
+
+func TestSignedHeartbeat(t *testing.T) {
+	a := testAdapter(t)
+	w := httptest.NewRecorder()
 	a.webhook(w, request(a, []byte(`{"op":1,"d":42}`)))
 	if strings.TrimSpace(w.Body.String()) != `{"op":11,"d":42}` {
 		t.Fatal(w.Body.String())

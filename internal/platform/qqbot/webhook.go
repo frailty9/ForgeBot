@@ -56,6 +56,20 @@ func (a *Adapter) validTimestamp(timestamp string) bool {
 	return age >= -time.Minute && age <= 5*time.Minute
 }
 
+// validChallengeToken 将未签名挑战限制为令牌文本，不能借此为业务事件 JSON 签名。
+func validChallengeToken(token string) bool {
+	if len(token) == 0 || len(token) > 4096 {
+		return false
+	}
+	for _, ch := range token {
+		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.ContainsRune("-_+/=", ch) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (a *Adapter) webhook(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if r.Header.Get("X-Bot-Appid") != a.cfg.AppID {
@@ -73,25 +87,25 @@ func (a *Adapter) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	// 包括 op=13 在内的每次回调都必须先验签；否则挑战接口会变成
-	// 对任意 timestamp+body 签名的入口，可被用于伪造管理员事件。
-	timestamp := r.Header.Get("X-Signature-Timestamp")
-	signature, err := hex.DecodeString(r.Header.Get("X-Signature-Ed25519"))
-	if err != nil || len(signature) != ed25519.SignatureSize || !a.validTimestamp(timestamp) || !ed25519.Verify(a.private.Public().(ed25519.PublicKey), append([]byte(timestamp), body...), signature) {
-		http.Error(w, "invalid signature", http.StatusUnauthorized)
-		return
-	}
+	// op=13 是开放平台验证回调地址的挑战，可不带签名头。
+	// 只签有界令牌，不分发事件；业务事件仍必须通过下面的原始体验签。
 	if envelope.Op == 13 {
 		var challenge struct {
 			PlainToken string `json:"plain_token"`
 			Timestamp  string `json:"event_ts"`
 		}
-		if json.Unmarshal(envelope.Data, &challenge) != nil || challenge.PlainToken == "" || len(challenge.PlainToken) > 4096 || !a.validTimestamp(challenge.Timestamp) {
+		if json.Unmarshal(envelope.Data, &challenge) != nil || !validChallengeToken(challenge.PlainToken) || !a.validTimestamp(challenge.Timestamp) {
 			http.Error(w, "invalid challenge", http.StatusBadRequest)
 			return
 		}
 		signature := hex.EncodeToString(ed25519.Sign(a.private, []byte(challenge.Timestamp+challenge.PlainToken)))
 		_ = json.NewEncoder(w).Encode(map[string]string{"plain_token": challenge.PlainToken, "signature": signature})
+		return
+	}
+	timestamp := r.Header.Get("X-Signature-Timestamp")
+	signature, err := hex.DecodeString(r.Header.Get("X-Signature-Ed25519"))
+	if err != nil || len(signature) != ed25519.SignatureSize || !a.validTimestamp(timestamp) || !ed25519.Verify(a.private.Public().(ed25519.PublicKey), append([]byte(timestamp), body...), signature) {
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
 	if envelope.Op == 1 {
