@@ -27,6 +27,11 @@ func (m *Manager) groupPolicy(id string) group.ReviewTarget {
 func (m *Manager) HandleGroupEvent(ctx context.Context, event group.Event) (group.EventResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	// 与入站消息共用换代屏障：候选连接器已启动但尚未发布时，事件不能落到旧代。
+	if err := m.readRoute(ctx); err != nil {
+		return group.EventResult{Verdict: "canceled"}, err
+	}
+	defer m.routeMu.RUnlock()
 	g := m.acquire()
 	if g == nil {
 		return group.EventResult{}, operation.New(operation.Unavailable, "runtime is unavailable")

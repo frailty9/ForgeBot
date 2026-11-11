@@ -354,16 +354,19 @@ type Manager struct {
 	retiring <-chan struct{}
 	applyMu  sync.Mutex
 	routeMu  sync.RWMutex
-	statusMu sync.RWMutex
-	current  atomic.Pointer[generation]
-	snapshot atomic.Pointer[config.Snapshot]
-	builder  Builder
-	status   Status
-	started  bool
-	runCtx   context.Context
-	errors   chan error
-	operator operations.Service
-	paused   atomic.Bool
+	// routeGate 在路由写锁持有期间非空，释放时关闭，等待者据此唤醒而不是轮询。
+	gateMu    sync.Mutex
+	routeGate chan struct{}
+	statusMu  sync.RWMutex
+	current   atomic.Pointer[generation]
+	snapshot  atomic.Pointer[config.Snapshot]
+	builder   Builder
+	status    Status
+	started   bool
+	runCtx    context.Context
+	errors    chan error
+	operator  operations.Service
+	paused    atomic.Bool
 }
 
 type generation struct {
@@ -839,8 +842,7 @@ func (m *Manager) Restart(ctx context.Context, reason string) error {
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
-	m.routeMu.Lock()
-	defer m.routeMu.Unlock()
+	defer m.lockRoute()()
 	old := m.current.Load()
 	if old == nil {
 		return nil
@@ -883,17 +885,50 @@ func (m *Manager) ReloadSearch(ctx context.Context, source string) (searchcontra
 	return result, nil
 }
 
-func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
-	// Webhook 工作者可能在连接器换代屏障外等待；Stop 取消它时必须能退出，
-	// 不能阻塞在 RLock 后让持写锁的换代反过来等待这个工作者。
+// lockRoute 独占连接器换代屏障，返回释放函数；释放时唤醒所有等待者。
+func (m *Manager) lockRoute() func() {
+	gate := make(chan struct{})
+	m.gateMu.Lock()
+	m.routeGate = gate
+	m.gateMu.Unlock()
+	m.routeMu.Lock()
+	return func() {
+		m.routeMu.Unlock()
+		m.gateMu.Lock()
+		if m.routeGate == gate {
+			m.routeGate = nil
+		}
+		m.gateMu.Unlock()
+		close(gate)
+	}
+}
+
+// readRoute 取得换代屏障的读锁。入站消息和群事件的处理者可能在换代期间等待；
+// 换代要先停止旧连接器，而停止会取消这些等待者，所以这里必须可取消，
+// 不能直接阻塞在 RLock 上让持写锁的换代反过来等待它们。
+func (m *Manager) readRoute(ctx context.Context) error {
 	for !m.routeMu.TryRLock() {
-		timer := time.NewTimer(time.Millisecond)
+		m.gateMu.Lock()
+		gate := m.routeGate
+		m.gateMu.Unlock()
+		var wake <-chan time.Time
+		if gate == nil {
+			// 写锁刚释放、下一位写者尚未登记，短暂让出后重试。
+			wake = time.After(time.Millisecond)
+		}
 		select {
 		case <-ctx.Done():
-			timer.Stop()
-			return platform.HandleResult{Verdict: "canceled"}, ctx.Err()
-		case <-timer.C:
+			return ctx.Err()
+		case <-gate:
+		case <-wake:
 		}
+	}
+	return nil
+}
+
+func (m *Manager) HandleInbound(ctx context.Context, message messaging.InboundMessage) (platform.HandleResult, error) {
+	if err := m.readRoute(ctx); err != nil {
+		return platform.HandleResult{Verdict: "canceled"}, err
 	}
 	defer m.routeMu.RUnlock()
 	generation := m.acquire()
@@ -981,8 +1016,7 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 	// 只在候选成功后调整，不能因候选构建失败破坏当前代的有效状态。
 	connectorsChanged := current.connectors != next.connectors
 	if connectorsChanged && m.started {
-		m.routeMu.Lock()
-		defer m.routeMu.Unlock()
+		defer m.lockRoute()()
 		stopCtx, cancel := context.WithTimeout(context.Background(), current.snapshot.Static.Server.ShutdownTimeout)
 		stopErr := current.connectors.Stop(stopCtx)
 		cancel()
@@ -1004,8 +1038,13 @@ func (m *Manager) publish(_ context.Context, current, next *generation, persist 
 		var err error
 		published, err = persist()
 		if err != nil {
-			m.rollbackConnectors(current, next, connectorsChanged)
+			restoreErr := m.rollbackConnectors(current, next, connectorsChanged)
 			next.engine.Shutdown(current.snapshot.Static.Server.ShutdownTimeout)
+			if restoreErr != nil {
+				// 旧集合没有恢复时已无可用连接器，必须让调用方和运行状态都知道。
+				m.setStatus(StateDegraded, ActionRestartConnectors, current.snapshot.Version, restoreErr.Error())
+				return config.Snapshot{}, errors.Join(err, fmt.Errorf("restore previous connectors: %w", restoreErr))
+			}
 			return config.Snapshot{}, err
 		}
 		next.snapshot = published.Clone()
@@ -1080,14 +1119,14 @@ func (m *Manager) PublicPlatforms(ctx context.Context, cfg config.RuntimeConfig)
 	return map[string]any{"connectors": connectors, "groups": cfg.Platforms.Groups}, nil
 }
 
-func (m *Manager) rollbackConnectors(current, next *generation, changed bool) {
+func (m *Manager) rollbackConnectors(current, next *generation, changed bool) error {
 	if !changed || !m.started {
-		return
+		return nil
 	}
 	stopCtx, cancel := context.WithTimeout(context.Background(), current.snapshot.Static.Server.ShutdownTimeout)
 	_ = next.connectors.Stop(stopCtx)
 	cancel()
-	_ = current.connectors.Start(m.runCtx, m)
+	return current.connectors.Start(m.runCtx, m)
 }
 
 func (m *Manager) setStatus(state State, action Action, version uint64, message string) {

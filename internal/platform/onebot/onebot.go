@@ -67,6 +67,10 @@ type Adapter struct {
 	done    chan struct{}
 	errors  chan error
 	replay  *replayCache
+	// lifetime 随每次 Start 新建、Stop 时取消。处理上下文不随客户端断开取消，
+	// 但必须随连接器停止取消，否则在换代屏障等待的请求会拖住 Shutdown。
+	lifetime    context.Context
+	endLifetime context.CancelFunc
 }
 
 // New validates configuration and precomputes connector/group prompt suffixes.
@@ -122,6 +126,7 @@ func (a *Adapter) Start(ctx context.Context, handler platform.Handler) error {
 	done := make(chan struct{})
 	a.server = server
 	a.done = done
+	a.lifetime, a.endLifetime = context.WithCancel(ctx)
 	a.serverM.Unlock()
 
 	go func() {
@@ -156,9 +161,13 @@ func (a *Adapter) Stop(ctx context.Context) error {
 	a.serverM.Lock()
 	server := a.server
 	done := a.done
+	endLifetime := a.endLifetime
 	a.serverM.Unlock()
 	if server == nil {
 		return nil
+	}
+	if endLifetime != nil {
+		endLifetime()
 	}
 	if err := server.Shutdown(ctx); err != nil {
 		return err
@@ -218,7 +227,9 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 			if normalized.Kind == group.MemberJoined && !normalized.Self {
 				normalized.UserName = a.sender.memberName(r.Context(), scalar(event.GroupID), normalized.UserID)
 			}
-			result, eventErr := consumer.HandleGroupEvent(context.WithoutCancel(r.Context()), normalized)
+			eventCtx, cancel := a.processingContext(r)
+			result, eventErr := consumer.HandleGroupEvent(eventCtx, normalized)
+			cancel()
 			if eventErr != nil {
 				a.logger.Error("onebot group event failed", "err", eventErr, "kind", normalized.Kind, "conversation_id", normalized.ConversationID)
 			}
@@ -260,7 +271,8 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		// Reverse HTTP clients may cancel their request after a short ACK timeout.
 		// Keep bot/LLM processing alive independently of that transport lifetime.
-		processingCtx := context.WithoutCancel(r.Context())
+		processingCtx, cancel := a.processingContext(r)
+		defer cancel()
 		result, err := handler.HandleInbound(processingCtx, msg)
 		if err != nil {
 			a.logger.ErrorContext(processingCtx, "onebot inbound message failed", "err", err, "message_id", msg.MessageID, "conversation_id", msg.ConversationID, "verdict", result.Verdict)
@@ -269,6 +281,19 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		writeResponse(w, http.StatusOK, map[string]any{"status": "ok", "retcode": "0", "data": result})
 	}
+}
+
+// processingContext 脱离 HTTP 请求的取消，但绑定当前启动周期；未启动（测试直接调用）时不受周期约束。
+func (a *Adapter) processingContext(r *http.Request) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	a.serverM.Lock()
+	lifetime := a.lifetime
+	a.serverM.Unlock()
+	if lifetime == nil {
+		return ctx, cancel
+	}
+	stop := context.AfterFunc(lifetime, cancel)
+	return ctx, func() { stop(); cancel() }
 }
 
 // resolveMedia turns OneBot file references into content the LLM can access.

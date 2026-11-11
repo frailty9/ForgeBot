@@ -228,19 +228,62 @@ func TestInboundWaitingForConnectorReplacementCanBeCanceled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Shutdown(context.Background())
-	manager.routeMu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { _, err := manager.HandleInbound(ctx, messaging.InboundMessage{}); done <- err }()
-	cancel()
+	for _, kind := range []string{"inbound", "group_event"} {
+		t.Run(kind, func(t *testing.T) {
+			unlock := manager.lockRoute()
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				if kind == "inbound" {
+					_, err = manager.HandleInbound(ctx, messaging.InboundMessage{})
+				} else {
+					_, err = manager.HandleGroupEvent(ctx, group.Event{Kind: group.MemberJoined})
+				}
+				done <- err
+			}()
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				unlock()
+				t.Fatal("canceled request remained blocked on replacement")
+			}
+			unlock()
+		})
+	}
+}
+
+func TestRouteBarrierWakesWaitersOnRelease(t *testing.T) {
+	manager, err := NewManager(context.Background(), testSnapshot(), Builder{Sender: registeredSender(t).registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	unlock := manager.lockRoute()
+	acquired := make(chan error, 1)
+	go func() {
+		err := manager.readRoute(context.Background())
+		if err == nil {
+			manager.routeMu.RUnlock()
+		}
+		acquired <- err
+	}()
 	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
+	case <-acquired:
+		t.Fatal("reader passed an exclusive barrier")
+	case <-time.After(20 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case err := <-acquired:
+		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		manager.routeMu.Unlock()
-		t.Fatal("canceled inbound remained blocked on replacement")
+		t.Fatal("waiter was not woken after release")
 	}
-	manager.routeMu.Unlock()
 }
