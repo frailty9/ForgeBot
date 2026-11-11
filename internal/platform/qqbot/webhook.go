@@ -78,7 +78,8 @@ func validChallengeToken(token string) bool {
 
 func (a *Adapter) webhook(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	if r.Header.Get("X-Bot-Appid") != a.cfg.AppID {
+	// 平台或反向代理可能不带 X-Bot-Appid；来源由 Ed25519 签名证明，头只用于拒绝明确错投的请求。
+	if appID := r.Header.Get("X-Bot-Appid"); appID != "" && appID != a.cfg.AppID {
 		http.Error(w, "invalid app", http.StatusUnauthorized)
 		return
 	}
@@ -151,8 +152,15 @@ func (a *Adapter) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(a.replays) >= a.cfg.ReplayMax {
-		dispatchACK(w, false)
-		return
+		// 满额时淘汰最早到期的标记，不能让去重容量本身阻断新消息。
+		oldestKey := ""
+		var oldest time.Time
+		for candidate, until := range a.replays {
+			if oldestKey == "" || until.Before(oldest) {
+				oldestKey, oldest = candidate, until
+			}
+		}
+		delete(a.replays, oldestKey)
 	}
 	// 引用索引由平台给出，与消息 ID 分开。只使用同群已见过的对应关系。
 	ref := ""
@@ -203,7 +211,11 @@ func (a *Adapter) inbound(data groupMessage, binding Group, mentioned bool) (mes
 		userID = data.Author.ID
 	}
 	at, err := time.Parse(time.RFC3339Nano, data.Timestamp)
-	if err != nil || userID == "" {
+	if err != nil {
+		// 时间仅用于记录与被动回复窗口；格式异常不应让平台反复重投同一条消息。
+		at = a.now()
+	}
+	if userID == "" {
 		return messaging.InboundMessage{}, messageMeta{}, false
 	}
 	role := "member"

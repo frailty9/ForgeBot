@@ -24,17 +24,18 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml
 | `webhook_addr`、`webhook_path` | 必填，本地 HTTP 监听地址及以 `/` 开头的路径，建议 `127.0.0.1:18091`、`/qqbot` |
 | `timeout` | 平台请求超时，默认 15s，必须为正 |
 | `request_limit` | 入站请求字节上限，默认 1MiB，范围 1..8MiB |
-| `replay_ttl`、`replay_max` | 已接收消息去重时长/容量，默认 5m、10000；容量范围 1..100000 |
+| `replay_ttl`、`replay_max` | 已接收消息去重时长/容量，默认 5m、10000；容量范围 1..100000。满额时淘汰最早到期的标记，不拒收新消息 |
+| `sandbox` | 默认 `false`；`true` 时 OpenAPI 改用开放平台沙箱地址，供尚未上线的机器人在沙箱群测试。Token 地址不变 |
 
 `init` 直接复用唯一的 `runtime.example.json` 生成部署文件，列全字段并保持 `native.qqbot` 模块和 QQ connector 默认关闭；填好参数并绑定 `group_openid` 后，再同时启用模块和连接器。仅打开模块不会自动绑定群。
 
-模块 options 只接受空对象，账号配置放在每个 connector 实例中；不提供第二套模块默认值。未知字段严格报错。API/Token 地址固定使用官方 HTTPS 地址，不对部署配置开放自定义地址。
+模块 options 只接受空对象，账号配置放在每个 connector 实例中；不提供第二套模块默认值。未知字段严格报错。Token 固定从 `https://bots.qq.com/app/getAppAccessToken` 获取，OpenAPI 使用 `https://api.sgroup.qq.com`（`sandbox: true` 时为 `https://sandbox.api.sgroup.qq.com`），不对部署配置开放任意地址。Token 响应缺少 `expires_in` 时按官方默认 7200 秒处理。
 
 ## 配置公开回调
 
 由反向代理将公开 HTTPS 路径转发到 `webhook_addr` 和 `webhook_path`。保持原始请求体、`X-Bot-Appid`、`X-Signature-Ed25519`、`X-Signature-Timestamp`，不要让代理改写 JSON 或重编码正文。平台当前接受的公开端口见官方 Webhook 文档，通常使用 HTTPS 443；本地监听地址可单独选择。
 
-开放平台配置该 HTTPS 回调地址，并监听群 @ 消息；需要普通群消息时按账号权限启用全量消息。所有请求先核对 AppID、请求体大小和 JSON 格式。`op=13` 是回调地址验证，允许不带签名头，按 AppSecret 派生的 Ed25519 密钥签名 `event_ts + plain_token` 后返回，不分发消息、不改变去重或引用缓存。其他回调仍必须按原始 `timestamp + body` 验签。
+开放平台配置该 HTTPS 回调地址，并监听群 @ 消息；需要普通群消息时按账号权限启用全量消息。所有请求先核对请求体大小和 JSON 格式；带 `X-Bot-Appid` 头时必须与 `app_id` 一致，不带该头的请求（部分代理会去掉）照常处理，来源由签名证明。`op=13` 是回调地址验证，允许不带签名头，按 AppSecret 派生的 Ed25519 密钥签名 `event_ts + plain_token` 后返回，不分发消息、不改变去重或引用缓存。其他回调仍必须按原始 `timestamp + body` 验签。
 
 挑战的 `event_ts` 和业务签名时间均只接受过去 5 分钟至未来 1 分钟，部署机器应保持时间同步。挑战令牌限定为 1..4096 字节的 ASCII 字母、数字及 `-_+/=`，不接受 JSON、空白和控制字符，防止验证接口被用于签署业务事件。这是本地约束，实际开放平台回调仍需验收；不为兼容挑战而放宽业务验签。
 
@@ -49,7 +50,8 @@ go run ./cmd/forgebot -config configs/forgebot.local.yaml
 | 群角色 | 使用官方 `member_role` 的 owner/admin；缺失或未知角色视为普通成员 |
 | 入站媒体 | 图片/视频/语音/文件附件映射为 Core 媒体；兼容无协议头地址及缺失 MIME 的图片，是否交给模型仍由 `llm.image_understanding` 决定 |
 | 引用 | 有界记录 `msg_idx/ref_msg_idx` 与真实消息 ID 的同群映射；未知或已经移出的映射不猜 ID，不额外调用远端取原文 |
-| 被动文本回复 | 带触发消息 ID，5 分钟内最多 5 次；进度提示也占次数，`msg_seq` 递增，无自动重试 |
+| 被动文本回复 | 带触发消息 ID，5 分钟内最多 5 次；进度提示也占次数，`msg_seq` 递增。已知引用索引时附带 `message_reference`；平台因引用失效以 4xx 拒绝时，去掉引用用同一 `msg_seq` 再发一次，其余失败不重试 |
+| 消息时间 | 使用事件 `timestamp`；格式异常时取接收时间，不因此拒收或要求平台重投 |
 | 协议内部消息索引 | 官方发送响应的消息 ID 与 `ext_info.ref_idx` 只保存在适配器内部用于引用/撤回，不返回通用回执，也不补写 Core history 的 Bot 消息 ID |
 | 撤回 | 实现宿主可调用能力的协议操作，按消息 ID 直接请求官方 API；不要求适配器缓存有该 ID，不在本地加两分钟闸门，真实账号权限/平台限制由返回结果确认 |
 | 主动发送、欢迎语和运维通知 | 首期仅被动回复，无触发依据时返回 unsupported，不自动消耗主动消息额度 |

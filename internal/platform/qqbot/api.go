@@ -26,7 +26,7 @@ func (a *Adapter) accessToken(ctx context.Context) (string, error) {
 		return a.token, nil
 	}
 	body, _ := json.Marshal(map[string]string{"appId": a.cfg.AppID, "clientSecret": a.cfg.Secret})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.apiBase+"/app/getAppAccessToken", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL, bytes.NewReader(body))
 	if err != nil {
 		return "", operation.New(operation.Invalid, "invalid QQ token request")
 	}
@@ -50,10 +50,14 @@ func (a *Adapter) accessToken(ctx context.Context) (string, error) {
 	if json.Unmarshal(data, &result) != nil || result.Token == "" {
 		return "", operation.New(operation.Unauthenticated, "QQ access token is unavailable")
 	}
-	lifetime := strings.Trim(string(result.Expires), "\"")
-	seconds, err := strconv.ParseInt(lifetime, 10, 64)
-	if err != nil || seconds <= 0 || seconds > 86400 {
-		return "", operation.New(operation.Invalid, "invalid QQ token lifetime")
+	// 平台以字符串秒数返回有效期；缺失时按官方默认的 7200 秒处理。
+	seconds := int64(7200)
+	if lifetime := strings.Trim(string(result.Expires), "\""); lifetime != "" && lifetime != "null" {
+		parsed, err := strconv.ParseInt(lifetime, 10, 64)
+		if err != nil || parsed <= 0 || parsed > 86400 {
+			return "", operation.New(operation.Invalid, "invalid QQ token lifetime")
+		}
+		seconds = parsed
 	}
 	a.token, a.tokenExpires = result.Token, a.now().Add(time.Duration(seconds)*time.Second)
 	return a.token, nil
@@ -163,7 +167,18 @@ func (a *Adapter) SendTo(ctx context.Context, target string, message messaging.O
 			RefIndex string `json:"ref_idx"`
 		} `json:"ext_info"`
 	}
-	if err := a.api(ctx, http.MethodPost, "/v2/groups/"+url.PathEscape(target)+"/messages", payload, &result); err != nil {
+	path := "/v2/groups/" + url.PathEscape(target) + "/messages"
+	err := a.api(ctx, http.MethodPost, path, payload, &result)
+	// 引用只是展示；原消息被撤回或索引失效时平台以 4xx 拒绝，去掉引用后用同一 msg_seq 再发一次。
+	// 被动回复超时/超限不在此列，重发也不会成功。
+	if _, quoted := payload["message_reference"]; quoted && err != nil {
+		code := operation.Describe(err).Code
+		if code == operation.Invalid || code == operation.NotFound {
+			delete(payload, "message_reference")
+			err = a.api(ctx, http.MethodPost, path, payload, &result)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	if result.ID != "" {

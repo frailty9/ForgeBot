@@ -261,9 +261,14 @@ func TestQueueFullDoesNotClaimEventAndCapacityIsBounded(t *testing.T) {
 	<-a.queue
 	dispatch(t, a, eventBody(a, "second", "GROUP_MESSAGE_CREATE", "member", "second"), 0)
 	<-a.queue
-	dispatch(t, a, eventBody(a, "third", "GROUP_MESSAGE_CREATE", "member", "third"), 1)
+	// 去重容量满时淘汰最早到期的标记并照常接收，容量本身不能阻断新消息。
+	dispatch(t, a, eventBody(a, "third", "GROUP_MESSAGE_CREATE", "member", "third"), 0)
+	<-a.queue
 	if len(a.replays) > 2 || len(a.messages) > 2 {
 		t.Fatal("unbounded caches")
+	}
+	if _, kept := a.replays[messageKey("group", "first")]; kept {
+		t.Fatal("oldest replay mark was not evicted")
 	}
 }
 

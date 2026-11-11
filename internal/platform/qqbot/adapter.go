@@ -24,7 +24,9 @@ type Config struct {
 	Timeout, ReplayTTL                                        time.Duration
 	RequestLimit                                              int64
 	ReplayMax                                                 int
-	Groups                                                    map[string]Group
+	// Sandbox 使用开放平台沙箱 OpenAPI，供尚未上线的机器人在沙箱群测试。
+	Sandbox bool
+	Groups  map[string]Group
 }
 
 type messageMeta struct {
@@ -38,6 +40,7 @@ type Adapter struct {
 	cfg        Config
 	logger     *slog.Logger
 	client     *http.Client
+	tokenURL   string
 	apiBase    string
 	private    ed25519.PrivateKey
 	now        func() time.Time
@@ -76,8 +79,12 @@ func New(cfg Config, logger *slog.Logger) (*Adapter, error) {
 	for len(seed) < ed25519.SeedSize {
 		seed += seed
 	}
+	apiBase := "https://api.sgroup.qq.com"
+	if cfg.Sandbox {
+		apiBase = "https://sandbox.api.sgroup.qq.com"
+	}
 	return &Adapter{cfg: cfg, logger: logger, client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		apiBase: "https://api.bot.qq.com", private: ed25519.NewKeyFromSeed([]byte(seed[:ed25519.SeedSize])), now: time.Now, errors: make(chan error, 1), replays: map[string]time.Time{}, messages: map[string]messageMeta{}}, nil
+		tokenURL: "https://bots.qq.com/app/getAppAccessToken", apiBase: apiBase, private: ed25519.NewKeyFromSeed([]byte(seed[:ed25519.SeedSize])), now: time.Now, errors: make(chan error, 1), replays: map[string]time.Time{}, messages: map[string]messageMeta{}}, nil
 }
 
 func (a *Adapter) ID() string                       { return a.cfg.ID }
@@ -158,13 +165,12 @@ func (a *Adapter) Stop(ctx context.Context) error {
 	if err != nil {
 		_ = a.server.Close()
 	}
+	// 监听已关闭、工作者已取消；即使等待超时也释放句柄，否则恢复旧集合时 Start 会误判“已启动”。
+	a.server, a.listener, a.cancel = nil, nil, nil
 	done := make(chan struct{})
 	go func() { a.wg.Wait(); close(done) }()
 	select {
 	case <-done:
-		a.server = nil
-		a.listener = nil
-		a.cancel = nil
 		return err
 	case <-ctx.Done():
 		return ctx.Err()

@@ -65,7 +65,8 @@
           "timeout": "15s",
           "request_limit": 1048576,
           "replay_ttl": "5m",
-          "replay_max": 10000
+          "replay_max": 10000,
+          "sandbox": false
         }
       },
       {

@@ -61,6 +61,7 @@ type options struct {
 	RequestLimit int64  `json:"request_limit,omitempty"`
 	ReplayTTL    string `json:"replay_ttl,omitempty"`
 	ReplayMax    int    `json:"replay_max,omitempty"`
+	Sandbox      bool   `json:"sandbox,omitempty"`
 }
 
 func parse(raw json.RawMessage) (options, error) {
@@ -115,7 +116,7 @@ func (provider) PublicOptions(_ json.RawMessage, raw json.RawMessage) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"app_id": o.AppID, "secret_configured": o.SecretRef != "", "webhook_addr": o.WebhookAddr, "webhook_path": o.WebhookPath, "timeout": o.Timeout, "request_limit": o.RequestLimit, "replay_ttl": o.ReplayTTL, "replay_max": o.ReplayMax}, nil
+	return map[string]any{"app_id": o.AppID, "secret_configured": o.SecretRef != "", "webhook_addr": o.WebhookAddr, "webhook_path": o.WebhookPath, "timeout": o.Timeout, "request_limit": o.RequestLimit, "replay_ttl": o.ReplayTTL, "replay_max": o.ReplayMax, "sandbox": o.Sandbox}, nil
 }
 func (provider) CredentialRefs(_ json.RawMessage, raw json.RawMessage) ([]string, error) {
 	o, err := parse(raw)
@@ -132,5 +133,5 @@ func (p provider) Build(_ context.Context, r platform.ConnectorBuildRequest) (pl
 	for _, b := range r.Bindings {
 		groups[b.Target] = adapter.Group{ConversationID: b.ConversationID, PromptSuffix: b.PromptSuffix}
 	}
-	return adapter.New(adapter.Config{ID: r.ConnectorID, AppID: o.AppID, Secret: r.Credentials[o.SecretRef], WebhookAddr: o.WebhookAddr, WebhookPath: o.WebhookPath, Timeout: timeout, RequestLimit: o.RequestLimit, ReplayTTL: ttl, ReplayMax: o.ReplayMax, Groups: groups, PromptSuffix: r.PromptSuffix}, r.Logger)
+	return adapter.New(adapter.Config{ID: r.ConnectorID, AppID: o.AppID, Secret: r.Credentials[o.SecretRef], WebhookAddr: o.WebhookAddr, WebhookPath: o.WebhookPath, Timeout: timeout, RequestLimit: o.RequestLimit, ReplayTTL: ttl, ReplayMax: o.ReplayMax, Sandbox: o.Sandbox, Groups: groups, PromptSuffix: r.PromptSuffix}, r.Logger)
 }
