@@ -27,6 +27,11 @@ func TestProviderValidationCredentialsAndPublicOptions(t *testing.T) {
 	}
 	for _, invalid := range []string{
 		`{}`, `null`, `{"token_ref":"key","mode":"webhook"}`,
+		`{"token_ref":"key","mode":"other"}`,
+		`{"token_ref":"key","mode":"webhook","webhook_url":"http://bot.example.com/tg","webhook_addr":"127.0.0.1:0","webhook_path":"/tg","webhook_secret_ref":"tg/hook"}`,
+		`{"token_ref":"key","mode":"webhook","webhook_url":"https://bot.example.com:9000/tg","webhook_addr":"127.0.0.1:0","webhook_path":"/tg","webhook_secret_ref":"tg/hook"}`,
+		`{"token_ref":"key","mode":"webhook","webhook_url":"https://bot.example.com/tg","webhook_addr":"127.0.0.1:0","webhook_path":"/tg","webhook_secret_ref":"key"}`,
+		`{"token_ref":"key","mode":"long_polling","webhook_url":"not a url"}`,
 		`{"token_ref":"key","mode":"long_polling","timeout":"0s"}`,
 		`{"token_ref":"key","mode":"long_polling","token":"secret"}`,
 		`{"token_ref":"../key","mode":"long_polling"}`,
@@ -52,5 +57,35 @@ func TestProviderValidationCredentialsAndPublicOptions(t *testing.T) {
 	adapter, err := p.Build(context.Background(), request)
 	if err != nil || adapter.ID() != "telegram" || (Factory{}).Descriptor().DefaultEnabled {
 		t.Fatal(adapter, err)
+	}
+}
+
+func TestWebhookModeDeclaresOnlyItsCredentials(t *testing.T) {
+	p := provider{}
+	bindings := []platform.ConnectorBinding{{ConversationID: "support", Target: "-100"}}
+	webhook := json.RawMessage(`{"token_ref":"tg/token","mode":"webhook","webhook_url":"https://bot.example.com/tg","webhook_addr":"127.0.0.1:0","webhook_path":"/tg","webhook_secret_ref":"tg/hook"}`)
+	polling := json.RawMessage(`{"token_ref":"tg/token","mode":"long_polling","webhook_url":"https://bot.example.com/tg","webhook_addr":"127.0.0.1:0","webhook_path":"/tg","webhook_secret_ref":"tg/hook"}`)
+	for raw, want := range map[string]string{string(webhook): "tg/token,tg/hook", string(polling): "tg/token"} {
+		refs, err := p.CredentialRefs(nil, json.RawMessage(raw))
+		if err != nil || strings.Join(refs, ",") != want {
+			t.Fatal(refs, err)
+		}
+		if err := p.ValidateOptions(nil, json.RawMessage(raw), bindings); err != nil {
+			t.Fatal(err)
+		}
+	}
+	public, _ := p.PublicOptions(nil, webhook)
+	data, _ := json.Marshal(public)
+	if strings.Contains(string(data), "tg/hook") || !strings.Contains(string(data), `"webhook_secret_configured":true`) {
+		t.Fatal(string(data))
+	}
+	request := platform.ConnectorBuildRequest{ConnectorID: "telegram", ConnectorOptions: webhook, Bindings: bindings,
+		Credentials: map[string]string{"tg/token": "123:test-token", "tg/hook": "bad secret"}}
+	if _, err := p.Build(context.Background(), request); err == nil {
+		t.Fatal("invalid webhook secret accepted")
+	}
+	request.Credentials["tg/hook"] = "valid_secret-1"
+	if _, err := p.Build(context.Background(), request); err != nil {
+		t.Fatal(err)
 	}
 }

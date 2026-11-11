@@ -35,8 +35,8 @@
 | --- | --- |
 | `platforms.connectors[].id` `type` `enabled` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms) |
 | `platforms.connectors[].options`（OneBot：`api_url` `send_token` `receive_secret` `webhook_addr` `webhook_path` `request_limit` `timeout` `replay_ttl` `replay_max`） | [配置手册 §5.6](configuration.md#56-platforms)，旧写法迁移见该节“OneBot 配置迁移” |
-| `platforms.connectors[].options`（Telegram：`token_ref` `mode` `timeout`） | [Telegram 群聊接入](telegram.md)，当前只接受 long_polling；[完整示例](../configs/runtime.example.json) |
 | `platforms.connectors[].options`（QQ 官方：`app_id` `secret_ref` `webhook_addr` `webhook_path` `timeout` `request_limit` `replay_ttl` `replay_max` `sandbox`） | [QQ 官方机器人接入](qqbot.md)，`target` 使用 group_openid；[完整示例](../configs/runtime.example.json) |
+| `platforms.connectors[].options`（Telegram：`token_ref` `mode` `timeout` `webhook_url` `webhook_addr` `webhook_path` `webhook_secret_ref`） | [Telegram 群聊接入](telegram.md)，`mode` 为 long_polling 或 webhook；[完整示例](../configs/runtime.example.json) |
 | `platforms.groups[].id` `connector_id` `target` `prompt_suffix` | [配置手册 §5.6](configuration.md#56-platforms)、[群管理：先把群绑定到 Bot](group-management.md#先把群绑定到-bot) |
 | `operator.conversation_id` `operator.notifications` `operator.commands` | [配置手册 §5.7](configuration.md#57-operator) |
 

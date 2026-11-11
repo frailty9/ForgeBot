@@ -42,36 +42,45 @@ func wait(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-// accept 在入队与记账间持锁；等待队列/记账空间时释放锁，Stop 始终能够取消。
+// tryAccept 原子完成去重检查、入队与记账；队列或去重容量满时不留任何标记并返回 false。
+// 已停止的接收器一律拒绝，Webhook 据此回 503 交平台重投。
+func (a *Adapter) tryAccept(r *receiver, item update) bool {
+	if r.ctx.Err() != nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.now()
+	for id, until := range a.replays {
+		if !until.After(now) {
+			delete(a.replays, id)
+		}
+	}
+	_, seen := a.replays[item.ID]
+	accepted := seen || item.Message == nil && item.Membership == nil
+	if !accepted && len(a.replays) < 10000 {
+		select {
+		case r.queue <- item:
+			a.replays[item.ID] = now.Add(5 * time.Minute)
+			accepted = true
+		default:
+		}
+	}
+	if accepted {
+		if next := item.ID + 1; next > a.offset {
+			a.offset = next
+		}
+	}
+	return accepted
+}
+
+// accept 供长轮询使用：等待队列/记账空间时不持锁，Stop 始终能够取消。
 func (a *Adapter) accept(ctx context.Context, r *receiver, item update) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		a.mu.Lock()
-		now := a.now()
-		for id, until := range a.replays {
-			if !until.After(now) {
-				delete(a.replays, id)
-			}
-		}
-		_, seen := a.replays[item.ID]
-		accepted := seen || item.Message == nil && item.Membership == nil
-		if !accepted && len(a.replays) < 10000 {
-			select {
-			case r.queue <- item:
-				a.replays[item.ID] = now.Add(5 * time.Minute)
-				accepted = true
-			default:
-			}
-		}
-		if accepted {
-			if next := item.ID + 1; next > a.offset {
-				a.offset = next
-			}
-		}
-		a.mu.Unlock()
-		if accepted {
+		if a.tryAccept(r, item) {
 			return nil
 		}
 		if err := wait(ctx, 10*time.Millisecond); err != nil {

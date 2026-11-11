@@ -70,7 +70,7 @@ func TestTelegramCatalogDeclaresOnlyImplementedCapabilities(t *testing.T) {
 		if entry.Kind == "group" {
 			found = true
 			support := entry.GroupSupport
-			if support == nil || !support.TextMessages || !support.MessageRecall || support.PassiveRepliesOnly || support.OutboundSegments || support.MemberEvents || support.JoinEvents || support.JoinReview || support.Permission != "unknown" {
+			if support == nil || !support.TextMessages || !support.MessageRecall || support.PassiveRepliesOnly || support.OutboundSegments || !support.MemberEvents || support.JoinEvents || support.JoinReview || support.Permission != "unknown" {
 				t.Fatal(entry)
 			}
 		}

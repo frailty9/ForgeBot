@@ -24,7 +24,7 @@ func response(status int, body string) *http.Response {
 
 func testAdapter(t *testing.T) *Adapter {
 	t.Helper()
-	a, err := New(Config{ID: "telegram", Token: "123:private-token", Timeout: time.Second,
+	a, err := New(Config{ID: "telegram", Token: "123:private-token", Mode: ModeLongPolling, Timeout: time.Second,
 		Groups: map[int64]Group{-100: {ConversationID: "support", PromptSuffix: "group"}}, PromptSuffix: "connector"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

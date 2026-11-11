@@ -62,7 +62,6 @@ func TestInboundBoundGroupsQuotesAndUnsupportedShapes(t *testing.T) {
 		func(m *message) { m.Chat.Type = "channel" },
 		func(m *message) { m.Chat.IsForum = true },
 		func(m *message) { m.IsTopic = true },
-		func(m *message) { m.ThreadID = 1 },
 		func(m *message) { m.Chat.ID = -999 },
 		func(m *message) { m.SenderChat = &m.Chat },
 		func(m *message) { m.From.IsBot = true },
@@ -76,9 +75,9 @@ func TestInboundBoundGroupsQuotesAndUnsupportedShapes(t *testing.T) {
 		}
 	}
 	m = testMessage()
-	m.Photo = []json.RawMessage{json.RawMessage(`{"file_id":"photo"}`)}
-	if _, _, err := a.inbound(m); operation.Describe(err).Code != operation.Unsupported {
-		t.Fatal("media silently lost", err)
+	m.Photo = []photoSize{{FileID: "huge", Width: 4000, Height: 4000, FileSize: maxImageBytes + 1}}
+	if _, _, err := a.inbound(m); operation.Describe(err).Code != operation.Invalid {
+		t.Fatal("oversized photo silently lost", err)
 	}
 	m = testMessage()
 	m.Date = 0

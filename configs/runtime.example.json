@@ -77,7 +77,11 @@
         "options": {
           "token_ref": "telegram/main",
           "mode": "long_polling",
-          "timeout": "15s"
+          "timeout": "15s",
+          "webhook_url": "https://bot.example.com/telegram",
+          "webhook_addr": "127.0.0.1:18092",
+          "webhook_path": "/telegram",
+          "webhook_secret_ref": "telegram/webhook"
         }
       }
     ],

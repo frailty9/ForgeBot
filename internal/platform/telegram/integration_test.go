@@ -100,7 +100,7 @@ func TestControlledPollingToRuntimeAnswerAndRecall(t *testing.T) {
 		t.Fatal(err, recalled.Load())
 	}
 	support, err := registry.Support(context.Background(), "support")
-	if err != nil || !support.MessageRecall || !support.TextMessages || support.PassiveRepliesOnly || support.OutboundSegments || support.JoinReview || support.MemberEvents || support.JoinEvents {
+	if err != nil || !support.MessageRecall || !support.TextMessages || support.PassiveRepliesOnly || support.OutboundSegments || support.JoinReview || !support.MemberEvents || support.JoinEvents {
 		t.Fatal(support, err)
 	}
 	if _, ok := any(a).(group.Reviewer); ok {

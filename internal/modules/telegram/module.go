@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -56,9 +57,17 @@ func (instance) ExtendedRegistrations() modules.ExtendedRegistrations {
 }
 
 type options struct {
-	TokenRef string `json:"token_ref"`
-	Mode     string `json:"mode"`
-	Timeout  string `json:"timeout,omitempty"`
+	TokenRef         string `json:"token_ref"`
+	Mode             string `json:"mode"`
+	Timeout          string `json:"timeout,omitempty"`
+	WebhookURL       string `json:"webhook_url,omitempty"`
+	WebhookAddr      string `json:"webhook_addr,omitempty"`
+	WebhookPath      string `json:"webhook_path,omitempty"`
+	WebhookSecretRef string `json:"webhook_secret_ref,omitempty"`
+}
+
+func validRef(ref string) bool {
+	return strings.TrimSpace(ref) != "" && !strings.ContainsAny(ref, "\\\r\n\t") && !strings.Contains(ref, "..") && !strings.HasPrefix(ref, "/")
 }
 
 func parse(raw json.RawMessage) (options, error) {
@@ -71,14 +80,34 @@ func parse(raw json.RawMessage) (options, error) {
 	if err := d.Decode(new(any)); err != io.EOF {
 		return o, errors.New("invalid telegram options suffix")
 	}
-	if strings.TrimSpace(o.TokenRef) == "" || strings.ContainsAny(o.TokenRef, "\\\r\n\t") || strings.Contains(o.TokenRef, "..") || strings.HasPrefix(o.TokenRef, "/") {
+	if !validRef(o.TokenRef) {
 		return o, errors.New("telegram requires a valid token_ref")
-	}
-	if o.Mode != "long_polling" {
-		return o, errors.New("telegram mode must be long_polling; webhook is not implemented")
 	}
 	if duration, err := time.ParseDuration(o.Timeout); err != nil || duration <= 0 || duration > time.Duration(1<<63-1)-30*time.Second {
 		return o, errors.New("telegram timeout must be positive and allow a 30s poll budget")
+	}
+	// 长轮询可保留已填写的 webhook 示例值，但填了就必须结构合法，避免切换时才发现错误。
+	webhookSet := o.WebhookURL != "" || o.WebhookAddr != "" || o.WebhookPath != "" || o.WebhookSecretRef != ""
+	switch o.Mode {
+	case adapter.ModeLongPolling:
+		if !webhookSet {
+			return o, nil
+		}
+	case adapter.ModeWebhook:
+	default:
+		return o, errors.New("telegram mode must be long_polling or webhook")
+	}
+	if !adapter.ValidWebhookURL(o.WebhookURL) {
+		return o, errors.New("telegram webhook_url must be a public HTTPS URL on port 443, 80, 88 or 8443")
+	}
+	if _, _, err := net.SplitHostPort(o.WebhookAddr); err != nil {
+		return o, errors.New("invalid telegram webhook_addr")
+	}
+	if !strings.HasPrefix(o.WebhookPath, "/") || strings.ContainsAny(o.WebhookPath, "?# \r\n") {
+		return o, errors.New("telegram webhook_path must be an absolute path")
+	}
+	if !validRef(o.WebhookSecretRef) || o.WebhookSecretRef == o.TokenRef {
+		return o, errors.New("telegram requires a separate valid webhook_secret_ref")
 	}
 	return o, nil
 }
@@ -110,13 +139,18 @@ func (provider) PublicOptions(_ json.RawMessage, raw json.RawMessage) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"token_configured": o.TokenRef != "", "mode": o.Mode, "timeout": o.Timeout}, nil
+	return map[string]any{"token_configured": o.TokenRef != "", "mode": o.Mode, "timeout": o.Timeout,
+		"webhook_url": o.WebhookURL, "webhook_addr": o.WebhookAddr, "webhook_path": o.WebhookPath, "webhook_secret_configured": o.WebhookSecretRef != ""}, nil
 }
 
+// CredentialRefs 只声明当前模式需要的凭据：长轮询不要求 webhook 认证文本已写入。
 func (provider) CredentialRefs(_ json.RawMessage, raw json.RawMessage) ([]string, error) {
 	o, err := parse(raw)
 	if err != nil {
 		return nil, err
+	}
+	if o.Mode == adapter.ModeWebhook {
+		return []string{o.TokenRef, o.WebhookSecretRef}, nil
 	}
 	return []string{o.TokenRef}, nil
 }
@@ -132,5 +166,9 @@ func (p provider) Build(_ context.Context, r platform.ConnectorBuildRequest) (pl
 		id, _ := strconv.ParseInt(binding.Target, 10, 64)
 		groups[id] = adapter.Group{ConversationID: binding.ConversationID, PromptSuffix: binding.PromptSuffix}
 	}
-	return adapter.New(adapter.Config{ID: r.ConnectorID, Token: r.Credentials[o.TokenRef], Timeout: timeout, Groups: groups, PromptSuffix: r.PromptSuffix}, r.Logger)
+	cfg := adapter.Config{ID: r.ConnectorID, Token: r.Credentials[o.TokenRef], Mode: o.Mode, Timeout: timeout, Groups: groups, PromptSuffix: r.PromptSuffix}
+	if o.Mode == adapter.ModeWebhook {
+		cfg.WebhookURL, cfg.WebhookAddr, cfg.WebhookPath, cfg.WebhookSecret = o.WebhookURL, o.WebhookAddr, o.WebhookPath, r.Credentials[o.WebhookSecretRef]
+	}
+	return adapter.New(cfg, r.Logger)
 }
