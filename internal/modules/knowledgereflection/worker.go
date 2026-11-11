@@ -75,10 +75,14 @@ func (i *instance) scanOnce(ctx context.Context) (processed, retried int, skippe
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	for index, candidate := range batch {
-		if state := i.sessions[candidate.Key]; state != nil {
+		state := i.sessions[candidate.Key]
+		if state != nil {
 			state.processing = false
 		}
 		if errs[index] != nil {
+			if state != nil {
+				state.failures++
+			}
 			retried++
 			i.worker.LastError = errs[index].Error()
 			continue

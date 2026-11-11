@@ -23,8 +23,13 @@ type Record struct {
 	ReplyTo        string `json:"reply_to,omitempty"`
 	// QuotedMessageID/QuotedText 保存适配器已解析的引用原文，不触发额外查询。
 	// 文本沿用容器字符上限；纯值字段保持 Reader 和事件的副本语义。
-	QuotedMessageID string    `json:"quoted_message_id,omitempty"`
-	QuotedText      string    `json:"quoted_text,omitempty"`
+	QuotedMessageID string `json:"quoted_message_id,omitempty"`
+	QuotedText      string `json:"quoted_text,omitempty"`
+	// QuotedFromBot 表示被引用的是本 Bot 的消息；TextTruncated/QuotedTruncated 表示正文超过
+	// max_text_chars 已被截断，消费方不能把它当作完整原文。
+	QuotedFromBot   bool      `json:"quoted_from_bot,omitempty"`
+	TextTruncated   bool      `json:"text_truncated,omitempty"`
+	QuotedTruncated bool      `json:"quoted_truncated,omitempty"`
 	UserID          string    `json:"user_id,omitempty"`
 	UserName        string    `json:"user_name,omitempty"`
 	Role            Role      `json:"role"`

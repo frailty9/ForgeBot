@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,10 +121,20 @@ func TestMissingOrMismatchedQuoteAndKnownBotAreNotQuestions(t *testing.T) {
 	quote := admin("mismatch", "unknown")
 	quote.QuotedMessageID, quote.QuotedText = "different", "not the target"
 	w.Append(quote)
-	w.Append(history.Record{ConversationID: "support", MessageID: "bot", Role: history.RoleBot, Text: "Bot reply"})
-	quote = admin("to-bot", "bot")
-	quote.QuotedMessageID, quote.QuotedText = "bot", "Bot reply"
+	// 生产中 Bot 记录没有平台 ID（FromOutbound），Find 查不到；只能靠连接器标出的发送者排除。
+	w.Append(history.Record{ConversationID: "support", Role: history.RoleBot, Text: "Bot reply"})
+	quote = admin("to-bot", "bot-platform-id")
+	quote.QuotedMessageID, quote.QuotedText, quote.QuotedFromBot = "bot-platform-id", "Bot reply", true
 	w.Append(quote)
+	// 截断标记由容器按 max_text_chars（默认 1000）计算，用真实超长正文触发。
+	long := strings.Repeat("x", 1001)
+	truncated := admin("truncated-quote", "gone")
+	truncated.QuotedMessageID, truncated.QuotedText = "gone", long
+	w.Append(truncated)
+	w.Append(member("long"))
+	cut := admin("cut-answer", "long")
+	cut.Text = long
+	w.Append(cut)
 	command := member("command")
 	command.Command = true
 	w.Append(command)

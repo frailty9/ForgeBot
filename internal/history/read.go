@@ -82,10 +82,10 @@ func (w *Window) Policy() Policy {
 	return w.policy
 }
 
-func truncate(text string, limit int) string {
+func truncate(text string, limit int) (string, bool) {
 	runes := []rune(text)
 	if len(runes) <= limit {
-		return text
+		return text, false
 	}
-	return string(runes[:limit])
+	return string(runes[:limit]), true
 }

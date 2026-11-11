@@ -89,8 +89,8 @@ func (w *Window) Append(record Record) (Record, bool) {
 		}
 	}
 	record.ConversationID, record.Seq, record.At = id, g.nextSeq, now
-	record.Text = truncate(record.Text, w.policy.MaxTextChars)
-	record.QuotedText = truncate(record.QuotedText, w.policy.MaxTextChars)
+	record.Text, record.TextTruncated = truncate(record.Text, w.policy.MaxTextChars)
+	record.QuotedText, record.QuotedTruncated = truncate(record.QuotedText, w.policy.MaxTextChars)
 	g.nextSeq++
 	if over := len(g.records) + 1 - w.policy.MaxMessages; over > 0 {
 		w.evictLocked(id, g, over, EvictCapacity)

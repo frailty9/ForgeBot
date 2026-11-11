@@ -168,7 +168,7 @@ func (a *Adapter) webhook(w http.ResponseWriter, r *http.Request) {
 				message.ReplyToMessageID = known.id
 				for _, element := range data.Elements {
 					if element.Index == ref && element.Content != "" {
-						message.Quoted = &messaging.QuotedMessage{MessageID: known.id, Text: element.Content}
+						message.Quoted = &messaging.QuotedMessage{MessageID: known.id, Text: element.Content, FromSelf: known.bot}
 						break
 					}
 				}

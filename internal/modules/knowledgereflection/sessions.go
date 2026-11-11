@@ -21,6 +21,8 @@ type answerState struct {
 	administrator string
 	closed        bool
 	processing    bool
+	// failures 让持续失败的会话排到新会话之后，避免它们长期占满每批名额。
+	failures int
 }
 
 type processedMark struct {
@@ -64,7 +66,8 @@ func newInstance(options Options, reader history.Reader, processor *pipeline.Pro
 }
 
 func (i *instance) observe(record history.Record) {
-	if !i.allowed[record.ConversationID] || record.Role != history.RoleAdmin || record.Command ||
+	// 已被容器截断的回答不是完整材料，不能作为知识发布。
+	if !i.allowed[record.ConversationID] || record.Role != history.RoleAdmin || record.Command || record.TextTruncated ||
 		record.UserID == "" || record.MessageID == "" || strings.TrimSpace(record.Text) == "" ||
 		utf8.RuneCountInString(record.Text) > i.options.MaxMessageChars {
 		return
@@ -122,11 +125,12 @@ func (i *instance) observe(record history.Record) {
 func (i *instance) question(answer history.Record) (messaging.InboundMessage, bool) {
 	var question messaging.InboundMessage
 	if record, ok := i.reader.Find(answer.ConversationID, answer.ReplyTo); ok {
-		if record.Role != history.RoleMember || record.Command {
+		if record.Role != history.RoleMember || record.Command || record.TextTruncated {
 			return question, false
 		}
 		question = inbound(record)
-	} else if answer.QuotedMessageID == answer.ReplyTo {
+	} else if answer.QuotedMessageID == answer.ReplyTo && !answer.QuotedFromBot && !answer.QuotedTruncated {
+		// Bot 发出的记录没有平台 ID，Find 查不到；只能靠连接器标出的发送者排除 Bot 自己的回答。
 		question = messaging.InboundMessage{ConversationID: answer.ConversationID,
 			MessageID: answer.ReplyTo, Text: answer.QuotedText}
 	}
@@ -244,6 +248,9 @@ func (i *instance) batchLocked(now time.Time) []session.AnswerSession {
 		}
 	}
 	sort.Slice(candidates, func(a, b int) bool {
+		if candidates[a].failures != candidates[b].failures {
+			return candidates[a].failures < candidates[b].failures
+		}
 		if candidates[a].StartedAt.Equal(candidates[b].StartedAt) {
 			return candidates[a].Key < candidates[b].Key
 		}

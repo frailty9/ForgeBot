@@ -237,7 +237,7 @@ func (a *Adapter) webhook(handler platform.Handler) http.HandlerFunc {
 		}
 		msg.Media = a.resolveMedia(r.Context(), msg.Media)
 		if msg.ReplyToMessageID != "" {
-			msg.Quoted = a.resolveQuotedMessage(r.Context(), msg.ReplyToMessageID)
+			msg.Quoted = a.resolveQuotedMessage(r.Context(), msg.ReplyToMessageID, scalar(event.SelfID))
 		}
 		if strings.TrimSpace(msg.Text) == "" && len(msg.Media) == 0 && !msg.Mentioned {
 			a.logger.DebugContext(r.Context(), "onebot message ignored", "reason", "no_supported_content", "message_id", msg.MessageID)
@@ -327,7 +327,7 @@ func (a *Adapter) resolveMedia(ctx context.Context, media []messaging.Media) []m
 	return media
 }
 
-func (a *Adapter) resolveQuotedMessage(ctx context.Context, messageID string) *messaging.QuotedMessage {
+func (a *Adapter) resolveQuotedMessage(ctx context.Context, messageID, selfID string) *messaging.QuotedMessage {
 	payload := map[string]any{"message_id": numericOrString(messageID)}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -357,6 +357,9 @@ func (a *Adapter) resolveQuotedMessage(ctx context.Context, messageID string) *m
 		Data    struct {
 			Message    json.RawMessage `json:"message"`
 			RawMessage string          `json:"raw_message"`
+			Sender     struct {
+				UserID json.RawMessage `json:"user_id"`
+			} `json:"sender"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
@@ -377,7 +380,8 @@ func (a *Adapter) resolveQuotedMessage(ctx context.Context, messageID string) *m
 		return nil
 	}
 	a.logger.DebugContext(ctx, "onebot quoted message resolved", "message_id", messageID, "text_len", len([]rune(text)), "media_count", len(media))
-	return &messaging.QuotedMessage{MessageID: messageID, Text: text, Media: media}
+	fromSelf := selfID != "" && scalar(envelope.Data.Sender.UserID) == selfID
+	return &messaging.QuotedMessage{MessageID: messageID, Text: text, Media: media, FromSelf: fromSelf}
 }
 
 func quotedTextLength(quoted *messaging.QuotedMessage) int {

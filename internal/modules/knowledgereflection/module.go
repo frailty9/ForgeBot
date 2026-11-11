@@ -138,6 +138,10 @@ func validate(options Options, requireConversations bool, catalog conversation.C
 	if options.ScanInterval <= 0 || options.MessageTTL <= 0 || options.QuietWindow <= 0 || options.MaxSessionDuration <= 0 || options.QuietWindow > options.MaxSessionDuration {
 		return errors.New("reflection durations are invalid")
 	}
+	// 会话最晚在最后回答后 quiet_window 到期，再等一个周期才被处理；保留期更短时会话总在处理前过期。
+	if options.MessageTTL < options.QuietWindow+options.ScanInterval {
+		return errors.New("message_ttl must be at least quiet_window + scan_interval")
+	}
 	if options.MaxMessagesPerConversation <= 0 || options.MaxMessagesTotal <= 0 || options.MaxMessageChars <= 0 || options.MaxPairsPerScan <= 0 {
 		return errors.New("reflection limits must be positive")
 	}

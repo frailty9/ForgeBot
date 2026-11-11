@@ -28,6 +28,8 @@ type QuotedMessage struct {
 	MessageID string  `json:"message_id"`
 	Text      string  `json:"text,omitempty"`
 	Media     []Media `json:"media,omitempty"`
+	// FromSelf 由可信连接器按平台发送者判断（被引用的是本 Bot 发出的消息），不从外部输入反序列化。
+	FromSelf bool `json:"-"`
 }
 
 type InboundMessage struct {

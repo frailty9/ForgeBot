@@ -21,6 +21,7 @@ func FromInbound(message messaging.InboundMessage) Record {
 	if message.Quoted != nil && record.ReplyTo != "" && message.Quoted.MessageID == record.ReplyTo {
 		record.QuotedMessageID = message.Quoted.MessageID
 		record.QuotedText = message.Quoted.Text
+		record.QuotedFromBot = message.Quoted.FromSelf
 	}
 	return record
 }
