@@ -25,6 +25,11 @@ type user struct {
 	Role         string `json:"member_role"`
 	Bot          bool   `json:"bot"`
 }
+type mention struct {
+	ID           string `json:"id"`
+	MemberOpenID string `json:"member_openid"`
+	IsYou        bool   `json:"is_you"`
+}
 type attachment struct {
 	URL         string `json:"url"`
 	ContentType string `json:"content_type"`
@@ -35,11 +40,12 @@ type element struct {
 	Content string `json:"content"`
 }
 type groupMessage struct {
-	ID        string `json:"id"`
-	Group     string `json:"group_openid"`
-	Content   string `json:"content"`
-	Timestamp string `json:"timestamp"`
-	Author    user   `json:"author"`
+	ID        string    `json:"id"`
+	Group     string    `json:"group_openid"`
+	Content   string    `json:"content"`
+	Timestamp string    `json:"timestamp"`
+	Author    user      `json:"author"`
+	Mentions  []mention `json:"mentions"`
 	Scene     struct {
 		Ext []string `json:"ext"`
 	} `json:"message_scene"`
@@ -205,6 +211,21 @@ func (a *Adapter) inbound(data groupMessage, binding Group, mentioned bool) (mes
 		role = data.Author.Role
 	}
 	text := strings.TrimSpace(data.Content)
+	// 在同群消息 ID 去重前归一明确 @，避免全量事件先到时吞掉专用 @ 事件。
+	// 只信平台的 is_you，不按正文标签、昵称或其他 Bot 身份猜测当前机器人。
+	for _, target := range data.Mentions {
+		if !target.IsYou {
+			continue
+		}
+		mentioned = true
+		for _, id := range []string{target.ID, target.MemberOpenID} {
+			if id != "" {
+				text = strings.ReplaceAll(text, "<@"+id+">", "")
+				text = strings.ReplaceAll(text, "<@!"+id+">", "")
+			}
+		}
+	}
+	text = strings.TrimSpace(text)
 	message := messaging.InboundMessage{ConversationID: binding.ConversationID, UserID: userID, UserName: data.Author.Name, MessageID: data.ID, Text: text,
 		Mentioned: mentioned, Command: strings.HasPrefix(text, "/"), PlatformRole: role, At: at, PromptSuffix: strings.TrimSpace(a.cfg.PromptSuffix + "\n" + binding.PromptSuffix)}
 	for _, item := range data.Attachments {

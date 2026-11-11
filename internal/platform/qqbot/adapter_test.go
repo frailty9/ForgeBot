@@ -516,10 +516,11 @@ func TestControlledWebhookToRuntimeAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Stop(context.Background())
-	dispatch(t, a, eventBody(a, "q", "GROUP_AT_MESSAGE_CREATE", "member", "question"), 0)
+	dispatch(t, a, eventWithMentions(t, a, "GROUP_MESSAGE_CREATE", "<@BOT> question", []mention{{MemberOpenID: "BOT", IsYou: true}}), 0)
+	dispatch(t, a, eventWithMentions(t, a, "GROUP_AT_MESSAGE_CREATE", "question", nil), 0)
 	select {
 	case body := <-sent:
-		if body["content"] != "controlled answer" || body["msg_id"] != "q" {
+		if body["content"] != "controlled answer" || body["msg_id"] != "mention" {
 			t.Fatal(body)
 		}
 	case <-time.After(time.Second):
@@ -528,7 +529,7 @@ func TestControlledWebhookToRuntimeAnswer(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		for _, record := range window.Recent("support", 0) {
-			if record.Role == history.RoleBot && record.ReplyTo == "q" && record.Text == "controlled answer" {
+			if record.Role == history.RoleBot && record.ReplyTo == "mention" && record.Text == "controlled answer" {
 				if record.MessageID != "" {
 					t.Fatal("platform ID leaked into host history", record)
 				}
