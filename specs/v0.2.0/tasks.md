@@ -4,7 +4,7 @@
 
 状态：用户已于 2026-11-10 授权提交规划文档并开始实施，先推进工作包 1。工作分支 `feat/v0.2.0`，核对基线 `1103bc7`。只在用户明确要求时提交，不自动推送、合并或打标签。
 
-2026-11-11 追加：用户确认 Telegram 群聊连接器纳入 v0.2.0，需求 §1.5、设计 §8；规划已提交 `10c5b2f`，用户确认后开始第一批，当前实现完成待审阅。原版本验收移为工作包 8，工作包 7 按以下批次推进，每次只暂存一批供用户审阅。
+2026-11-11 追加：用户确认 Telegram 群聊连接器纳入 v0.2.0，需求 §1.5、设计 §8；规划已提交 `10c5b2f`。同日接手审查并完成 7.2–7.4，全部未提交，待用户审阅。原版本验收移为工作包 8，工作包 7 按以下批次推进，每次只暂存一批供用户审阅。
 
 ## 0. 上下文与基线
 
@@ -132,24 +132,25 @@
 
 ### 7.2 Webhook 与模式/凭据切换（TG-R2/R9/R10）
 
-- [ ] 加入 webhook 配置与当前模式专属凭据，先监听再 setWebhook，验证 secret header、请求体上限和队列 ACK；不实现 QQ 式挑战。
-- [ ] 按配置自动登记/移除回调，保留 pending updates；Start 部分失败自行清理，Stop 区分本地释放失败与远端撤销未确认，恢复旧代重新登记。
-- [ ] 覆盖 polling↔webhook、凭据/配置持久化失败、候选启动失败、端口占用、错认证、重复/满队列、停止及恢复，证明不会把远端清理失败变成本地已停但无法恢复的状态。
-- [ ] 同步模式切换文档、配置索引、init 完整关闭配置与唯一示例中的 webhook 全字段，文档解释启用步骤；明确单 Token 独占与内存队列确认边界。
+- [x] 加入 webhook 配置（`webhook_url/addr/path/secret_ref`）与当前模式专属凭据声明；先占本地端口再 setWebhook，校验 secret header（恒定时间比较）、1MiB 请求体上限和入队后 ACK（满/已停止 503）；不实现 QQ 式挑战。
+- [x] 每次 Start 按当前模式登记（长轮询 deleteWebhook、webhook setWebhook，均保留待处理更新）；登记被拒释放端口，结果未知时尽力撤销；Stop 先停本地再有界撤销，远端失败只记诊断。
+- [x] 覆盖登记顺序与参数、错/缺认证、重复投递、满队列/非法/超限、端口占用、登记被拒/未知、远端撤销失败仍本地成功并可重启重新登记；模块层覆盖两种模式的凭据声明、URL 端口/HTTPS、认证引用不得与 Token 相同。
+- [x] 同步 telegram.md、config-index、唯一示例（webhook 字段完整列出，默认仍为 long_polling）。模式切换走既有连接器换代与恢复，未新增 Runtime 级测试。
 
 ### 7.3 图片输入（TG-R4/R5/R10）
 
-- [ ] 工作者按像素面积选择照片尺寸并处理图片 document，以 getFile 有界下载至 Media.Data；下载后识别实际图片 MIME，不假定 Photo 全是 JPEG；当前/引用图共享 4 张、5MiB/图、20MiB/消息上限，不在接收循环阻塞下载。
-- [ ] 保留图片理解开关与现有 Core 接口，超限/失败整条停止而非丢图后问答；不下载非图片，不聚合相册。
-- [ ] 覆盖尺寸数组乱序、全部尺寸已知超限、已知/未知大小、实际超限、下载取消/失败、照片实际 MIME 与声明不符、文件头无法确认类型、同群引用图和关闭图片理解；断言 Token/下载地址不进入模型/history/公开状态/日志。
+- [x] 照片按像素面积选最大且已知不超 5MiB 的尺寸，不假定有序；全部已知超限报错；图片 document 按 MIME 或后缀识别。工作者中 getFile 后按 limit+1 读取，file_path 只允许相对路径，下载后按文件头确认真实 MIME，不写 Media.URL。
+- [x] 当前与同群引用图片一并下载；任一失败/超限/类型不明整条停止，不丢图后问答；非图片附件只映射类型和名称。
+- [x] 覆盖尺寸乱序、全部超限、文档后缀/非图片、当前+引用、类型不明、实际超限、声明超限不下载、下载失败、路径校验与 Token 不进消息/日志。
+- 说明：一条消息最多一张照片与一份文档，连同引用天然不超过 4 张、20MiB，未另设计数；图片理解关闭时仍会下载，由 Core 返回原有提示。
 
 ### 7.4 欢迎、换代屏障与收口（TG-R7/R9/R10）
 
-- [ ] 仅以 new_chat_members 元素的身份和服务消息 date 生成 MemberJoined，不能把邀请人/当前时间当作新成员/入群时间；按 update_id 防重复欢迎，真人短期重新入群仍可产生新事件；跳过机器人/自身，不把服务消息重复作为问答，不实现 Telegram Reviewer。
-- [ ] 给 Runtime 群事件补与 HandleInbound 一致的可取消 routeMu 屏障，复用私有等待逻辑。覆盖候选已启动未发布不访问旧代、旧代已进入的事件先完成、失败恢复及 Stop 取消等待；不扩展公共接口。
-- [ ] 为 OneBot 的 WithoutCancel 处理关联每次 Start 的生命周期上下文，Stop 可取消屏障等待，同时保留客户端断开后继续处理的原语义；验证它与 Telegram 混用换代不死锁，不改 OneBot 协议/配置。
-- [ ] 验证邀请人和新成员身份不同、原始 date/非法时间、多成员服务消息、重复 update 和真人短期重新入群，以及欢迎模板/群开关/暂停、角色、主动插话/通知、撤回和两种模式的受控链路。
-- [ ] 同步用户教程、config-index、默认行为/能力清单、双语 README；更正 architecture 中历史 MuseBot SDK/流式编辑迁移建议，写清首期纯文本边界。
+- [x] new_chat_members 中每位真人生成 MemberJoined：身份取成员元素、时间取服务消息 date（缺失不欢迎），事件 ID 含 connector/chat/update_id/user，跳过机器人与自身；服务消息先于发送者过滤处理，不作为空文本问答；能力声明 member_events=true、join_events=false，不实现 Reviewer。
+- [x] Runtime 群事件与入站共用可取消的换代屏障（审查修正时完成，见下方交接）。
+- [x] OneBot 处理上下文绑定每次 Start 的生命周期，Stop 取消等待者，保留客户端断开后继续处理（审查修正时完成）。
+- [x] 覆盖邀请人与新成员身份不同、多成员、机器人/自身、非法时间、未绑定群、重投去重与短期重新入群。
+- [x] 同步 telegram.md（图片、欢迎、代理说明）与能力目录描述。
 
 每批出口：gofmt、build、vet、相关测试通过；供提交的独立暂存快照再跑全量普通测试和 internal 竞态测试。代码、配置、用户文档与 specs 同步后才暂存，用户审阅前不推进下一批。Telegram 模块实现了哪些能力就声明哪些，不接受未来 mode 或把未完成的能力标为可用。
 
@@ -160,7 +161,7 @@
 - [ ] 外部审批：使用可控服务验证同意、拒绝、unknown、AND/OR 和真实审批副作用；验证凭据替换。
 - [ ] 真实 QQ：有效 Webhook、@Bot、模型回答成功发送、引用映射；具备权限时验证 capability 按 ID 撤回，其他能力按账号结果记录。
 - [ ] 真实 Telegram：普通群/非论坛超级群，两种接收分别验证 @/回复/命令、照片和图片文件、欢迎/通知、撤回权限、超长拒绝，以及切换模式/替换凭据后的恢复；核对隐私模式影响，未启用的私聊/频道/话题不进入群会话。不执行自动入群审批。
-- [ ] Telegram 实施后重新执行所有代码 gofmt、`go build ./...`、`go vet ./...`、`go test ./... -count=1`、`go test -race ./internal/... -count=1`；既有代码验证证据保留于下方。
+- [x] Telegram 实施后重新执行所有代码 gofmt、`go build ./...`、`go vet ./...`、`go test ./... -count=1`、`go test -race ./internal/... -count=1`；2026-11-11 审查修正与 7.2–7.4 完成后全部通过（Go 1.27.3/windows-amd64）。
 - [ ] Telegram 实施后刷新 specs、配置索引、功能清单及双语 README 的最终能力边界，逐项区分实现/自动测试/真实验收；新文档链接和空白检查通过。
 
 此前实现的自动验证（2026-11-10，Go 1.27.3/windows-amd64）：上述四项检查通过。本批 QQ 独立暂存快照已通过 go build ./...、go vet ./...、go test ./... -count=1 和 go test -race ./internal/... -count=1，未调用真实平台或模型服务。一次并发全量验证中，未改动的 `notification.TestDispatcherSendsToEveryTargetAndContinuesAfterFailure` 在 1 秒等待处超时，无竞态报告；该包随后 `go test -race ./internal/notification -count=10` 通过，单独重跑完整 `go test -race ./internal/... -count=1` 全通过，未为消除超时修改通知代码或测试。
@@ -168,6 +169,21 @@
 真实条件不足就保留未勾选及阻碍原因，不以单元测试代替真实验收，不自动修改部署配置。提交或发行需用户另行明确要求。
 
 ## 当前交接
+
+### 2026-11-11 审查与修正
+
+接手审查已实施工作包，修正如下，均未提交：
+
+- 外部入群审批：HTTP 故障、非 2xx、超限、缺凭据、响应不符表达式及组合中的模型故障，原实现落成 Approve:false 并真实拒绝申请人。改为未决（undecided，不操作）：AND 遇未决即停，OR 无明确 true 且有未决时不操作；明确 false 仍拒绝。替换后请求体另限 256KiB。§5 原“区分 false 与 unknown”勾选此前仅日志层面成立。
+- QQ：Token 地址改为 `bots.qq.com/app/getAppAccessToken`，OpenAPI 改为 `api.sgroup.qq.com`（原 `api.bot.qq.com` 不可用，连接器无法启动）；新增 `sandbox` 选项。Stop 超时也释放句柄；引用失效 4xx 去引用重发一次；时间戳异常取接收时间；`X-Bot-Appid` 缺失时不拒绝；去重满额淘汰最旧标记；`expires_in` 缺失按 7200s。
+- Telegram：非论坛超级群的回复带 message_thread_id，原实现误判为话题而丢弃回复/引用，改为只看 is_topic_message；Stop 超时也释放句柄；401/403 只结束读取，不再取消发送；409 上报后退避重试；角色查询不再持锁访问网络；保留平台错误描述并细分 not found/权限；非 JSON 错误正文按 HTTP 状态分类。
+- 沉淀：history 增加 QuotedFromBot/TextTruncated/QuotedTruncated；引用 Bot 自身消息（连接器按平台发送者标记）、被截断的问题/引用/回答均不采纳；`message_ttl` 须 ≥ `quiet_window + scan_interval`；失败会话排在新会话之后。删除遗留空目录。
+- Runtime：保存失败后旧连接器恢复失败不再被吞，合并错误并置 degraded；换代屏障改为释放时唤醒，群事件同样经过屏障；OneBot 处理上下文绑定每次启动周期，Stop 时取消（工作包 7.4 的两项前置随之完成）。
+- 未改：Telegram 回复仍为 allow_sending_without_reply=false（设计决定，参考项目用 true），留待用户确认。
+
+验证（2026-11-11）：go build ./...、go vet ./...、go test ./... -count=1、go test -race ./internal/... -count=1 全部通过。
+
+### 此前交接
 
 2026-11-11：Telegram 规划已提交 `10c5b2f`。本批仅实现工作包 7.1：Provider、Bot Token 凭据声明、绑定检查、长轮询及逐项确认、文本/UTF-16/引用/角色、纯文本投递和宿主撤回；组合根、能力目录、doctor、init 与示例/用户文档同步。图片及引用媒体明确 unsupported，欢迎服务消息忽略，Webhook 不接受。未修改现有宿主接口，不新增通用回执，不调用真实账号。本批实现只暂存待用户审阅，不创建提交；后三批及真实验收未开始。
 
