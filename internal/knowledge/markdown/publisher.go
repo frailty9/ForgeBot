@@ -172,14 +172,17 @@ func (p *Publisher) resultPath(path string) string {
 }
 
 func canonicalEntry(entry knowledge.Entry) (knowledge.Entry, string, error) {
-	entry.Title, entry.Question, entry.Answer = strings.TrimSpace(entry.Title), strings.TrimSpace(entry.Question), strings.TrimSpace(entry.Answer)
+	entry.Title, entry.Summary, entry.Body = strings.TrimSpace(entry.Title), strings.TrimSpace(entry.Summary), strings.TrimSpace(entry.Body)
 	entry.ConversationID = strings.TrimSpace(entry.ConversationID)
 	entry.SourceQuestionMessageID = strings.TrimSpace(entry.SourceQuestionMessageID)
 	entry.SourceAnswerMessageID = strings.TrimSpace(entry.SourceAnswerMessageID)
-	if entry.Title == "" || entry.Question == "" || entry.Answer == "" || entry.ConversationID == "" || entry.SourceQuestionMessageID == "" || entry.SourceAnswerMessageID == "" {
+	if entry.Title == "" || entry.Summary == "" || entry.Body == "" || entry.ConversationID == "" || entry.SourceQuestionMessageID == "" || entry.SourceAnswerMessageID == "" {
 		return knowledge.Entry{}, "", ErrInvalidEntry
 	}
-	if utf8.RuneCountInString(entry.Title) > 200 || utf8.RuneCountInString(entry.Question) > 4000 || utf8.RuneCountInString(entry.Answer) > 12000 {
+	if strings.ContainsAny(entry.Title+entry.Summary, "\r\n") {
+		return knowledge.Entry{}, "", ErrInvalidEntry
+	}
+	if utf8.RuneCountInString(entry.Title) > 200 || utf8.RuneCountInString(entry.Summary) > 1000 || utf8.RuneCountInString(entry.Body) > 12000 {
 		return knowledge.Entry{}, "", ErrInvalidEntry
 	}
 	seen := make(map[string]struct{}, len(entry.Tags))
@@ -201,22 +204,22 @@ func canonicalEntry(entry knowledge.Entry) (knowledge.Entry, string, error) {
 	} else {
 		entry.CreatedAt = entry.CreatedAt.UTC()
 	}
-	basis := strings.Join([]string{entry.ConversationID, entry.SourceQuestionMessageID, entry.SourceAnswerMessageID, entry.Title, entry.Question, entry.Answer, strings.Join(entry.Tags, "\x00")}, "\x1f")
+	basis := strings.Join([]string{entry.ConversationID, entry.SourceQuestionMessageID, entry.SourceAnswerMessageID, entry.Title, entry.Summary, entry.Body, strings.Join(entry.Tags, "\x00")}, "\x1f")
 	digest := sha256.Sum256([]byte(basis))
 	return entry, hex.EncodeToString(digest[:]), nil
 }
 
 func render(entry knowledge.Entry) ([]byte, error) {
-	front, err := yaml.Marshal(map[string]any{"title": entry.Title, "tags": entry.Tags, "managed_by": "forgebot", "source_conversation_id": entry.ConversationID, "source_question_message_id": entry.SourceQuestionMessageID, "source_answer_message_id": entry.SourceAnswerMessageID, "content_hash": contentHash(entry), "created_at": entry.CreatedAt.Format(time.RFC3339)})
+	front, err := yaml.Marshal(map[string]any{"title": entry.Title, "summary": entry.Summary, "tags": entry.Tags, "managed_by": "forgebot", "source_conversation_id": entry.ConversationID, "source_question_message_id": entry.SourceQuestionMessageID, "source_answer_message_id": entry.SourceAnswerMessageID, "content_hash": contentHash(entry), "created_at": entry.CreatedAt.Format(time.RFC3339)})
 	if err != nil {
 		return nil, err
 	}
-	text := "---\n" + string(front) + "---\n\n# " + entry.Title + "\n\n## 问题\n\n" + entry.Question + "\n\n## 答案\n\n" + entry.Answer + "\n"
+	text := "---\n" + string(front) + "---\n\n# " + entry.Title + "\n\n" + entry.Summary + "\n\n" + entry.Body + "\n"
 	return []byte(text), nil
 }
 
 func contentHash(entry knowledge.Entry) string {
-	basis := strings.Join([]string{entry.ConversationID, entry.SourceQuestionMessageID, entry.SourceAnswerMessageID, entry.Title, entry.Question, entry.Answer, strings.Join(entry.Tags, "\x00")}, "\x1f")
+	basis := strings.Join([]string{entry.ConversationID, entry.SourceQuestionMessageID, entry.SourceAnswerMessageID, entry.Title, entry.Summary, entry.Body, strings.Join(entry.Tags, "\x00")}, "\x1f")
 	digest := sha256.Sum256([]byte(basis))
 	return hex.EncodeToString(digest[:])
 }

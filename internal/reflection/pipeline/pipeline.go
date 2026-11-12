@@ -103,7 +103,7 @@ func (p *Processor) ProcessBatch(ctx context.Context, sessions []answersession.A
 			p.increment(func(stats *Stats) { stats.LowConfidence++ })
 			continue
 		}
-		entry := knowledge.Entry{Title: result.Title, Question: result.Question, Answer: result.Answer, Tags: result.Tags,
+		entry := knowledge.Entry{Title: result.Title, Summary: result.Summary, Body: result.Body, Tags: result.Tags,
 			ConversationID: session.Question.ConversationID, SourceQuestionMessageID: session.Question.MessageID,
 			SourceAnswerMessageID: session.Answers[0].MessageID, CreatedAt: session.StartedAt}
 		publishResult, err := p.publisher.Publish(entry)

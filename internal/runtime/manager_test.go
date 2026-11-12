@@ -217,7 +217,7 @@ func TestManagerReflectionScanPublishesMarkdownAndReloadsSearch(t *testing.T) {
 	enableReflectionModule(t, &snapshot, map[string]any{"conversation_ids": []string{"c"}, "quiet_window": "1ms", "max_session_duration": "1s"})
 	store := configuredSecrets(t, "key")
 	clientFactory := func(cfg llm.ClientConfig) (llm.Client, error) {
-		return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":true,"title":"Key rotation","question":"How do I rotate a key?","answer":"Create a replacement key and revoke the old one.","tags":["api-key"],"confidence":0.98,"reason":"reusable"}`}, nil
+		return &reflectionResponseClient{protocol: cfg.Protocol, response: `{"accept":true,"title":"Key rotation","summary":"Rotate an API key.","body":"Create a replacement key and revoke the old one.","tags":["api-key"],"confidence":0.98,"reason":"reusable"}`}, nil
 	}
 	manager, err := NewManager(context.Background(), snapshot, Builder{
 		Sender: registeredSender(t).registry, Secrets: store, ClientFactory: clientFactory, Modules: searchRegistry(t),

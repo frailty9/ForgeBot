@@ -12,7 +12,7 @@ import (
 )
 
 func testEntry() knowledge.Entry {
-	return knowledge.Entry{Title: "API Key 轮换", Question: "如何轮换 API Key？", Answer: "创建新 Key，更新客户端后撤销旧 Key。", Tags: []string{"API-Key", "console"}, ConversationID: "support", SourceQuestionMessageID: "q1", SourceAnswerMessageID: "a1", CreatedAt: time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)}
+	return knowledge.Entry{Title: "API Key 轮换", Summary: "通过控制台轮换 API Key，更新客户端后再撤销旧 Key。", Body: "## 创建替换 Key\n\n在控制台创建新 Key。\n\n## 更新客户端\n\n使用新 Key 更新客户端，确认正常后撤销旧 Key。", Tags: []string{"API-Key", "console"}, ConversationID: "support", SourceQuestionMessageID: "q1", SourceAnswerMessageID: "a1", CreatedAt: time.Date(2026, 9, 12, 8, 0, 0, 0, time.UTC)}
 }
 
 func TestPublisherWritesManagedMarkdownAndDeduplicates(t *testing.T) {
@@ -30,12 +30,42 @@ func TestPublisherWritesManagedMarkdownAndDeduplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "managed_by: forgebot") || !strings.Contains(text, "## 答案") || !strings.Contains(text, "api-key") {
+	if !strings.Contains(text, "managed_by: forgebot") || !strings.Contains(text, "api-key") || !strings.HasSuffix(text, "# "+testEntry().Title+"\n\n"+testEntry().Summary+"\n\n"+testEntry().Body+"\n") || strings.Contains(text, "## 问题") || strings.Contains(text, "## 答案") {
 		t.Fatalf("document=%s", text)
+	}
+	var meta struct {
+		Summary string `yaml:"summary"`
+	}
+	if !parseFrontmatter(data, &meta) || meta.Summary != testEntry().Summary {
+		t.Fatalf("summary metadata=%+v", meta)
 	}
 	second, err := p.Publish(testEntry())
 	if err != nil || second.Status != knowledge.Duplicate || second.Path != first.Path {
 		t.Fatalf("second=%+v err=%v", second, err)
+	}
+}
+
+func TestPublisherRecognizesPreviouslyPublishedQuestionAnswerDocument(t *testing.T) {
+	root := t.TempDir()
+	p, err := New(Config{Root: root, ExtraDirectory: "extra", MaxBytes: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "extra", "old.md")
+	old := "---\nmanaged_by: forgebot\nsource_conversation_id: support\nsource_question_message_id: q1\nsource_answer_message_id: a1\ncontent_hash: old-hash\n---\n\n# Old title\n\n## 问题\n\nHow?\n\n## 答案\n\nRotate it.\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.Publish(testEntry())
+	if err != nil || result.Status != knowledge.Duplicate || result.Path != "extra/old.md" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != old {
+		t.Fatalf("old document changed: %v", err)
 	}
 }
 

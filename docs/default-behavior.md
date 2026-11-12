@@ -1,6 +1,6 @@
 # 默认行为与验收边界
 
-2026-11-10 更新 v0.2.0 沉淀行为，其余沿用 v0.1.0 记录。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
+2026-11-12 更新 v0.2.0 沉淀行为与文档组织，其余沿用既有记录。下面列出实现中的默认行为与测试证据；测试通过不等于真实平台或供应商已经验收。
 
 | 场景 | 默认行为 | 配置或约束 | 主要证据 |
 | --- | --- | --- | --- |
@@ -36,6 +36,7 @@
 | 沉淀答题会话 | 仅管理员引用锚定后保存材料，同一管理员继续答复；静默后由定时任务分批处理 | 模块自己的周期、TTL 和容量；不保留全部普通消息候选池 | [归组与边界](../internal/modules/knowledgereflection/sessions_test.go) |
 | 沉淀原问题已滑出 | 先查同群 history，再使用适配器已带回的引用原文；两处没有正文才放弃；已捕获会话不随 history 滑动失效 | 只订阅新消息，不钉住记录或依赖移出事件 | [会话快照](../internal/modules/knowledgereflection/sessions_test.go)、[引用文本](../internal/history/quote_test.go) |
 | 自动沉淀生成失败 | 保留未过期会话，后续批次再处理；低置信度、拒绝和重复结束会话 | native.knowledge_reflection；换代取消，不重放旧回答 | [批处理与取消](../internal/modules/knowledgereflection/sessions_test.go)、[流水线](../internal/reflection/pipeline/pipeline_test.go) |
+| 自动沉淀文档 | 具体主题标题、简短摘要、自然 Markdown 正文和标签；按需使用主题小标题、步骤和代码，不强制问答模板 | 一次模型调用；每条一文件，旧文件不自动改写；直接复用普通文档索引 | [文档发布与检索](../internal/reflection/pipeline/document_test.go)、[保存与去重](../internal/knowledge/markdown/publisher_test.go) |
 | 能力目录 | 展示投影，not_probed不冒充健康 | 认证API与CLI同源 | [目录](../internal/runtime/catalog_test.go) |
 | 初次使用 | init不覆盖；doctor不要求先启动Bot | 远程与stdio探测须显式 | [CLI](../cmd/forgebot/commands_test.go) |
 

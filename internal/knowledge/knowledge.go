@@ -12,8 +12,8 @@ import (
 // deliberately excluded from the persisted contract.
 type Entry struct {
 	Title                   string
-	Question                string
-	Answer                  string
+	Summary                 string
+	Body                    string // Ordinary Markdown, without the document title or summary.
 	Tags                    []string
 	ConversationID          string
 	SourceQuestionMessageID string

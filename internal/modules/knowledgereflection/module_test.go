@@ -27,7 +27,7 @@ type fakeCompleter struct{}
 
 func (fakeCompleter) Model() string { return "test-model" }
 func (fakeCompleter) Complete(context.Context, llm.Request) (llm.Response, error) {
-	return llm.Response{Text: `{"accept":true,"title":"Key rotation","question":"How?","answer":"Rotate it.","tags":["key"],"confidence":0.99,"reason":"reusable"}`}, nil
+	return llm.Response{Text: `{"accept":true,"title":"Key rotation","summary":"API key rotation.","body":"Rotate it.","tags":["key"],"confidence":0.99,"reason":"reusable"}`}, nil
 }
 
 type fakeSearch struct{ reloads atomic.Int64 }

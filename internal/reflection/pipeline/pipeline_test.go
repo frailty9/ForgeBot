@@ -38,7 +38,7 @@ func structMessage(id string) []messaging.InboundMessage {
 }
 
 func TestProcessBatchReloadsOnce(t *testing.T) {
-	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Question: "question", Answer: "answer", Confidence: .95}}
+	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Summary: "summary", Body: "body", Confidence: .95}}
 	p := &fakePublisher{}
 	reloads := 0
 	processor, err := New(Config{Reflector: r, Publisher: p, MinConfidence: .9, Reload: func(context.Context) error { reloads++; return nil }})
@@ -62,7 +62,7 @@ func TestProcessBatchRejectsWithoutReload(t *testing.T) {
 }
 
 func TestProcessBatchKeepsPublishedSessionsRetryableOnReloadFailure(t *testing.T) {
-	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Question: "question", Answer: "answer", Confidence: .95}}
+	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Summary: "summary", Body: "body", Confidence: .95}}
 	processor, _ := New(Config{Reflector: r, Publisher: &fakePublisher{}, MinConfidence: .9, Reload: func(context.Context) error { return errors.New("offline") }})
 	errs := processor.ProcessBatch(context.Background(), []answersession.AnswerSession{session("s1")})
 	if errs[0] == nil || !errors.Is(errs[0], ErrReloadFailed) {
@@ -71,7 +71,7 @@ func TestProcessBatchKeepsPublishedSessionsRetryableOnReloadFailure(t *testing.T
 }
 
 func TestProcessBatchRetriesPendingReloadBeforeNewCandidates(t *testing.T) {
-	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Question: "question", Answer: "answer", Confidence: .95}}
+	r := &fakeReflector{result: reflector.Result{Accept: true, Title: "title", Summary: "summary", Body: "body", Confidence: .95}}
 	publisher := &fakePublisher{}
 	reloads := 0
 	processor, _ := New(Config{Reflector: r, Publisher: publisher, MinConfidence: .9, Reload: func(context.Context) error {

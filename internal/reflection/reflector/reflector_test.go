@@ -2,6 +2,8 @@ package reflector
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +36,7 @@ func testSession() answersession.AnswerSession {
 }
 
 func TestReflectParsesStrictJSONAndDisablesTools(t *testing.T) {
-	client := &fakeClient{response: llm.Response{Text: `{"accept":true,"title":"Rotate an API key","question":"How do I rotate the key?","answer":"Create a replacement key, update clients, then revoke the old key.","tags":["api-key"],"confidence":0.96,"reason":"reusable procedure"}`}}
+	client := &fakeClient{response: llm.Response{Text: `{"accept":true,"title":"Rotate an API key","summary":"Replace an API key without interrupting clients.","body":"## Create a replacement key\n\nOpen the console and create a replacement key.","tags":["api-key"],"confidence":0.96,"reason":"reusable procedure"}`}}
 	r, err := New(client, "model")
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +45,7 @@ func TestReflectParsesStrictJSONAndDisablesTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Accept || result.Confidence != 0.96 || result.Title == "" {
+	if !result.Accept || result.Confidence != 0.96 || result.Summary == "" || !strings.Contains(result.Body, "## Create a replacement key") {
 		t.Fatalf("result=%+v", result)
 	}
 	if len(client.request.Tools) != 0 || client.request.Temperature == nil || *client.request.Temperature != 0 {
@@ -51,6 +53,35 @@ func TestReflectParsesStrictJSONAndDisablesTools(t *testing.T) {
 	}
 	if client.request.Instructions == "" {
 		t.Fatal("missing system instruction")
+	}
+}
+
+func TestParseResultValidatesDocumentFields(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		edit func(*Result)
+	}{
+		{"missing summary", func(r *Result) { r.Summary = " " }},
+		{"missing body", func(r *Result) { r.Body = " " }},
+		{"multiline title", func(r *Result) { r.Title = "Title\n## Another topic" }},
+		{"multiline summary", func(r *Result) { r.Summary = "Summary\nAnother line" }},
+		{"long summary", func(r *Result) { r.Summary = strings.Repeat("字", 1001) }},
+		{"long body", func(r *Result) { r.Body = strings.Repeat("字", 12001) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Result{Accept: true, Title: "Title", Summary: "Summary", Body: "A standalone paragraph.", Confidence: .95}
+			test.edit(&result)
+			if err := normalizeAndValidate(&result); !errors.Is(err, ErrInvalidResult) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	// Ordinary prose needs no section template; Markdown blocks remain intact.
+	for _, body := range []string{"A standalone paragraph.", "## Configuration\n\n```json\n{\"enabled\": true}\n```"} {
+		result := Result{Accept: true, Title: "Title", Summary: "Summary", Body: body, Confidence: .95}
+		if err := normalizeAndValidate(&result); err != nil || result.Body != body {
+			t.Fatalf("body=%q err=%v", result.Body, err)
+		}
 	}
 }
 
